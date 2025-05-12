@@ -161,7 +161,7 @@ func BlobAdd(ctx context.Context, content io.Reader, issuer principal.Signer, sp
 	}
 
 	caveats := spaceblobcap.AddCaveats{
-		Blob: spaceblobcap.Blob{
+		Blob: captypes.Blob{
 			Digest: contentHash,
 			Size:   uint64(len(contentBytes)),
 		},
@@ -182,21 +182,19 @@ func BlobAdd(ctx context.Context, content io.Reader, issuer principal.Signer, sp
 		return nil, nil, fmt.Errorf("receipt not found: %s", inv.Link())
 	}
 
-	// reader, err := receipt.NewReceiptReaderFromTypes[spaceblob.AddOk, fdm.FailureModel](spaceblob.AddOkType(), fdm.FailureType())
-	// if err != nil {
-	// 	return nil, nil, fmt.Errorf("generating receipt reader: %w", err)
-	// }
-	reader := receipt.NewAnyReceiptReader(captypes.Converters...)
+	reader, err := receipt.NewReceiptReaderFromTypes[spaceblobcap.AddOk, fdm.FailureModel](spaceblobcap.AddOkType(), fdm.FailureType())
+	if err != nil {
+		return nil, nil, fmt.Errorf("generating receipt reader: %w", err)
+	}
 
 	rcpt, err := reader.Read(rcptlnk, resp.Blocks())
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading receipt: %w", err)
 	}
 
-	//_, err = result.Unwrap(result.MapError(rcpt.Out(), failure.FromFailureModel))
-	_, fail := result.Unwrap(rcpt.Out())
-	if fail != nil {
-		return nil, nil, fmt.Errorf("blob add failed: %v", fail)
+	_, failErr := result.Unwrap(result.MapError(rcpt.Out(), failure.FromFailureModel))
+	if failErr != nil {
+		return nil, nil, fmt.Errorf("blob add failed: %+v", failErr)
 	}
 
 	var allocateTask, putTask, acceptTask invocation.Invocation
@@ -342,23 +340,25 @@ func BlobAdd(ctx context.Context, content io.Reader, issuer principal.Signer, sp
 			return nil, nil, fmt.Errorf("polling accept: %w", err)
 		}
 	} else if acceptRcpt != nil {
-		if acceptRcpt.Out().Ok() == nil {
+		acceptOk, failErr := result.Unwrap(result.MapError(acceptRcpt.Out(), failure.FromFailureModel))
+		if failErr != nil {
 			anyAcceptRcpt, err = pollAccept(ctx, acceptTask.Link(), cfg.conn, receiptsURL)
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
 		} else {
-			site = acceptRcpt.Out().Ok().Site
+			site = acceptOk.Site
 			rcptBlocks = acceptRcpt.Blocks()
 		}
 	} else if legacyAcceptRcpt != nil {
-		if legacyAcceptRcpt.Out().Ok() == nil {
+		acceptOk, failErr := result.Unwrap(result.MapError(legacyAcceptRcpt.Out(), failure.FromFailureModel))
+		if failErr != nil {
 			anyAcceptRcpt, err = pollAccept(ctx, acceptTask.Link(), cfg.conn, receiptsURL)
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
 		} else {
-			site = legacyAcceptRcpt.Out().Ok().Site
+			site = acceptOk.Site
 			rcptBlocks = legacyAcceptRcpt.Blocks()
 		}
 	}

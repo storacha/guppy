@@ -195,7 +195,7 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 			}
 			allocateCaveats := blobcap.AllocateCaveats{
 				Space: spaceDID,
-				Blob: blobcap.Blob{
+				Blob: captypes.Blob{
 					Digest: blobDigest,
 					Size:   blobSize,
 				},
@@ -269,7 +269,7 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 			// add task for blob/accept
 			acceptCaveats := blobcap.AcceptCaveats{
 				Space: spaceDID,
-				Blob: blobcap.Blob{
+				Blob: captypes.Blob{
 					Digest: blobDigest,
 					Size:   blobSize,
 				},
@@ -291,7 +291,7 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 				StorageProvider: mockSPPrincipal,
 				Digest:          blobDigest,
 				Space:           spaceDID,
-				Location:        &allocateResult.Ok().Address.URL,
+				Location:        putBlobURL,
 			}
 
 			forks := []fx.Effect{

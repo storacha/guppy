@@ -20,6 +20,7 @@ import (
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/receipt"
+	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-w3up/car/sharding"
@@ -185,8 +186,9 @@ func uploadCAR(ctx context.Context, path string, signer principal.Signer, conn u
 		return nil, err
 	}
 
-	if rcpt.Out().Err() != nil {
-		return nil, fmt.Errorf("%+v", rcpt.Out().Err())
+	_, failErr := result.Unwrap(rcpt.Out())
+	if failErr != nil {
+		return nil, fmt.Errorf("%+v", failErr)
 	}
 
 	fmt.Printf("Uploaded %d bytes\n", stat.Size())

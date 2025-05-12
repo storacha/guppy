@@ -2,17 +2,14 @@ module github.com/storacha/go-w3up
 
 go 1.23.3
 
-replace github.com/storacha/go-libstoracha => ../go-libstoracha
-
-replace github.com/storacha/go-ucanto => ../go-ucanto
-
 require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipld/go-ipld-prime v0.21.1-0.20240917223228-6148356a4c2e
+	github.com/multiformats/go-multicodec v0.9.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.0.7
-	github.com/storacha/go-libstoracha v0.0.0-00010101000000-000000000000
-	github.com/storacha/go-ucanto v0.3.0
+	github.com/storacha/go-libstoracha v0.0.3
+	github.com/storacha/go-ucanto v0.3.2
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.25.7
 )
@@ -60,7 +57,6 @@ require (
 	github.com/multiformats/go-base36 v0.2.0 // indirect
 	github.com/multiformats/go-multiaddr v0.14.0 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
-	github.com/multiformats/go-multicodec v0.9.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.23.3 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
