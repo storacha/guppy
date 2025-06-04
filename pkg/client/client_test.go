@@ -44,7 +44,7 @@ import (
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/stretchr/testify/require"
 
-	"github.com/storacha/guppy/client"
+	"github.com/storacha/guppy/pkg/client"
 )
 
 func TestBlobAdd(t *testing.T) {

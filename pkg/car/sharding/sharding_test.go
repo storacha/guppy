@@ -10,7 +10,7 @@ import (
 	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/ipld/block"
 	"github.com/storacha/go-ucanto/core/ipld/hash/sha256"
-	"github.com/storacha/guppy/car/sharding"
+	"github.com/storacha/guppy/pkg/car/sharding"
 	"github.com/stretchr/testify/require"
 )
 

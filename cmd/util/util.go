@@ -18,7 +18,7 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/transport/car"
 	"github.com/storacha/go-ucanto/transport/http"
-	cdg "github.com/storacha/guppy/delegation"
+	cdg "github.com/storacha/guppy/pkg/delegation"
 )
 
 const defaultServiceName = "staging.up.storacha.network"

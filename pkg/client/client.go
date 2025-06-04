@@ -33,8 +33,8 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	ucanhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/capability/uploadadd"
-	"github.com/storacha/guppy/capability/uploadlist"
+	"github.com/storacha/guppy/pkg/capability/uploadadd"
+	"github.com/storacha/guppy/pkg/capability/uploadlist"
 )
 
 // UploadAdd registers an "upload" with the service. The issuer needs proof of
@@ -182,7 +182,7 @@ func BlobAdd(ctx context.Context, content io.Reader, issuer principal.Signer, sp
 		return nil, nil, fmt.Errorf("receipt not found: %s", inv.Link())
 	}
 
-	reader, err := receipt.NewReceiptReaderFromTypes[spaceblobcap.AddOk, fdm.FailureModel](spaceblobcap.AddOkType(), fdm.FailureType())
+	reader, err := receipt.NewReceiptReaderFromTypes[spaceblobcap.AddOk, fdm.FailureModel](spaceblobcap.AddOkType(), fdm.FailureType(), captypes.Converters...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generating receipt reader: %w", err)
 	}

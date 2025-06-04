@@ -7,9 +7,9 @@ import (
 
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
-	"github.com/storacha/guppy/capability/uploadlist"
-	"github.com/storacha/guppy/client"
 	"github.com/storacha/guppy/cmd/util"
+	"github.com/storacha/guppy/pkg/capability/uploadlist"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/urfave/cli/v2"
 )
 
