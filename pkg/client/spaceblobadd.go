@@ -97,7 +97,7 @@ func SpaceBlobAdd(ctx context.Context, content io.Reader, issuer principal.Signe
 
 	_, failErr := result.Unwrap(result.MapError(rcpt.Out(), failure.FromFailureModel))
 	if failErr != nil {
-		return nil, nil, fmt.Errorf("blob add failed: %+v", failErr)
+		return nil, nil, fmt.Errorf("blob add failed: %w", failErr)
 	}
 
 	var allocateTask, putTask, acceptTask invocation.Invocation
