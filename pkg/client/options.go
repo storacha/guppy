@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/storacha/go-ucanto/client"
+	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/ucan"
 )
@@ -10,7 +10,7 @@ import (
 type Option func(cfg *Config) error
 
 type Config struct {
-	conn client.Connection
+	conn uclient.Connection
 	exp  *int
 	nbf  int
 	nnc  string
@@ -33,7 +33,7 @@ func NewConfig(options ...Option) (Config, error) {
 }
 
 // WithConnection configures the connection to execute the invocation on.
-func WithConnection(conn client.Connection) Option {
+func WithConnection(conn uclient.Connection) Option {
 	return func(cfg *Config) error {
 		cfg.conn = conn
 		return nil

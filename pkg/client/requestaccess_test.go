@@ -7,7 +7,6 @@ import (
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
-	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
@@ -18,8 +17,6 @@ import (
 
 func TestRequestAccess(t *testing.T) {
 	t.Run("invokes `access/authorize`", func(t *testing.T) {
-		agentPrincipal := uhelpers.Must(ed25519.Generate())
-
 		account := uhelpers.Must(did.Parse("did:mailto:example.com:alice"))
 
 		invokedCapabilities := make([]ucan.Capability[access.AuthorizeCaveats], 0)
@@ -41,7 +38,9 @@ func TestRequestAccess(t *testing.T) {
 			),
 		)
 
-		client.RequestAccess(agentPrincipal, account, client.WithConnection(connection))
+		c := uhelpers.Must(client.NewClient(connection))
+
+		c.RequestAccess(account)
 
 		require.Len(t, invokedCapabilities, 1, "expected exactly one capability to be invoked")
 		capability := invokedCapabilities[0]

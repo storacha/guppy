@@ -4,13 +4,13 @@ import (
 	"log"
 	"net/url"
 
-	"github.com/storacha/go-ucanto/client"
+	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/transport/car"
 	"github.com/storacha/go-ucanto/transport/http"
 )
 
-var DefaultConnection client.Connection
+var DefaultConnection uclient.Connection
 
 func init() {
 	// service URL & DID
@@ -28,7 +28,7 @@ func init() {
 	channel := http.NewHTTPChannel(serviceURL)
 	codec := car.NewCAROutboundCodec()
 
-	conn, err := client.NewConnection(servicePrincipal, channel, client.WithOutboundCodec(codec))
+	conn, err := uclient.NewConnection(servicePrincipal, channel, uclient.WithOutboundCodec(codec))
 	if err != nil {
 		log.Fatal(err)
 	}
