@@ -4,40 +4,49 @@ import (
 	"testing"
 
 	"github.com/storacha/go-libstoracha/capabilities/access"
+	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/storacha/go-ucanto/server"
+	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/testing/helpers"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRequestAccess(t *testing.T) {
 	t.Run("invokes `access/authorize`", func(t *testing.T) {
-		signer, err := ed25519.Generate()
-		require.NoError(t, err)
+		agentPrincipal := uhelpers.Must(ed25519.Generate())
 
-		account, err := did.Parse("did:mailto:example.com:alice")
-		require.NoError(t, err)
+		account := uhelpers.Must(did.Parse("did:mailto:example.com:alice"))
 
-		servicePrincipal, err := did.Parse("did:web:storage.example.com")
-		require.NoError(t, err)
+		invokedCapabilities := make([]ucan.Capability[access.AuthorizeCaveats], 0)
 
-		connection, mock, err := newMockConnection(servicePrincipal)
-		require.NoError(t, err)
+		connection := helpers.NewServerConnection(
+			server.WithServiceMethod(
+				access.Authorize.Can(),
+				server.Provide(
+					access.Authorize,
+					func(
+						cap ucan.Capability[access.AuthorizeCaveats],
+						inv invocation.Invocation,
+						ctx server.InvocationContext,
+					) (access.AuthorizeOk, fx.Effects, error) {
+						invokedCapabilities = append(invokedCapabilities, cap)
+						return access.AuthorizeOk{}, nil, nil
+					},
+				),
+			),
+		)
 
-		client.RequestAccess(signer, account, client.WithConnection(connection))
-		invocations, _ := mock.ExecutedInvocations()
+		client.RequestAccess(agentPrincipal, account, client.WithConnection(connection))
 
-		require.Len(t, invocations, 1, "expected exactly one invocation to be executed")
-		invocation := invocations[0]
-		require.Equal(t, signer.DID().String(), invocation.Issuer().DID().String(), "expected invocation issuer to be the given signer")
-		require.Equal(t, "did:web:storage.example.com", invocation.Audience().DID().String(), "expected invocation audience to be the service")
+		require.Len(t, invokedCapabilities, 1, "expected exactly one capability to be invoked")
+		capability := invokedCapabilities[0]
 
-		require.Len(t, invocation.Capabilities(), 1, "expected exactly one capability in the invocation")
-		capability := invocation.Capabilities()[0]
-		require.Equal(t, "access/authorize", capability.Can(), "expected an `access/authorize` invocation")
-
-		nb, err := access.AuthorizeCaveatsReader.Read(capability.Nb())
-		require.NoError(t, err, "expected to read the caveats without error")
+		nb := uhelpers.Must(access.AuthorizeCaveatsReader.Read(capability.Nb()))
 		require.Equal(t, "did:mailto:example.com:alice", nb.Iss.String(), "expected to authorize the correct issuer")
 
 		requestedCapabilities := make([]string, 0, len(nb.Att))
