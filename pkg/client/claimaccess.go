@@ -41,19 +41,37 @@ func ClaimAccess(issuer principal.Signer, options ...Option) ([]udelegation.Dele
 		return nil, fmt.Errorf("sending invocation: %w", err)
 	}
 
-	reader, err := receipt.NewReceiptReaderFromTypes[access.ClaimOk, serverdatamodel.HandlerExecutionErrorModel](access.ClaimOkType(), serverdatamodel.HandlerExecutionErrorType(), captypes.Converters...)
-	if err != nil {
-		return nil, fmt.Errorf("generating receipt reader: %w", err)
-	}
-
 	rcptlnk, ok := resp.Get(inv.Link())
 	if !ok {
 		return nil, fmt.Errorf("receipt not found: %s", inv.Link())
 	}
 
+	reader, err := receipt.NewReceiptReaderFromTypes[access.ClaimOk, serverdatamodel.HandlerExecutionErrorModel](access.ClaimOkType(), serverdatamodel.HandlerExecutionErrorType(), captypes.Converters...)
+	if err != nil {
+		return nil, fmt.Errorf("generating receipt reader: %w", err)
+	}
+
 	rcpt, err := reader.Read(rcptlnk, resp.Blocks())
 	if err != nil {
-		return nil, fmt.Errorf("reading receipt: %w", err)
+		anyRcpt, err := receipt.NewAnyReceiptReader().Read(rcptlnk, resp.Blocks())
+		if err != nil {
+			return nil, fmt.Errorf("reading receipt as any: %w", err)
+		}
+		okNode, errorNode := result.Unwrap(anyRcpt.Out())
+
+		if okNode != nil {
+			okValue, err := NodeValue(okNode)
+			if err != nil {
+				return nil, fmt.Errorf("reading `access/claim` ok output: %w", err)
+			}
+			return nil, fmt.Errorf("`access/claim` succeeded with unexpected output: %#v", okValue)
+		}
+
+		errorValue, err := NodeValue(errorNode)
+		if err != nil {
+			return nil, fmt.Errorf("reading `access/claim` error output: %w", err)
+		}
+		return nil, fmt.Errorf("`access/claim` failed with unexpected error: %#v", errorValue)
 	}
 
 	claimOk, failErr := result.Unwrap(

@@ -88,4 +88,18 @@ func TestClaimAccess(t *testing.T) {
 		require.Equal(t, "`access/claim` failed: Something went wrong!", err.Error())
 		require.Len(t, claimedDels, 0)
 	})
+
+	t.Run("returns a useful error on any other UCAN failure", func(t *testing.T) {
+		agent := uhelpers.Must(ed25519.Generate())
+
+		// In this case, we test the server not implementing the `access/claim`
+		// capability.
+		connection := helpers.NewServerConnection()
+
+		claimedDels, err := client.ClaimAccess(agent, client.WithConnection(connection))
+
+		require.ErrorContains(t, err, "`access/claim` failed with unexpected error:")
+		require.ErrorContains(t, err, "HandlerNotFoundError")
+		require.Len(t, claimedDels, 0)
+	})
 }
