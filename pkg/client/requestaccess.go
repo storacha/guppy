@@ -7,7 +7,6 @@ import (
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/go-ucanto/principal"
 )
 
 // spaceAccess is the set of capabilities required by the agent to manage a
@@ -29,23 +28,18 @@ var spaceAccess = []access.CapabilityRequest{
 // The [issuer] is the Agent which would like to act as the Account.
 //
 // The [account] is the Account the Agent would like to act as.
-func RequestAccess(issuer principal.Signer, account did.DID, options ...Option) error {
-	cfg, err := NewConfig(options...)
-	if err != nil {
-		return err
-	}
-
+func (c *Client) RequestAccess(account did.DID) error {
 	caveats := access.AuthorizeCaveats{
 		Iss: &account,
 		Att: spaceAccess,
 	}
 
-	inv, err := access.Authorize.Invoke(issuer, cfg.conn.ID(), issuer.DID().String(), caveats, convertToInvocationOptions(cfg)...)
+	inv, err := access.Authorize.Invoke(c.issuer, c.connection.ID(), c.issuer.DID().String(), caveats)
 	if err != nil {
 		return fmt.Errorf("generating invocation: %w", err)
 	}
 
-	_, err = uclient.Execute([]invocation.Invocation{inv}, cfg.conn)
+	_, err = uclient.Execute([]invocation.Invocation{inv}, c.connection)
 	if err != nil {
 		return fmt.Errorf("sending invocation: %w", err)
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/core/result/failure/datamodel"
-	"github.com/storacha/go-ucanto/principal"
 	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
 	"github.com/storacha/guppy/pkg/delegation"
 )
@@ -23,20 +22,15 @@ import (
 // user to confirm the access request out of band, e.g. via email. Once
 // confirmed, a delegation will be available on the service for the Agent to
 // claim.
-func ClaimAccess(issuer principal.Signer, options ...Option) ([]udelegation.Delegation, error) {
-	cfg, err := NewConfig(options...)
-	if err != nil {
-		return nil, err
-	}
-
+func (c *Client) ClaimAccess() ([]udelegation.Delegation, error) {
 	caveats := access.ClaimCaveats{}
 
-	inv, err := access.Claim.Invoke(issuer, cfg.conn.ID(), issuer.DID().String(), caveats, convertToInvocationOptions(cfg)...)
+	inv, err := access.Claim.Invoke(c.issuer, c.connection.ID(), c.issuer.DID().String(), caveats)
 	if err != nil {
 		return nil, fmt.Errorf("generating invocation: %w", err)
 	}
 
-	resp, err := uclient.Execute([]invocation.Invocation{inv}, cfg.conn)
+	resp, err := uclient.Execute([]invocation.Invocation{inv}, c.connection)
 	if err != nil {
 		return nil, fmt.Errorf("sending invocation: %w", err)
 	}
