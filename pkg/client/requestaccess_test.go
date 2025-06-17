@@ -6,7 +6,6 @@ import (
 	"github.com/storacha/go-libstoracha/capabilities/access"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
-	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
@@ -16,8 +15,7 @@ import (
 
 func TestRequestAccess(t *testing.T) {
 	t.Run("invokes `access/authorize`", func(t *testing.T) {
-		account := uhelpers.Must(did.Parse("did:mailto:example.com:alice"))
-
+		invokedInvocations := []invocation.Invocation{}
 		invokedCapabilities := []ucan.Capability[access.AuthorizeCaveats]{}
 
 		connection := newTestServerConnection(
@@ -30,8 +28,12 @@ func TestRequestAccess(t *testing.T) {
 						inv invocation.Invocation,
 						ctx server.InvocationContext,
 					) (access.AuthorizeOk, fx.Effects, error) {
+						invokedInvocations = append(invokedInvocations, inv)
 						invokedCapabilities = append(invokedCapabilities, cap)
-						return access.AuthorizeOk{}, nil, nil
+						return access.AuthorizeOk{
+							Request:    inv.Link(),
+							Expiration: 123,
+						}, nil, nil
 					},
 				),
 			),
@@ -39,13 +41,15 @@ func TestRequestAccess(t *testing.T) {
 
 		c := uhelpers.Must(client.NewClient(connection))
 
-		c.RequestAccess(account)
+		authOk, err := c.RequestAccess("did:mailto:example.com:alice")
 
+		require.Len(t, invokedInvocations, 1, "expected exactly one invocation to be invoked")
+		invocation := invokedInvocations[0]
 		require.Len(t, invokedCapabilities, 1, "expected exactly one capability to be invoked")
 		capability := invokedCapabilities[0]
 
 		nb := uhelpers.Must(access.AuthorizeCaveatsReader.Read(capability.Nb()))
-		require.Equal(t, "did:mailto:example.com:alice", nb.Iss.String(), "expected to authorize the correct issuer")
+		require.Equal(t, "did:mailto:example.com:alice", *nb.Iss, "expected to authorize the correct issuer")
 
 		requestedCapabilities := make([]string, 0, len(nb.Att))
 		for _, att := range nb.Att {
@@ -64,6 +68,11 @@ func TestRequestAccess(t *testing.T) {
 				"filecoin/*",
 				"usage/*",
 			}, requestedCapabilities,
-			"expected to authorize the capabilities required to manage a space")
+			"expected to authorize the capabilities required to manage a space",
+		)
+
+		require.NoError(t, err, "expected to successfully request access")
+		require.Equal(t, invocation.Link().String(), authOk.Request.String(), "expected to return the request link")
+		require.Equal(t, 123, authOk.Expiration, "expected to return the expiration")
 	})
 }

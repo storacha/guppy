@@ -10,7 +10,7 @@ require (
 	github.com/multiformats/go-multicodec v0.9.0
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.0.7
-	github.com/storacha/go-libstoracha v0.0.6
+	github.com/storacha/go-libstoracha v0.0.7
 	github.com/storacha/go-ucanto v0.3.2
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.25.7
