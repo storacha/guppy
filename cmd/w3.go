@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -10,11 +11,11 @@ import (
 	"github.com/storacha/guppy/cmd/util"
 	"github.com/storacha/guppy/pkg/capability/uploadlist"
 	"github.com/storacha/guppy/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func main() {
-	app := &cli.App{
+	app := &cli.Command{
 		Name:  "w3",
 		Usage: "interact with the web3.storage API",
 		Commands: []*cli.Command{
@@ -101,22 +102,22 @@ func main() {
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func whoami(cCtx *cli.Context) error {
+func whoami(ctx context.Context, cmd *cli.Command) error {
 	s := util.MustGetSigner()
 	fmt.Println(s.DID())
 	return nil
 }
 
-func ls(cCtx *cli.Context) error {
+func ls(ctx context.Context, cmd *cli.Command) error {
 	signer := util.MustGetSigner()
 	conn := util.MustGetConnection()
-	space := util.MustParseDID(cCtx.String("space"))
-	proof := util.MustGetProof(cCtx.String("proof"))
+	space := util.MustParseDID(cmd.String("space"))
+	proof := util.MustGetProof(cmd.String("proof"))
 
 	rcpt, err := client.UploadList(
 		signer,
@@ -136,7 +137,7 @@ func ls(cCtx *cli.Context) error {
 
 	for _, r := range lsSuccess.Results {
 		fmt.Printf("%s\n", r.Root)
-		if cCtx.Bool("shards") {
+		if cmd.Bool("shards") {
 			for _, s := range r.Shards {
 				fmt.Printf("\t%s\n", s)
 			}

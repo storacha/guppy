@@ -26,49 +26,49 @@ import (
 	"github.com/storacha/guppy/cmd/util"
 	"github.com/storacha/guppy/pkg/car/sharding"
 	"github.com/storacha/guppy/pkg/client"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // upload handles file and directory uploads to Storacha
-func upload(cCtx *cli.Context) error {
+func upload(ctx context.Context, cmd *cli.Command) error {
 	signer := util.MustGetSigner()
 	conn := util.MustGetConnection()
-	space := util.MustParseDID(cCtx.String("space"))
-	proofs := []delegation.Delegation{util.MustGetProof(cCtx.String("proof"))}
+	space := util.MustParseDID(cmd.String("space"))
+	proofs := []delegation.Delegation{util.MustGetProof(cmd.String("proof"))}
 	receiptsURL := util.MustGetReceiptsURL()
 
 	// Handle options
-	isCAR := cCtx.String("car") != ""
-	isJSON := cCtx.Bool("json")
-	// isVerbose := cCtx.Bool("verbose")
-	isWrap := cCtx.Bool("wrap")
-	// shardSize := cCtx.Int("shard-size")
+	isCAR := cmd.String("car") != ""
+	isJSON := cmd.Bool("json")
+	// isVerbose := cmd.Bool("verbose")
+	isWrap := cmd.Bool("wrap")
+	// shardSize := cmd.Int("shard-size")
 
 	var paths []string
 	if isCAR {
-		paths = []string{cCtx.String("car")}
+		paths = []string{cmd.String("car")}
 	} else {
-		paths = cCtx.Args().Slice()
+		paths = cmd.Args().Slice()
 	}
 
 	var root ipld.Link
 	if isCAR {
 		fmt.Printf("Uploading %s...\n", paths[0])
 		var err error
-		root, err = uploadCAR(cCtx.Context, paths[0], signer, conn, space, proofs, receiptsURL)
+		root, err = uploadCAR(ctx, paths[0], signer, conn, space, proofs, receiptsURL)
 		if err != nil {
 			return err
 		}
 	} else {
 		if len(paths) == 1 && !isWrap {
 			var err error
-			root, err = uploadFile(cCtx.Context, paths[0], signer, conn, space, proofs, receiptsURL)
+			root, err = uploadFile(ctx, paths[0], signer, conn, space, proofs, receiptsURL)
 			if err != nil {
 				return err
 			}
 		} else {
 			var err error
-			root, err = uploadDirectory(cCtx.Context, paths, signer, conn, space, proofs, receiptsURL)
+			root, err = uploadDirectory(ctx, paths, signer, conn, space, proofs, receiptsURL)
 			if err != nil {
 				return err
 			}

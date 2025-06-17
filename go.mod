@@ -13,7 +13,7 @@ require (
 	github.com/storacha/go-libstoracha v0.0.7
 	github.com/storacha/go-ucanto v0.3.2
 	github.com/stretchr/testify v1.10.0
-	github.com/urfave/cli/v2 v2.25.7
+	github.com/urfave/cli/v3 v3.3.8
 )
 
 require (
@@ -68,8 +68,8 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/ucan-wg/go-ucan v0.0.0-20240916120445-37f52863156c // indirect
+	github.com/urfave/cli/v2 v2.0.0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.3.1 // indirect
-	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.opentelemetry.io/otel v1.35.0 // indirect
 	go.opentelemetry.io/otel/metric v1.35.0 // indirect
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
