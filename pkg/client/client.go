@@ -66,11 +66,22 @@ func (c *Client) Proofs() []delegation.Delegation {
 	return c.data.Delegations
 }
 
-// AddProofs adds the given delegations to the client's data and saves it.
-func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
-	c.data.Delegations = append(c.data.Delegations, delegations...)
+func (c *Client) save() error {
 	if c.saveFn != nil {
 		return c.saveFn(c.data)
 	}
 	return nil
+}
+
+// AddProofs adds the given delegations to the client's data and saves it.
+func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
+	c.data.Delegations = append(c.data.Delegations, delegations...)
+	return c.save()
+}
+
+func (c *Client) Reset() error {
+	c.data = agentdata.AgentData{
+		Principal: c.Issuer(),
+	}
+	return c.save()
 }

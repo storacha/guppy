@@ -32,6 +32,12 @@ func main() {
 				Action:    login,
 			},
 			{
+				Name:      "reset",
+				Usage:     "Remove all proofs/delegations from the store but retain the agent DID.",
+				UsageText: "reset",
+				Action:    reset,
+			},
+			{
 				Name:    "up",
 				Aliases: []string{"upload"},
 				Usage:   "Store a file(s) to the service and register an upload.",
@@ -156,6 +162,11 @@ func login(cCtx *cli.Context) error {
 	c.AddProofs(claimedDels...)
 
 	return nil
+}
+
+func reset(cCtx *cli.Context) error {
+	c := util.MustGetClient()
+	return c.Reset()
 }
 
 func ls(cCtx *cli.Context) error {
