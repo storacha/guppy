@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/briandowns/spinner"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/guppy/cmd/util"
@@ -14,6 +17,8 @@ import (
 	"github.com/storacha/guppy/pkg/didmailto"
 	"github.com/urfave/cli/v2"
 )
+
+var log = logging.Logger("storoku/main")
 
 func main() {
 	app := &cli.App{
@@ -109,7 +114,28 @@ func main() {
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	// set up a context that is canceled when a command is interrupted
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// set up a signal handler to cancel the context
+	go func() {
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+		select {
+		case <-interrupt:
+			fmt.Println()
+			log.Info("received interrupt signal")
+			cancel()
+		case <-ctx.Done():
+		}
+
+		// Allow any further SIGTERM or SIGINT to kill process
+		signal.Stop(interrupt)
+	}()
+
+	if err := app.RunContext(ctx, os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -143,10 +169,12 @@ func login(cCtx *cli.Context) error {
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
 	s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
 	s.Start()
-	// FIXME: This is meant to clean up if we SIGINT (Ctrl+C) the process, but doesn't.
-	defer s.Stop()
 	claimedDels, err := result.Unwrap(<-resultChan)
 	s.Stop()
+
+	if cCtx.Context.Err() != nil {
+		return fmt.Errorf("login canceled: %w", cCtx.Context.Err())
+	}
 
 	if err != nil {
 		return fmt.Errorf("claiming access: %w", err)
