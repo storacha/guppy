@@ -159,7 +159,6 @@ func login(cCtx *cli.Context) error {
 }
 
 func ls(cCtx *cli.Context) error {
-	c := util.MustGetClient()
 	space := util.MustParseDID(cCtx.String("space"))
 
 	proofs := []delegation.Delegation{}
@@ -168,11 +167,12 @@ func ls(cCtx *cli.Context) error {
 		proofs = append(proofs, proof)
 	}
 
+	c := util.MustGetClient(proofs...)
+
 	rcpt, err := c.UploadList(
 		cCtx.Context,
 		space,
 		uploadlist.Caveat{},
-		proofs...,
 	)
 	if err != nil {
 		return err

@@ -88,9 +88,11 @@ func TestBlobAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	c.AddProofs(proof)
+
 	testBlob := bytes.NewReader([]byte("test"))
 
-	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), receiptsURL, proof)
+	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), receiptsURL)
 	require.NoError(t, err)
 }
 
