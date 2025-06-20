@@ -35,7 +35,10 @@ func envSigner() (principal.Signer, error) {
 	return signer.Parse(str)
 }
 
-func MustGetClient() *client.Client {
+// MustGetClient creates a new client suitable for the CLI, using stored data,
+// if any. If proofs are provided, they will be added to the client, but the
+// client will not save changes to disk to avoid storing them.
+func MustGetClient(proofs ...delegation.Delegation) *client.Client {
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("obtaining user home directory: %s", err)
@@ -58,29 +61,28 @@ func MustGetClient() *client.Client {
 		}
 	}
 
-	clientOptions := []client.Option{
-		client.WithData(data),
-		client.WithSaveFn(func(data agentdata.AgentData) error {
-			return data.WriteToFile(datapath)
-		}),
-	}
+	var clientOptions []client.Option
 
 	// Use the principal from the environment if given.
 	if s, err := envSigner(); err != nil {
 		log.Fatalf("parsing GUPPY_PRIVATE_KEY: %s", err)
 	} else if s != nil {
 		// If a principal is provided, use that, and ignore the saved data.
-		clientOptions = []client.Option{
-			client.WithPrincipal(s),
-		}
+		clientOptions = append(clientOptions, client.WithPrincipal(s))
 	} else {
 		// Otherwise, read and write the saved data.
-		clientOptions = []client.Option{
-			client.WithData(data),
+		clientOptions = append(clientOptions, client.WithData(data))
+	}
+
+	proofsProvided := len(proofs) > 0
+
+	if !proofsProvided {
+		// Only enable saving if no proofs are provided
+		clientOptions = append(clientOptions,
 			client.WithSaveFn(func(data agentdata.AgentData) error {
 				return data.WriteToFile(datapath)
 			}),
-		}
+		)
 	}
 
 	c, err := client.NewClient(
@@ -90,6 +92,11 @@ func MustGetClient() *client.Client {
 	if err != nil {
 		log.Fatalf("creating client: %s", err)
 	}
+
+	if proofsProvided {
+		c.AddProofs(proofs...)
+	}
+
 	return c
 }
 
