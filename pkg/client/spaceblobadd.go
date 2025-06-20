@@ -74,40 +74,27 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
 
-	inv, err := spaceblobcap.Add.Invoke(c.Issuer(), c.Connection().ID(), space.String(), caveats, delegation.WithProof(pfs...))
+	res, fx, err := invokeAndExecute[spaceblobcap.AddCaveats, spaceblobcap.AddOk](
+		ctx,
+		c,
+		spaceblobcap.Add,
+		caveats,
+		spaceblobcap.AddOkType(),
+		delegation.WithProof(pfs...),
+	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generating invocation: %w", err)
+		return nil, nil, fmt.Errorf("invoking and executing `space/blob/add`: %w", err)
 	}
 
-	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
-	if err != nil {
-		return nil, nil, fmt.Errorf("sending invocation: %w", err)
-	}
-
-	rcptlnk, ok := resp.Get(inv.Link())
-	if !ok {
-		return nil, nil, fmt.Errorf("receipt not found: %s", inv.Link())
-	}
-
-	reader, err := receipt.NewReceiptReaderFromTypes[spaceblobcap.AddOk, fdm.FailureModel](spaceblobcap.AddOkType(), fdm.FailureType(), captypes.Converters...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generating receipt reader: %w", err)
-	}
-
-	rcpt, err := reader.Read(rcptlnk, resp.Blocks())
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading receipt: %w", err)
-	}
-
-	_, failErr := result.Unwrap(result.MapError(rcpt.Out(), failure.FromFailureModel))
+	_, failErr := result.Unwrap(res)
 	if failErr != nil {
-		return nil, nil, fmt.Errorf("blob add failed: %w", failErr)
+		return nil, nil, fmt.Errorf("`space/blob/add` failed: %w", failErr)
 	}
 
 	var allocateTask, putTask, acceptTask invocation.Invocation
 	legacyAccept := false
 	var concludeFxs []invocation.Invocation
-	for _, task := range rcpt.Fx().Fork() {
+	for _, task := range fx.Fork() {
 		inv, ok := task.Invocation()
 		if ok {
 			switch inv.Capabilities()[0].Can() {

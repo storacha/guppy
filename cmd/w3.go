@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/guppy/cmd/util"
-	"github.com/storacha/guppy/pkg/capability/uploadlist"
 	"github.com/storacha/guppy/pkg/didmailto"
 	"github.com/urfave/cli/v2"
 )
@@ -30,6 +30,12 @@ func main() {
 				Usage:     "Authenticate this agent with your email address to gain access to all capabilities that have been delegated to it.",
 				UsageText: "login <email>",
 				Action:    login,
+			},
+			{
+				Name:      "reset",
+				Usage:     "Remove all proofs/delegations from the store but retain the agent DID.",
+				UsageText: "reset",
+				Action:    reset,
 			},
 			{
 				Name:    "up",
@@ -158,6 +164,11 @@ func login(cCtx *cli.Context) error {
 	return nil
 }
 
+func reset(cCtx *cli.Context) error {
+	c := util.MustGetClient()
+	return c.Reset()
+}
+
 func ls(cCtx *cli.Context) error {
 	c := util.MustGetClient()
 	space := util.MustParseDID(cCtx.String("space"))
@@ -168,22 +179,17 @@ func ls(cCtx *cli.Context) error {
 		proofs = append(proofs, proof)
 	}
 
-	rcpt, err := c.UploadList(
+	listOk, err := c.UploadList(
 		cCtx.Context,
 		space,
-		uploadlist.Caveat{},
+		uploadcap.ListCaveats{},
 		proofs...,
 	)
 	if err != nil {
 		return err
 	}
 
-	lsSuccess, lsFailure := result.Unwrap(rcpt.Out())
-	if lsFailure != nil {
-		return fmt.Errorf("%+v", lsFailure)
-	}
-
-	for _, r := range lsSuccess.Results {
+	for _, r := range listOk.Results {
 		fmt.Printf("%s\n", r.Root)
 		if cCtx.Bool("shards") {
 			for _, s := range r.Shards {
