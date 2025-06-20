@@ -5,17 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 
-	"github.com/storacha/guppy/pkg/client/nodevalue"
-
 	"github.com/storacha/go-libstoracha/capabilities/access"
-	captypes "github.com/storacha/go-libstoracha/capabilities/types"
-	uclient "github.com/storacha/go-ucanto/client"
-	"github.com/storacha/go-ucanto/core/invocation"
-	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/result"
-	"github.com/storacha/go-ucanto/core/result/failure"
-	"github.com/storacha/go-ucanto/core/result/failure/datamodel"
-	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
 )
 
 // spaceAccess is the set of capabilities required by the agent to manage a
@@ -43,60 +34,18 @@ func (c *Client) RequestAccess(ctx context.Context, account string) (access.Auth
 		Att: spaceAccess,
 	}
 
-	inv, err := access.Authorize.Invoke(c.Issuer(), c.Connection().ID(), c.Issuer().DID().String(), caveats)
-	if err != nil {
-		return access.AuthorizeOk{}, fmt.Errorf("generating invocation: %w", err)
-	}
-
-	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
-	if err != nil {
-		return access.AuthorizeOk{}, fmt.Errorf("sending invocation: %w", err)
-	}
-
-	rcptlnk, ok := resp.Get(inv.Link())
-	if !ok {
-		return access.AuthorizeOk{}, fmt.Errorf("receipt not found: %s", inv.Link())
-	}
-
-	reader, err := receipt.NewReceiptReaderFromTypes[access.AuthorizeOk, serverdatamodel.HandlerExecutionErrorModel](access.AuthorizeOkType(), serverdatamodel.HandlerExecutionErrorType(), captypes.Converters...)
-	if err != nil {
-		return access.AuthorizeOk{}, fmt.Errorf("generating receipt reader: %w", err)
-	}
-
-	rcpt, err := reader.Read(rcptlnk, resp.Blocks())
-	if err != nil {
-		anyRcpt, err := receipt.NewAnyReceiptReader().Read(rcptlnk, resp.Blocks())
-		if err != nil {
-			return access.AuthorizeOk{}, fmt.Errorf("reading receipt as any: %w", err)
-		}
-		okNode, errorNode := result.Unwrap(anyRcpt.Out())
-
-		if okNode != nil {
-			okValue, err := nodevalue.NodeValue(okNode)
-			if err != nil {
-				return access.AuthorizeOk{}, fmt.Errorf("reading `access/authorize` ok output: %w", err)
-			}
-			return access.AuthorizeOk{}, fmt.Errorf("`access/authorize` succeeded with unexpected output: %#v", okValue)
-		}
-
-		errorValue, err := nodevalue.NodeValue(errorNode)
-		if err != nil {
-			return access.AuthorizeOk{}, fmt.Errorf("reading `access/authorize` error output: %w", err)
-		}
-		return access.AuthorizeOk{}, fmt.Errorf("`access/authorize` failed with unexpected error: %#v", errorValue)
-	}
-
-	authorizeOk, failErr := result.Unwrap(
-		result.MapError(
-			result.MapError(
-				rcpt.Out(),
-				func(errorModel serverdatamodel.HandlerExecutionErrorModel) datamodel.FailureModel {
-					return datamodel.FailureModel(errorModel.Cause)
-				},
-			),
-			failure.FromFailureModel,
-		),
+	res, _, err := invokeAndExecute[access.AuthorizeCaveats, access.AuthorizeOk](
+		ctx,
+		c,
+		access.Authorize,
+		caveats,
+		access.AuthorizeOkType(),
 	)
+	if err != nil {
+		return access.AuthorizeOk{}, fmt.Errorf("invoking and executing `access/authorize`: %w", err)
+	}
+
+	authorizeOk, failErr := result.Unwrap(res)
 	if failErr != nil {
 		return access.AuthorizeOk{}, fmt.Errorf("`access/authorize` failed: %w", failErr)
 	}

@@ -12,15 +12,9 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
-	captypes "github.com/storacha/go-libstoracha/capabilities/types"
-	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
-	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/car"
 	"github.com/storacha/go-ucanto/core/delegation"
-	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/ipld"
-	"github.com/storacha/go-ucanto/core/receipt"
-	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/cmd/util"
 	"github.com/storacha/guppy/pkg/car/sharding"
@@ -146,56 +140,19 @@ func uploadCAR(ctx context.Context, path string, c *client.Client, space did.DID
 
 	// TODO: build, add and register index
 
-	// rcpt, err := client.UploadAdd(
-	// 	signer,
-	// 	space,
-	// 	uploadadd.Caveat{
-	// 		Root:   roots[0],
-	// 		Shards: shdlnks,
-	// 	},
-	// 	client.WithConnection(conn),
-	// 	client.WithProofs(proofs),
-	// )
-	caveats := uploadcap.AddCaveats{
-		Root:   roots[0],
-		Shards: shdlnks,
-	}
+	addOk, err := c.UploadAdd(
+		ctx,
+		space,
+		roots[0],
+		shdlnks,
+		proofs...,
+	)
 
-	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
-	for _, del := range append(c.Proofs(), proofs...) {
-		pfs = append(pfs, delegation.FromDelegation(del))
-	}
-
-	inv, err := uploadcap.Add.Invoke(c.Issuer(), c.Connection().ID(), space.String(), caveats, delegation.WithProof(pfs...))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("uploading CAR: %w", err)
 	}
 
-	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
-	if err != nil {
-		return nil, err
-	}
-
-	rcptlnk, ok := resp.Get(inv.Link())
-	if !ok {
-		return nil, fmt.Errorf("receipt not found: %s", inv.Link())
-	}
-
-	reader := receipt.NewAnyReceiptReader(captypes.Converters...)
-
-	rcpt, err := reader.Read(rcptlnk, resp.Blocks())
-	if err != nil {
-		return nil, err
-	}
-
-	_, failErr := result.Unwrap(rcpt.Out())
-	if failErr != nil {
-		return nil, fmt.Errorf("%+v", failErr)
-	}
-
-	fmt.Printf("Uploaded %d bytes\n", stat.Size())
-
-	return roots[0], nil
+	return addOk.Root, nil
 }
 
 func uploadFile(ctx context.Context, path string, c *client.Client, space did.DID, proofs []delegation.Delegation, receiptsURL *url.URL) (ipld.Link, error) {
