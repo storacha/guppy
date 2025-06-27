@@ -6,6 +6,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/util"
 )
 
 // ScanState represents the state of a scan.
@@ -31,6 +32,11 @@ func validScanState(state ScanState) bool {
 	default:
 		return false
 	}
+}
+
+// nowTimestamp returns the current time in UTC, truncated to the second.
+func nowTimestamp() time.Time {
+	return util.Now().UTC().Truncate(time.Second)
 }
 
 // Scan represents a single scan of a source, usually associated with an upload
@@ -109,7 +115,7 @@ func (s *Scan) Fail(errorMessage string) error {
 	}
 	s.state = ScanStateFailed
 	s.errorMessage = &errorMessage
-	s.updatedAt = time.Now()
+	s.updatedAt = nowTimestamp()
 	return nil
 }
 
@@ -119,7 +125,7 @@ func (s *Scan) Complete(rootID id.FSEntryID) error {
 	}
 	s.state = ScanStateCompleted
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = nowTimestamp()
 	s.rootID = &rootID
 	return nil
 }
@@ -130,7 +136,7 @@ func (s *Scan) Cancel() error {
 	}
 	s.state = ScanStateCanceled
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = nowTimestamp()
 	return nil
 }
 
@@ -140,7 +146,7 @@ func (s *Scan) Start() error {
 	}
 	s.state = ScanStateRunning
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = nowTimestamp()
 	return nil
 }
 
@@ -149,8 +155,8 @@ func NewScan(uploadID id.UploadID) (*Scan, error) {
 		id:        id.New(),
 		uploadID:  uploadID,
 		state:     ScanStatePending,
-		createdAt: time.Now().UTC().Truncate(time.Second),
-		updatedAt: time.Now().UTC().Truncate(time.Second),
+		createdAt: nowTimestamp(),
+		updatedAt: nowTimestamp(),
 	}
 	return validateScan(scan)
 }
