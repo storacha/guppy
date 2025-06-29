@@ -8,18 +8,28 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
-	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
+	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var _ uploads.Repo = (*repo)(nil)
 
 // GetUploadByID retrieves an upload by its unique ID from the repository.
-func (r *repo) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*uploadsmodel.Upload, error) {
+func (r *repo) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*model.Upload, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, configuration_id, source_id, created_at FROM uploads WHERE id = ?`, uploadID,
+		`SELECT id, configuration_id, source_id, created_at, updated_at, state, error_message FROM uploads WHERE id = ?`, uploadID,
 	)
-	upload, err := uploadsmodel.ReadUploadFromDatabase(func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt *time.Time) error {
-		return row.Scan(id, configurationID, sourceID, createdAt)
+	upload, err := model.ReadUploadFromDatabase(func(id, configurationID, sourceID *types.SourceID, createdAt, updatedAt *time.Time, state *model.UploadState, errorMessage **string) error {
+		var nullErrorMessage sql.NullString
+		err := row.Scan(id, configurationID, sourceID, timestampScanner(createdAt), timestampScanner(updatedAt), state, &nullErrorMessage)
+		if err != nil {
+			return err
+		}
+		if nullErrorMessage.Valid {
+			*errorMessage = &nullErrorMessage.String
+		} else {
+			*errorMessage = nil
+		}
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -41,21 +51,34 @@ func (r *repo) GetSourceIDForUploadID(ctx context.Context, uploadID types.Upload
 }
 
 // CreateUploads creates uploads for a given configuration and source IDs.
-func (r *repo) CreateUploads(ctx context.Context, configurationID types.ConfigurationID, sourceIDs []types.SourceID) ([]*uploadsmodel.Upload, error) {
-	var uploads []*uploadsmodel.Upload
+func (r *repo) CreateUploads(ctx context.Context, configurationID types.ConfigurationID, sourceIDs []types.SourceID) ([]*model.Upload, error) {
+	var uploads []*model.Upload
 	for _, sourceID := range sourceIDs {
-		upload, err := uploadsmodel.NewUpload(configurationID, sourceID)
+		upload, err := model.NewUpload(configurationID, sourceID)
 		if err != nil {
 			return nil, err
 		}
-		_, err = r.db.ExecContext(ctx,
-			`INSERT INTO uploads (id, configuration_id, source_id, created_at) VALUES (?, ?, ?, ?)`,
-			upload.ID(), upload.ConfigurationID(), upload.SourceID(), upload.CreatedAt(),
-		)
+		insertQuery := `INSERT INTO uploads (id, configuration_id, source_id, created_at, updated_at, state, error_message) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		err = model.WriteUploadToDatabase(func(id, configurationID, sourceID types.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string) error {
+			_, err := r.db.ExecContext(ctx,
+				insertQuery, id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage))
+			return err
+		}, upload)
 		if err != nil {
 			return nil, err
 		}
 		uploads = append(uploads, upload)
 	}
 	return uploads, nil
+}
+
+// UpdateUpload implements uploads.Repo.
+func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
+	updateQuery := `UPDATE uploads SET configuration_id = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7 WHERE id = $1`
+	return model.WriteUploadToDatabase(func(id, configurationID, sourceID types.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string) error {
+		_, err := r.db.ExecContext(ctx,
+			updateQuery,
+			id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage))
+		return err
+	}, upload)
 }

@@ -59,8 +59,8 @@ func (fs fileShards) byteSizes() []uint64 {
 // visiting each node with the provided visitor.
 // This code is adapted from https://github.com/ipfs/go-unixfsnode/blob/main/data/builder/file.go
 // but is tailored to the dag walking process we need for database storage
-func BuildUnixFSFile(r io.Reader, chunkSize uint64, linksPerNode uint64, visitor UnixFSVisitor) (cid.Cid, error) {
-	c := unixfs.NewChunker(r, chunkSize)
+func BuildUnixFSFile(r io.Reader, blockSize uint64, linksPerNode uint64, visitor UnixFSVisitor) (cid.Cid, error) {
+	c := unixfs.NewChunker(r, blockSize)
 	var prev fileShards
 	depth := 1
 	for {
@@ -177,7 +177,7 @@ func fileTreeRecursive(
 }
 
 func toLinks(children fileShards) ([]dagpb.PBLink, error) {
-	links := make([]dagpb.PBLink, len(children))
+	links := make([]dagpb.PBLink, 0, len(children))
 	for _, c := range children {
 		link, err := builder.BuildUnixFSDirectoryEntry("", int64(c.storedSize), c.link)
 		if err != nil {

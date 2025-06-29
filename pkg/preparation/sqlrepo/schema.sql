@@ -45,7 +45,10 @@ CREATE TABLE IF NOT EXISTS uploads (
   id BLOB PRIMARY KEY,
   configuration_id BLOB NOT NULL,
   source_id BLOB NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'scanning', 'generating_dag', 'sharding', 'uploading', 'completed', 'failed', 'cancelled')),
+  error_message TEXT,
   FOREIGN KEY (configuration_id) REFERENCES configurations(id),
   FOREIGN KEY (source_id) REFERENCES sources(id)
 ) STRICT;
@@ -84,8 +87,8 @@ CREATE TABLE IF NOT EXISTS directory_children (
 CREATE TABLE IF NOT EXISTS dag_scans (
   fs_entry_id BLOB NOT NULL PRIMARY KEY,
   upload_id BLOB NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
   error_message TEXT,
   state TEXT NOT NULL,
   cid BLOB,
@@ -110,7 +113,7 @@ CREATE TABLE IF NOT EXISTS links (
   t_size INTEGER NOT NULL,
   hash BLOB NOT NULL,
   parent_id BLOB NOT NULL,
-  "order" INTEGER NOT NULL,
+  ordering INTEGER NOT NULL,
   FOREIGN KEY (parent_id) REFERENCES nodes(cid),
   FOREIGN KEY (hash) REFERENCES nodes(cid),
   PRIMARY KEY (name, t_size, hash, parent_id, "order")

@@ -10,6 +10,7 @@ import (
 type Uploads struct {
 	repo                       Repo
 	ConfigurationSourcesLookup ConfigurationSourcesLookupFn
+	UploadDAGScanWorker        func(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error
 }
 
 type ConfigurationSourcesLookupFn func(ctx context.Context, configurationID types.ConfigurationID) ([]types.SourceID, error)
