@@ -13,11 +13,6 @@ import (
 
 var _ sources.Repo = (*repo)(nil)
 
-// NewRepo creates a new sources repository with the given database connection.
-func NewRepo(db *sql.DB) sources.Repo {
-	return &repo{db: db}
-}
-
 // CreateSource creates a new source in the repository with the given name, path, and options.
 func (r *repo) CreateSource(ctx context.Context, name string, path string, options ...sourcemodel.SourceOption) (*sourcemodel.Source, error) {
 	src, err := sourcemodel.NewSource(name, path, options...)
