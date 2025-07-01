@@ -2,7 +2,11 @@ package sqlrepo
 
 import (
 	"database/sql"
+	_ "embed"
 )
+
+//go:embed schema.sql
+var Schema string
 
 func NullString(s *string) sql.NullString {
 	if s == nil {
