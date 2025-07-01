@@ -3,6 +3,7 @@ package sqlrepo_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -12,8 +13,7 @@ import (
 
 func TestCreateScan(t *testing.T) {
 	t.Run("with an upload ID", func(t *testing.T) {
-		db := testutil.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		uploadID := uuid.New()
 
 		scan, err := repo.CreateScan(t.Context(), uploadID)
@@ -42,4 +42,25 @@ func TestCreateScan(t *testing.T) {
 		_, err := repo.CreateScan(ctx, uploadID)
 		require.ErrorContains(t, err, "context canceled")
 	})
+}
+
+func TestFindOrCreateFile(t *testing.T) {
+	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	modTime := time.Now().UTC().Truncate(time.Second)
+	sourceId := uuid.New()
+
+	file, created, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotNil(t, file)
+
+	file2, created2, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	require.NoError(t, err)
+	require.False(t, created2)
+	require.Equal(t, file, file2)
+
+	file3, created3, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("different-checksum"), sourceId)
+	require.NoError(t, err)
+	require.True(t, created3)
+	require.NotEqual(t, file.ID(), file3.ID())
 }

@@ -47,7 +47,18 @@ CREATE TABLE IF NOT EXISTS uploads (
   source_id BLOB NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'scanning', 'generating_dag', 'sharding', 'uploading', 'completed', 'failed', 'cancelled')),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'pending',
+      'scanning',
+      'generating_dag',
+      'sharding',
+      'uploading',
+      'completed',
+      'failed',
+      'cancelled'
+    )
+  ),
   error_message TEXT,
   FOREIGN KEY (configuration_id) REFERENCES configurations(id),
   FOREIGN KEY (source_id) REFERENCES sources(id)
@@ -69,7 +80,7 @@ CREATE TABLE IF NOT EXISTS fs_entries (
   id BLOB PRIMARY KEY,
   source_id BLOB NOT NULL,
   path TEXT NOT NULL,
-  last_modified TEXT NOT NULL,
+  last_modified INTEGER NOT NULL,
   MODE INTEGER NOT NULL,
   size INTEGER NOT NULL,
   CHECKSUM BLOB,

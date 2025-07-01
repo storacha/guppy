@@ -255,11 +255,41 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 	query := `
 		SELECT id, path, last_modified, mode, size, checksum, source_id
 		FROM fs_entries
-		WHERE path = $1 AND last_modified = $2 AND mode = $3 AND size = $4 AND checksum = $5 AND source_id = $6
+		WHERE path = $1
+		  AND last_modified = $2
+		  AND mode = $3
+		  AND size = $4
+		  AND checksum = $5
+		  AND source_id = $6
 	`
-	row := r.db.QueryRowContext(ctx, query, path, lastModified, mode, size, checksum, sourceID)
-	entry, err := scanmodel.ReadFSEntryFromDatabase(func(id *types.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *types.SourceID) error {
-		return row.Scan(id, path, lastModified, mode, size, checksum, sourceID)
+	row := r.db.QueryRowContext(
+		ctx,
+		query,
+		path,
+		lastModified.Unix(),
+		mode,
+		size,
+		checksum,
+		sourceID[:],
+	)
+	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
+		id *types.FSEntryID,
+		path *string,
+		lastModified *time.Time,
+		mode *fs.FileMode,
+		size *uint64,
+		checksum *[]byte,
+		sourceID *types.SourceID,
+	) error {
+		return row.Scan(
+			id,
+			path,
+			timestampScanner(lastModified),
+			mode,
+			size,
+			checksum,
+			sourceID,
+		)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -273,8 +303,28 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
-	return scanmodel.WriteFSEntryToDatabase(entry, func(id types.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) error {
-		_, err := r.db.ExecContext(ctx, insertQuery, id, path, lastModified, mode, size, checksum, sourceID)
-		return err
-	})
+	return scanmodel.WriteFSEntryToDatabase(
+		entry,
+		func(
+			id types.FSEntryID,
+			path string,
+			lastModified time.Time,
+			mode fs.FileMode,
+			size uint64,
+			checksum []byte,
+			sourceID types.SourceID,
+		) error {
+			_, err := r.db.ExecContext(
+				ctx,
+				insertQuery,
+				id[:],
+				path,
+				lastModified.Unix(),
+				mode,
+				size,
+				checksum,
+				sourceID[:],
+			)
+			return err
+		})
 }
