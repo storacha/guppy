@@ -116,5 +116,5 @@ CREATE TABLE IF NOT EXISTS links (
   ordering INTEGER NOT NULL,
   FOREIGN KEY (parent_id) REFERENCES nodes(cid),
   FOREIGN KEY (hash) REFERENCES nodes(cid),
-  PRIMARY KEY (name, t_size, hash, parent_id, "order")
+  PRIMARY KEY (name, t_size, hash, parent_id, ordering)
 ) STRICT;

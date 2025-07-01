@@ -243,7 +243,7 @@ func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
 	return writer(
 		kind,
 		ds.fsEntryID,
-		ds.uploadID
+		ds.uploadID,
 		ds.createdAt,
 		ds.updatedAt,
 		ds.errorMessage,
