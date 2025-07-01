@@ -118,6 +118,9 @@ func (r *repo) GetScanByID(ctx context.Context, scanID types.ScanID) (*scanmodel
 // If the file already exists, it returns the existing file and false.
 // If the file does not exist, it creates a new file entry and returns it along with true.
 func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) (*scanmodel.File, bool, error) {
+	if mode.IsDir() {
+		return nil, false, errors.New("cannot create a file with directory mode")
+	}
 	entry, err := r.findFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID)
 	if err != nil {
 		return nil, false, err
@@ -148,6 +151,9 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 // If the directory already exists, it returns the existing directory and false.
 // If the directory does not exist, it creates a new directory entry and returns it along with true.
 func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID types.SourceID) (*scanmodel.Directory, bool, error) {
+	if !mode.IsDir() {
+		return nil, false, errors.New("cannot create a directory with file mode")
+	}
 	entry, err := r.findFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID) // size is not used for directories
 	if err != nil {
 		return nil, false, err
