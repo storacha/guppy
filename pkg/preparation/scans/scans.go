@@ -56,8 +56,8 @@ func (s Scans) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func
 			return fmt.Errorf("completing scan: %w", err)
 		}
 	}
-	if err := s.Repo.UpdateScan(ctx, scan); err != nil {
-		return fmt.Errorf("updating scan after fail: %w", err)
+	if err := s.Repo.UpdateScan(context.WithoutCancel(ctx), scan); err != nil {
+		return fmt.Errorf("updating scan after execute: %w", err)
 	}
 	return nil
 }
