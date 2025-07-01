@@ -20,13 +20,13 @@ const (
 	ScanStateCompleted ScanState = "completed"
 	// ScanStateFailed indicates that the scan has failed.
 	ScanStateFailed ScanState = "failed"
-	// ScanStateCancelled indicates that the scan has been cancelled.
-	ScanStateCancelled ScanState = "cancelled"
+	// ScanStateCanceled indicates that the scan has been cancelled.
+	ScanStateCanceled ScanState = "cancelled"
 )
 
 func validScanState(state ScanState) bool {
 	switch state {
-	case ScanStatePending, ScanStateRunning, ScanStateCompleted, ScanStateFailed, ScanStateCancelled:
+	case ScanStatePending, ScanStateRunning, ScanStateCompleted, ScanStateFailed, ScanStateCanceled:
 		return true
 	default:
 		return false
@@ -104,7 +104,7 @@ func (s *Scan) RootID() types.FSEntryID {
 }
 
 func (s *Scan) Fail(errorMessage string) error {
-	if s.state == ScanStateCompleted || s.state == ScanStateCancelled {
+	if s.state == ScanStateCompleted || s.state == ScanStateCanceled {
 		return fmt.Errorf("cannot fail scan in state %s", s.state)
 	}
 	s.state = ScanStateFailed
@@ -128,7 +128,7 @@ func (s *Scan) Cancel() error {
 	if s.state == ScanStateCompleted || s.state == ScanStateFailed {
 		return fmt.Errorf("cannot cancel scan in state %s", s.state)
 	}
-	s.state = ScanStateCancelled
+	s.state = ScanStateCanceled
 	s.errorMessage = nil
 	s.updatedAt = time.Now()
 	return nil

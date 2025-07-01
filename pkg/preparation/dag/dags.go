@@ -92,7 +92,7 @@ func (d DAGAPI) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, onSca
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			if err := dagScan.Cancel(); err != nil {
-				return fmt.Errorf("cancelling scan: %w", err)
+				return fmt.Errorf("canceling scan: %w", err)
 			}
 		} else {
 			if err := dagScan.Fail(err.Error()); err != nil {

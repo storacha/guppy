@@ -44,7 +44,7 @@ func (s Scans) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			if err := scan.Cancel(); err != nil {
-				return fmt.Errorf("cancelling scan: %w", err)
+				return fmt.Errorf("canceling scan: %w", err)
 			}
 		} else {
 			if err := scan.Fail(err.Error()); err != nil {
