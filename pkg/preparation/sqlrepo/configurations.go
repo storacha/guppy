@@ -15,10 +15,10 @@ var _ configurations.Repo = (*repo)(nil)
 // GetConfigurationByID retrieves a configuration by its unique ID from the repository.
 func (r *repo) GetConfigurationByID(configurationID types.ConfigurationID) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRow(
-		`SELECT id, name, created_at, shard_size, block_size, links_per_node, use_hamt_directory_size FROM configurations WHERE id = ?`, configurationID,
+		`SELECT id, name, created_at, shard_size FROM configurations WHERE id = ?`, configurationID,
 	)
-	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64, blockSize *uint64, linksPerNode *uint64, useHAMTDirectorySize *uint64) error {
-		return row.Scan(id, name, createdAt, shardSize, blockSize, linksPerNode, useHAMTDirectorySize)
+	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
+		return row.Scan(id, name, createdAt, shardSize)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -29,10 +29,10 @@ func (r *repo) GetConfigurationByID(configurationID types.ConfigurationID) (*con
 // GetConfigurationByName retrieves a configuration by its name from the repository.
 func (r *repo) GetConfigurationByName(name string) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRow(
-		`SELECT id, name, created_at, shard_size, block_size, links_per_node, use_hamt_directory_size FROM configurations WHERE name = ?`, name,
+		`SELECT id, name, created_at, shard_size FROM configurations WHERE name = ?`, name,
 	)
-	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64, blockSize *uint64, linksPerNode *uint64, useHAMTDirectorySize *uint64) error {
-		return row.Scan(id, name, createdAt, shardSize, blockSize, linksPerNode, useHAMTDirectorySize)
+	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
+		return row.Scan(id, name, createdAt, shardSize)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -47,8 +47,8 @@ func (r *repo) CreateConfiguration(name string, options ...configurationsmodel.C
 		return nil, err
 	}
 	_, err = r.db.Exec(
-		`INSERT INTO configurations (id, name, created_at, shard_size, block_size, links_per_node, use_hamt_directory_size) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		configuration.ID(), configuration.Name(), configuration.CreatedAt(), configuration.ShardSize(), configuration.BlockSize(), configuration.LinksPerNode(), configuration.UseHAMTDirectorySize(),
+		`INSERT INTO configurations (id, name, created_at, shard_size) VALUES (?, ?, ?, ?)`,
+		configuration.ID(), configuration.Name(), configuration.CreatedAt(), configuration.ShardSize(),
 	)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (r *repo) DeleteConfiguration(configurationID types.ConfigurationID) error 
 // ListConfigurations lists all configurations in the repository.
 func (r *repo) ListConfigurations() ([]*configurationsmodel.Configuration, error) {
 	rows, err := r.db.Query(
-		`SELECT id, name, created_at, shard_size, block_size, links_per_node, use_hamt_directory_size FROM configurations`,
+		`SELECT id, name, created_at, shard_size FROM configurations`,
 	)
 	if err != nil {
 		return nil, err
@@ -85,8 +85,8 @@ func (r *repo) ListConfigurations() ([]*configurationsmodel.Configuration, error
 
 	var configurations []*configurationsmodel.Configuration
 	for rows.Next() {
-		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64, blockSize *uint64, linksPerNode *uint64, useHAMTDirectorySize *uint64) error {
-			return rows.Scan(id, name, createdAt, shardSize, blockSize, linksPerNode, useHAMTDirectorySize)
+		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
+			return rows.Scan(id, name, createdAt, shardSize)
 		})
 		if err != nil {
 			return nil, err

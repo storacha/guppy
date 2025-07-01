@@ -3,6 +3,7 @@ package visitor
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ipfs/go-cid"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -69,20 +70,24 @@ func (v UnixFSNodeVisitor) VisitUnixFSNode(cid cid.Cid, size uint64, ufsData []b
 // UnixFSVisitor is a struct that implements the file.UnixFSVisitor interface.
 type UnixFSVisitor struct {
 	UnixFSNodeVisitor
-	sourceID types.SourceID
-	path     string // path is the root path of the scan
+	sourceID       types.SourceID
+	path           string // path is the root path of the scan
+	readerPosition ReaderPosition
 }
 
-func NewUnixFSVisitor(ctx context.Context, repo Repo, sourceID types.SourceID, path string, cb NodeCallback) UnixFSVisitor {
+func NewUnixFSVisitor(ctx context.Context, repo Repo, sourceID types.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSVisitor {
 	return UnixFSVisitor{
 		UnixFSNodeVisitor: NewUnixFSNodeVisitor(ctx, repo, cb),
 		sourceID:          sourceID,
 		path:              path,
+		readerPosition:    readerPosition,
 	}
 }
 
 // VisitRawNode is called for each raw node found during the scan.
-func (v UnixFSVisitor) VisitRawNode(cid cid.Cid, size uint64, offset uint64, data []byte) error {
+func (v UnixFSVisitor) VisitRawNode(cid cid.Cid, size uint64, data []byte) error {
+	// this raw block has already been read, so we subtract its size to get the beginning offset
+	offset := v.readerPosition.Offset() - size
 	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.path, v.sourceID, offset)
 	if err != nil {
 		return fmt.Errorf("creating raw node: %w", err)
@@ -93,4 +98,34 @@ func (v UnixFSVisitor) VisitRawNode(cid cid.Cid, size uint64, offset uint64, dat
 		}
 	}
 	return nil
+}
+
+type ReaderPosition interface {
+	io.Reader
+	Offset() uint64
+}
+
+// ReaderPositionFromReader creates a ReaderPosition from an io.Reader.
+func ReaderPositionFromReader(r io.Reader) ReaderPosition {
+	return &readerPosition{
+		reader: r,
+		offset: 0,
+	}
+}
+
+type readerPosition struct {
+	reader io.Reader
+	offset uint64
+}
+
+func (frp *readerPosition) Read(p []byte) (n int, err error) {
+	n, err = frp.reader.Read(p)
+	if n > 0 {
+		frp.offset += uint64(n)
+	}
+	return n, err
+}
+
+func (frp *readerPosition) Offset() uint64 {
+	return frp.offset
 }

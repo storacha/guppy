@@ -7,32 +7,31 @@ import (
 	"io/fs"
 
 	"github.com/ipfs/go-cid"
-	"github.com/storacha/guppy/pkg/preparation/dag/directory"
-	"github.com/storacha/guppy/pkg/preparation/dag/file"
+	"github.com/ipfs/go-unixfsnode/data/builder"
+	dagpb "github.com/ipld/go-codec-dagpb"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dag/model"
 	"github.com/storacha/guppy/pkg/preparation/dag/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
-// UnixFSParams defines the parameters for UnixFS DAG scans.
-type UnixFSParams interface {
-	BlockSize() uint64
-	LinksPerNode() uint64
-	UseHAMTDirectorySize() uint64
+const BlockSize = 1 << 20         // 1 MiB
+const DefaultLinksPerBlock = 1024 // Default number of links per block for UnixFS
+
+func init() {
+	// Set the default links per block for UnixFS.
+	// annoying this is not more easily configurable, but this is the only way to set it globally.
+	builder.DefaultLinksPerBlock = DefaultLinksPerBlock
 }
 
 // DAGAPI provides methods to interact with the DAG scans in the repository.
 type DAGAPI struct {
 	Repo         Repo
 	FileAccessor FileAccessorFn
-	UnixFSParams UnixFSParamsFn
 }
 
 // FileAccessorFn is a function type that retrieves a file for a given fsEntryID.
 type FileAccessorFn func(ctx context.Context, fsEntryID types.FSEntryID) (fs.File, types.SourceID, string, error)
-
-// UnixFSParamsFn is a function type that retrieves UnixFS parameters for a given upload ID.
-type UnixFSParamsFn func(ctx context.Context, uploadID types.UploadID) UnixFSParams
 
 // UploadDAGScanWorker processes DAG scans for an upload until the context is canceled or the work channel is closed.
 func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
@@ -131,9 +130,10 @@ func (d DAGAPI) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGSc
 		return cid.Undef, fmt.Errorf("accessing file for DAG scan: %w", err)
 	}
 	defer f.Close()
-	unixFSParams := d.UnixFSParams(ctx, dagScan.UploadID())
-	visitor := visitor.NewUnixFSVisitor(ctx, d.Repo, sourceID, path, nodeCB)
-	return file.BuildUnixFSFile(f, unixFSParams.BlockSize(), unixFSParams.LinksPerNode(), visitor)
+	reader := visitor.ReaderPositionFromReader(f)
+	visitor := visitor.NewUnixFSVisitor(ctx, d.Repo, sourceID, path, reader, nodeCB)
+	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
+	return l.(cidlink.Link).Cid, err
 }
 
 func (d DAGAPI) executeDirectoryDAGScan(ctx context.Context, dagScan *model.DirectoryDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {
@@ -142,7 +142,12 @@ func (d DAGAPI) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Dire
 		return cid.Undef, fmt.Errorf("getting directory links for DAG scan: %w", err)
 	}
 	visitor := visitor.NewUnixFSNodeVisitor(ctx, d.Repo, nodeCB)
-	return directory.BuildUnixFSDirectory(childLinks, d.UnixFSParams(ctx, dagScan.UploadID()).UseHAMTDirectorySize(), visitor)
+	pbLinks, err := toLinks(childLinks)
+	if err != nil {
+		return cid.Undef, fmt.Errorf("converting links to PBLinks: %w", err)
+	}
+	l, _, err := builder.BuildUnixFSDirectory(pbLinks, visitor.LinkSystem())
+	return l.(cidlink.Link).Cid, err
 }
 
 // HandleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
@@ -189,4 +194,16 @@ func (d DAGAPI) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGSca
 	default:
 		return fmt.Errorf("unrecognized DAG scan type: %T", dagScan)
 	}
+}
+
+func toLinks(linkParams []model.LinkParams) ([]dagpb.PBLink, error) {
+	links := make([]dagpb.PBLink, 0, len(linkParams))
+	for _, c := range linkParams {
+		link, err := builder.BuildUnixFSDirectoryEntry(c.Name, int64(c.TSize), cidlink.Link{Cid: c.Hash})
+		if err != nil {
+			return nil, fmt.Errorf("failed to build unixfs directory entry: %w", err)
+		}
+		links = append(links, link)
+	}
+	return links, nil
 }
