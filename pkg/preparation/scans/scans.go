@@ -71,7 +71,7 @@ func (s Scans) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func
 	if err != nil {
 		return nil, fmt.Errorf("accessing source: %w", err)
 	}
-	fsEntry, err := s.WalkerFn(fsys, "/", visitor.NewScanVisitor(ctx, s.Repo, sourceID, fsEntryCb))
+	fsEntry, err := s.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, s.Repo, sourceID, fsEntryCb))
 	if err != nil {
 		return nil, fmt.Errorf("recursively creating directories: %w", err)
 	}

@@ -17,6 +17,9 @@ type FSVisitor interface {
 
 // WalkDir walks the file system rooted at root, calling the visitor for each file and directory, and returns the root directory entry.
 func WalkDir(fsys fs.FS, root string, visitor FSVisitor) (model.FSEntry, error) {
+	if !fs.ValidPath(root) {
+		return nil, fmt.Errorf("invalid path: %s", root)
+	}
 	info, err := fs.Stat(fsys, root)
 	if err != nil {
 		return nil, fmt.Errorf("statting root: %w", err)
