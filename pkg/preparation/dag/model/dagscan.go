@@ -189,10 +189,11 @@ func (d *DirectoryDAGScan) ChildrenCompleted() error {
 }
 
 // NewFileDAGScan creates a new FileDAGScan with the given fsEntryID.
-func NewFileDAGScan(fsEntryID types.FSEntryID) (*FileDAGScan, error) {
+func NewFileDAGScan(fsEntryID types.FSEntryID, uploadID types.UploadID) (*FileDAGScan, error) {
 	fds := &FileDAGScan{
 		dagScan: dagScan{
 			fsEntryID: fsEntryID,
+			uploadID:  uploadID,
 			createdAt: time.Now(),
 			updatedAt: time.Now(),
 			state:     DAGScanStatePending,
@@ -205,10 +206,11 @@ func NewFileDAGScan(fsEntryID types.FSEntryID) (*FileDAGScan, error) {
 }
 
 // NewDirectoryDAGScan creates a new DirectoryDAGScan with the given fsEntryID.
-func NewDirectoryDAGScan(fsEntryID types.FSEntryID) (*DirectoryDAGScan, error) {
+func NewDirectoryDAGScan(fsEntryID types.FSEntryID, uploadID types.UploadID) (*DirectoryDAGScan, error) {
 	dds := &DirectoryDAGScan{
 		dagScan: dagScan{
 			fsEntryID: fsEntryID,
+			uploadID:  uploadID,
 			createdAt: time.Now(),
 			updatedAt: time.Now(),
 			state:     DAGScanStateAwaitingChildren,

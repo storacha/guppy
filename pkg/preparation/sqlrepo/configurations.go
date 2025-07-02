@@ -1,6 +1,7 @@
 package sqlrepo
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -13,8 +14,8 @@ import (
 var _ configurations.Repo = (*repo)(nil)
 
 // GetConfigurationByID retrieves a configuration by its unique ID from the repository.
-func (r *repo) GetConfigurationByID(configurationID types.ConfigurationID) (*configurationsmodel.Configuration, error) {
-	row := r.db.QueryRow(
+func (r *repo) GetConfigurationByID(ctx context.Context, configurationID types.ConfigurationID) (*configurationsmodel.Configuration, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT id, name, created_at, shard_size FROM configurations WHERE id = ?`, configurationID,
 	)
 	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
@@ -27,8 +28,8 @@ func (r *repo) GetConfigurationByID(configurationID types.ConfigurationID) (*con
 }
 
 // GetConfigurationByName retrieves a configuration by its name from the repository.
-func (r *repo) GetConfigurationByName(name string) (*configurationsmodel.Configuration, error) {
-	row := r.db.QueryRow(
+func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*configurationsmodel.Configuration, error) {
+	row := r.db.QueryRowContext(ctx,
 		`SELECT id, name, created_at, shard_size FROM configurations WHERE name = ?`, name,
 	)
 	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
@@ -41,12 +42,12 @@ func (r *repo) GetConfigurationByName(name string) (*configurationsmodel.Configu
 }
 
 // CreateConfiguration creates a new configuration in the repository with the given name and options.
-func (r *repo) CreateConfiguration(name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
+func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
 	configuration, err := configurationsmodel.NewConfiguration(name, options...)
 	if err != nil {
 		return nil, err
 	}
-	_, err = r.db.Exec(
+	_, err = r.db.ExecContext(ctx,
 		`INSERT INTO configurations (id, name, created_at, shard_size) VALUES (?, ?, ?, ?)`,
 		configuration.ID(), configuration.Name(), configuration.CreatedAt(), configuration.ShardSize(),
 	)
@@ -57,8 +58,8 @@ func (r *repo) CreateConfiguration(name string, options ...configurationsmodel.C
 }
 
 // DeleteConfiguration deletes a configuration from the repository.
-func (r *repo) DeleteConfiguration(configurationID types.ConfigurationID) error {
-	_, err := r.db.Exec(
+func (r *repo) DeleteConfiguration(ctx context.Context, configurationID types.ConfigurationID) error {
+	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configurations WHERE id = ?`,
 		configurationID,
 	)
@@ -74,8 +75,8 @@ func (r *repo) DeleteConfiguration(configurationID types.ConfigurationID) error 
 }
 
 // ListConfigurations lists all configurations in the repository.
-func (r *repo) ListConfigurations() ([]*configurationsmodel.Configuration, error) {
-	rows, err := r.db.Query(
+func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.Configuration, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, created_at, shard_size FROM configurations`,
 	)
 	if err != nil {
@@ -100,8 +101,8 @@ func (r *repo) ListConfigurations() ([]*configurationsmodel.Configuration, error
 }
 
 // AddSourceToConfiguration adds a source to a configuration in the repository.
-func (r *repo) AddSourceToConfiguration(configurationID types.ConfigurationID, sourceID types.SourceID) error {
-	_, err := r.db.Exec(
+func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID types.ConfigurationID, sourceID types.SourceID) error {
+	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO configuration_sources (configuration_id, source_id) VALUES (?, ?)`,
 		configurationID, sourceID,
 	)
@@ -109,35 +110,10 @@ func (r *repo) AddSourceToConfiguration(configurationID types.ConfigurationID, s
 }
 
 // RemoveSourceFromConfiguration removes a source from a configuration in the repository.
-func (r *repo) RemoveSourceFromConfiguration(configurationID types.ConfigurationID, sourceID types.SourceID) error {
-	_, err := r.db.Exec(
+func (r *repo) RemoveSourceFromConfiguration(ctx context.Context, configurationID types.ConfigurationID, sourceID types.SourceID) error {
+	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configuration_sources WHERE configuration_id = ? AND source_id = ?`,
 		configurationID, sourceID,
 	)
 	return err
-}
-
-// ListConfigurationSources lists all sources associated with a given configuration ID.
-func (r *repo) ListConfigurationSources(configurationID types.ConfigurationID) ([]types.SourceID, error) {
-	rows, err := r.db.Query(
-		`SELECT cs.source_id
-		FROM configuration_sources cs
-		WHERE cs.configuration_id = ?`, configurationID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var sources []types.SourceID
-	for rows.Next() {
-		var sourceID types.SourceID
-		if err := rows.Scan(&sourceID); err != nil {
-			return nil, err
-		}
-		sources = append(sources, sourceID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return sources, nil
 }

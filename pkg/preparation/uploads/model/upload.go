@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
@@ -53,9 +54,11 @@ type Upload struct {
 	configurationID types.ConfigurationID
 	sourceID        types.SourceID
 	createdAt       time.Time
-	updatedAt       time.Time   // The last time the upload was updated
-	state           UploadState // The current state of the upload
-	errorMessage    *string     // Optional error message if the upload fails
+	updatedAt       time.Time        // The last time the upload was updated
+	state           UploadState      // The current state of the upload
+	errorMessage    *string          // Optional error message if the upload fails
+	rootFSEntryID   *types.FSEntryID // The ID of the root file system entry associated with this upload, if any
+	rootCID         *cid.Cid         // The root CID of the upload, if applicable
 }
 
 // ID returns the unique identifier of the upload.
@@ -89,6 +92,17 @@ func (u *Upload) Error() error {
 		return nil
 	}
 	return fmt.Errorf("upload error: %s", *u.errorMessage)
+}
+
+func (u *Upload) HasRootFSEntryID() bool {
+	return u.rootFSEntryID != nil
+}
+
+func (u *Upload) RootFSEntryID() types.FSEntryID {
+	if u.rootFSEntryID == nil {
+		return uuid.Nil // Return an empty FSEntryID if rootFSEntryID is not set
+	}
+	return *u.rootFSEntryID
 }
 
 func (u *Upload) Fail(errorMessage string) error {
@@ -131,22 +145,24 @@ func (u *Upload) Start() error {
 	return nil
 }
 
-func (u *Upload) ScanComplete() error {
+func (u *Upload) ScanComplete(rootFSEntryID types.FSEntryID) error {
 	if u.state != UploadStateScanning {
 		return fmt.Errorf("cannot complete scan in state %s", u.state)
 	}
 	u.state = UploadStateGeneratingDAG
 	u.errorMessage = nil
+	u.rootFSEntryID = &rootFSEntryID
 	u.updatedAt = time.Now()
 	return nil
 }
 
-func (u *Upload) DAGGenerationComplete() error {
+func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 	if u.state != UploadStateGeneratingDAG {
 		return fmt.Errorf("cannot complete DAG generation in state %s", u.state)
 	}
 	u.state = UploadStateSharding
 	u.errorMessage = nil
+	u.rootCID = &rootCID
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -166,6 +182,8 @@ func (u *Upload) Restart() error {
 		return fmt.Errorf("cannot restart upload in state %s", u.state)
 	}
 	u.state = UploadStatePending
+	u.rootFSEntryID = nil // Reset root file system entry ID
+	u.rootCID = nil       // Reset root CID if applicable
 	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
@@ -191,6 +209,12 @@ func validateUpload(upload *Upload) error {
 	if upload.errorMessage != nil && upload.state != UploadStateFailed {
 		return fmt.Errorf("error message is set but upload state is not 'failed': %s", upload.state)
 	}
+	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateScanning) {
+		return fmt.Errorf("root file system entry ID is set but upload has not completed file system scan")
+	}
+	if upload.rootCID != nil && (upload.state == UploadStatePending || upload.state == UploadStateScanning || upload.state == UploadStateGeneratingDAG) {
+		return fmt.Errorf("root CID is set but upload has not completed file system scan")
+	}
 	if upload.updatedAt.IsZero() {
 		return types.ErrEmpty{"updated at"}
 	}
@@ -215,21 +239,21 @@ func NewUpload(configurationID types.ConfigurationID, sourceID types.SourceID) (
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id types.UploadID, configurationID types.ConfigurationID, sourceID types.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string) error
+type UploadWriter func(id types.UploadID, configurationID types.ConfigurationID, sourceID types.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
-	return writer(upload.id, upload.configurationID, upload.sourceID, upload.createdAt, upload.updatedAt, upload.state, upload.errorMessage)
+	return writer(upload.id, upload.configurationID, upload.sourceID, upload.createdAt, upload.updatedAt, upload.state, upload.errorMessage, upload.rootFSEntryID, upload.rootCID)
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string) error
+type UploadScanner func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **types.FSEntryID, rootCID **cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {
 	var upload Upload
 
-	if err := scanner(&upload.id, &upload.configurationID, &upload.sourceID, &upload.createdAt, &upload.updatedAt, &upload.state, &upload.errorMessage); err != nil {
+	if err := scanner(&upload.id, &upload.configurationID, &upload.sourceID, &upload.createdAt, &upload.updatedAt, &upload.state, &upload.errorMessage, &upload.rootFSEntryID, &upload.rootCID); err != nil {
 		return nil, err
 	}
 

@@ -35,6 +35,10 @@ type FileAccessorFn func(ctx context.Context, fsEntryID types.FSEntryID) (fs.Fil
 
 // UploadDAGScanWorker processes DAG scans for an upload until the context is canceled or the work channel is closed.
 func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
+	err := d.RestartScansForUpload(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -51,6 +55,25 @@ func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, u
 	}
 }
 
+// RestartScansForUpload restarts all cancelled or running DAG scans for the given upload ID.
+func (d DAGAPI) RestartScansForUpload(ctx context.Context, uploadID types.UploadID) error {
+	// restart all cancelled/running dag scans
+	restartableDagScans, err := d.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCancelled, model.DAGScanStateRunning)
+	if err != nil {
+		return fmt.Errorf("getting restartable dag scans for upload %s: %w", uploadID, err)
+	}
+	for _, dagScan := range restartableDagScans {
+		err := dagScan.Restart()
+		if err != nil {
+			return fmt.Errorf("restarting dag scan %s: %w", dagScan.FsEntryID(), err)
+		}
+		if err := d.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
+			return fmt.Errorf("updating restarted dag scan %s: %w", dagScan.FsEntryID(), err)
+		}
+	}
+	return nil
+}
+
 // RunDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (d DAGAPI) RunDagScansForUpload(ctx context.Context, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
 	for {
@@ -61,25 +84,37 @@ func (d DAGAPI) RunDagScansForUpload(ctx context.Context, uploadID types.UploadI
 		if len(dagScans) == 0 {
 			return nil // No pending or awaiting children scans found, exit the loop
 		}
+		executions := 0
 		for _, dagScan := range dagScans {
 			switch dagScan.State() {
 			case model.DAGScanStatePending:
-				if err := d.ExecuteDAGScan(ctx, dagScan, onScanTerminated, nodeCB); err != nil {
+				if err := d.ExecuteDAGScan(ctx, dagScan, nodeCB); err != nil {
 					return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 				}
+				executions++
 			case model.DAGScanStateAwaitingChildren:
-				if err := d.HandleAwaitingChildren(ctx, dagScan, onScanTerminated); err != nil {
+				if err := d.HandleAwaitingChildren(ctx, dagScan); err != nil {
 					return fmt.Errorf("handling awaiting children for dag scan %s: %w", dagScan.FsEntryID(), err)
+				}
+				// if the scan is now in a state where it can be executed, execute it
+				if dagScan.State() == model.DAGScanStatePending {
+					if err := d.ExecuteDAGScan(ctx, dagScan, nodeCB); err != nil {
+						return fmt.Errorf("executing dag scan %s after handling awaiting children: %w", dagScan.FsEntryID(), err)
+					}
+					executions++
 				}
 			default:
 				return fmt.Errorf("unexpected dag scan state %s for scan %s", dagScan.State(), dagScan.FsEntryID())
 			}
 		}
+		if executions == 0 {
+			return nil // No scans executed, only awaiting children handled and no pending scans left
+		}
 	}
 }
 
 // ExecuteDAGScan executes a dag scan on the given fs entry, creating a unix fs dag for the given file or directory.
-func (d DAGAPI) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
+func (d DAGAPI) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) error {
 	err := dagScan.Start()
 	if err != nil {
 		return fmt.Errorf("starting scan: %w", err)
@@ -106,9 +141,6 @@ func (d DAGAPI) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, onSca
 	// Update the scan in the repository after completion or failure.
 	if err := d.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
 		return fmt.Errorf("updating scan after fail: %w", err)
-	}
-	if err := onScanTerminated(dagScan.FsEntryID(), dagScan.Error()); err != nil {
-		return fmt.Errorf("on scan terminated callback: %w", err)
 	}
 	return nil
 }
@@ -151,7 +183,7 @@ func (d DAGAPI) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Dire
 }
 
 // HandleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
-func (d DAGAPI) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGScan, onScanTerminated func(types.FSEntryID, error) error) error {
+func (d DAGAPI) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGScan) error {
 	if dagScan.State() != model.DAGScanStateAwaitingChildren {
 		return fmt.Errorf("DAG scan is not in awaiting children state: %s", dagScan.State())
 	}
@@ -172,9 +204,6 @@ func (d DAGAPI) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGSca
 				}
 				if err := d.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
 					return fmt.Errorf("updating scan after failure: %w", err)
-				}
-				if err := onScanTerminated(dagScan.FsEntryID(), dagScan.Error()); err != nil {
-					return fmt.Errorf("on scan terminated callback for scan: %w", err)
 				}
 				return nil
 			}
