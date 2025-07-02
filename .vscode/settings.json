@@ -1,0 +1,6 @@
+{
+  "gopls": {
+    "build.buildFlags": ["-tags=wip"],
+    "importShortcut": "Definition",
+  }
+}

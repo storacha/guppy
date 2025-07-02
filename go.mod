@@ -4,6 +4,7 @@ go 1.24.4
 
 require (
 	github.com/briandowns/spinner v1.23.2
+	github.com/ipfs/go-bitfield v1.1.0
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/ipld/go-ipld-prime v0.21.1-0.20240917223228-6148356a4c2e
@@ -21,7 +22,6 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ipfs/boxo v0.30.0 // indirect
-	github.com/ipfs/go-bitfield v1.1.0 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

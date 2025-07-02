@@ -26,6 +26,7 @@ type RunNewScanFn func(ctx context.Context, uploadID types.UploadID, fsEntryCb f
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
 func (u Uploads) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*model.Upload, error) {
+	log.Debugf("Creating uploads for configuration %s", configurationID)
 	sources, err := u.Repo.ListConfigurationSources(ctx, configurationID)
 	if err != nil {
 		return nil, err
@@ -35,6 +36,7 @@ func (u Uploads) CreateUploads(ctx context.Context, configurationID types.Config
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Created %d uploads for configuration %s", len(uploads), configurationID)
 	return uploads, nil
 }
 
@@ -64,6 +66,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 		}
 		switch upload.State() {
 		case model.UploadStatePending:
+			// TK: Persist state?
 			err := upload.Start()
 			if err != nil {
 				return fmt.Errorf("starting upload: %w", err)
