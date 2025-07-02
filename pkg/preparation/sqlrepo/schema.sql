@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS uploads (
       'uploading',
       'completed',
       'failed',
-      'cancelled'
+      'canceled'
     )
   ),
   error_message TEXT,

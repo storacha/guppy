@@ -112,7 +112,7 @@ func TestExecuteScan(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		scan, scansProcess := newScanAndProcess(t)
 		scansProcess.WalkerFn = func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
-			cancel() // Cancel the context to simulate a cancellation
+			cancel() // Cancel the context to simulate a cancelation
 			return nil, ctx.Err()
 		}
 

@@ -20,8 +20,8 @@ const (
 	ScanStateCompleted ScanState = "completed"
 	// ScanStateFailed indicates that the scan has failed.
 	ScanStateFailed ScanState = "failed"
-	// ScanStateCanceled indicates that the scan has been cancelled.
-	ScanStateCanceled ScanState = "cancelled"
+	// ScanStateCanceled indicates that the scan has been canceled.
+	ScanStateCanceled ScanState = "canceled"
 )
 
 func validScanState(state ScanState) bool {

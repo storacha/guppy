@@ -141,14 +141,14 @@ func TestPollClaim(t *testing.T) {
 
 		claimedDels, err := result.Unwrap(<-resultChan)
 
-		require.Empty(t, claimedDels, "expected no delegations to be claimed due to context cancellation")
+		require.Empty(t, claimedDels, "expected no delegations to be claimed due to context cancelation")
 		require.ErrorContains(t, err, "Something went wrong!", "expected error from PollClaim")
 
 		_, ok := <-resultChan
-		require.False(t, ok, "expected result channel to be closed after context cancellation")
+		require.False(t, ok, "expected result channel to be closed after context cancelation")
 	})
 
-	t.Run("respects the context's cancellation", func(t *testing.T) {
+	t.Run("respects the context's cancelation", func(t *testing.T) {
 		// A channel that will never tick
 		tickChan := make(chan time.Time)
 		ctx, cancel := context.WithCancel(testContext(t))
@@ -163,10 +163,10 @@ func TestPollClaim(t *testing.T) {
 
 		claimedDels, err := result.Unwrap(<-resultChan)
 
-		require.Empty(t, claimedDels, "expected no delegations to be claimed due to context cancellation")
-		require.ErrorContains(t, err, "context canceled", "expected context cancellation error from PollClaim")
+		require.Empty(t, claimedDels, "expected no delegations to be claimed due to context cancelation")
+		require.ErrorContains(t, err, "context canceled", "expected context cancelation error from PollClaim")
 
 		_, ok := <-resultChan
-		require.False(t, ok, "expected result channel to be closed after context cancellation")
+		require.False(t, ok, "expected result channel to be closed after context cancelation")
 	})
 }

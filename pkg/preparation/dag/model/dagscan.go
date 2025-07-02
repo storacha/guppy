@@ -23,13 +23,13 @@ const (
 	DAGScanStateCompleted DAGScanState = "completed"
 	// DAGScanStateFailed indicates that the file system entry has failed.
 	DAGScanStateFailed DAGScanState = "failed"
-	// DAGScanStateCancelled indicates that the file system entry has been cancelled.
-	DAGScanStateCancelled DAGScanState = "cancelled"
+	// DAGScanStateCanceled indicates that the file system entry has been canceled.
+	DAGScanStateCanceled DAGScanState = "canceled"
 )
 
 func validDAGScanState(state DAGScanState) bool {
 	switch state {
-	case DAGScanStateAwaitingChildren, DAGScanStatePending, DAGScanStateRunning, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCancelled:
+	case DAGScanStateAwaitingChildren, DAGScanStatePending, DAGScanStateRunning, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
 		return true
 	default:
 		return false
@@ -37,7 +37,7 @@ func validDAGScanState(state DAGScanState) bool {
 }
 
 func TerminatedState(state DAGScanState) bool {
-	return state == DAGScanStateCompleted || state == DAGScanStateFailed || state == DAGScanStateCancelled
+	return state == DAGScanStateCompleted || state == DAGScanStateFailed || state == DAGScanStateCanceled
 }
 
 type DAGScan interface {
@@ -141,7 +141,7 @@ func (d *dagScan) Cancel() error {
 	if TerminatedState(d.state) {
 		return fmt.Errorf("cannot cancel dag scan in state %s", d.state)
 	}
-	d.state = DAGScanStateCancelled
+	d.state = DAGScanStateCanceled
 	d.errorMessage = nil
 	d.updatedAt = time.Now()
 	return nil
@@ -158,7 +158,7 @@ func (d *dagScan) Start() error {
 }
 
 func (d *dagScan) Restart() error {
-	if d.state != DAGScanStateRunning && d.state != DAGScanStateCancelled {
+	if d.state != DAGScanStateRunning && d.state != DAGScanStateCanceled {
 		return fmt.Errorf("cannot restart dag scan in state %s", d.state)
 	}
 	d.state = DAGScanStatePending

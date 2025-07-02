@@ -149,7 +149,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 			}
 		case model.UploadStateFailed:
 			return fmt.Errorf("upload failed: %w", upload.Error())
-		case model.UploadStateCancelled:
+		case model.UploadStateCanceled:
 			return context.Canceled
 		case model.UploadStateCompleted:
 			// upload is complete, no further action needed

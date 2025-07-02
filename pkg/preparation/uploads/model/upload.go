@@ -27,13 +27,13 @@ const (
 	UploadStateCompleted UploadState = "completed"
 	// UploadStateFailed indicates that the upload has failed.
 	UploadStateFailed UploadState = "failed"
-	// UploadStateCancelled indicates that the upload has been cancelled.
-	UploadStateCancelled UploadState = "cancelled"
+	// UploadStateCanceled indicates that the upload has been canceled.
+	UploadStateCanceled UploadState = "canceled"
 )
 
 func validUploadState(state UploadState) bool {
 	switch state {
-	case UploadStatePending, UploadStateScanning, UploadStateGeneratingDAG, UploadStateSharding, UploadStateUploading, UploadStateCompleted, UploadStateFailed, UploadStateCancelled:
+	case UploadStatePending, UploadStateScanning, UploadStateGeneratingDAG, UploadStateSharding, UploadStateUploading, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
 		return true
 	default:
 		return false
@@ -41,11 +41,11 @@ func validUploadState(state UploadState) bool {
 }
 
 func TerminatedState(state UploadState) bool {
-	return state == UploadStateCompleted || state == UploadStateFailed || state == UploadStateCancelled
+	return state == UploadStateCompleted || state == UploadStateFailed || state == UploadStateCanceled
 }
 
 func RestartableState(state UploadState) bool {
-	return state == UploadStateScanning || state == UploadStateGeneratingDAG || state == UploadStateSharding || state == UploadStateUploading || state == UploadStateCancelled
+	return state == UploadStateScanning || state == UploadStateGeneratingDAG || state == UploadStateSharding || state == UploadStateUploading || state == UploadStateCanceled
 }
 
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
@@ -129,7 +129,7 @@ func (u *Upload) Cancel() error {
 	if TerminatedState(u.state) {
 		return fmt.Errorf("cannot cancel upload in state %s", u.state)
 	}
-	u.state = UploadStateCancelled
+	u.state = UploadStateCanceled
 	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil

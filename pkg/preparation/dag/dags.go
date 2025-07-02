@@ -55,10 +55,10 @@ func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, u
 	}
 }
 
-// RestartScansForUpload restarts all cancelled or running DAG scans for the given upload ID.
+// RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
 func (d DAGAPI) RestartScansForUpload(ctx context.Context, uploadID types.UploadID) error {
-	// restart all cancelled/running dag scans
-	restartableDagScans, err := d.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCancelled, model.DAGScanStateRunning)
+	// restart all canceled/running dag scans
+	restartableDagScans, err := d.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCanceled, model.DAGScanStateRunning)
 	if err != nil {
 		return fmt.Errorf("getting restartable dag scans for upload %s: %w", uploadID, err)
 	}
