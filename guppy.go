@@ -19,7 +19,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var log = logging.Logger("storoku/main")
+var log = logging.Logger("guppy/main")
 
 func main() {
 	app := &cli.App{
