@@ -67,7 +67,7 @@ func WithShardSize(shardSize uint64) ConfigurationOption {
 
 // validateConfiguration checks if the configuration is valid.
 func validateConfiguration(u *Configuration) (*Configuration, error) {
-	if u.id == uuid.Nil {
+	if u.id == types.ConfigurationID(uuid.Nil) {
 		return nil, types.ErrEmpty{Field: "id"}
 	}
 	if u.name == "" {
@@ -85,7 +85,7 @@ func validateConfiguration(u *Configuration) (*Configuration, error) {
 // NewConfiguration creates a new Configuration instance with the given name and options.
 func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration, error) {
 	u := &Configuration{
-		id:        uuid.New(),
+		id:        types.ConfigurationID(uuid.New()),
 		name:      name,
 		shardSize: DefaultShardSize, // default shard size
 		createdAt: time.Now().UTC().Truncate(time.Second),

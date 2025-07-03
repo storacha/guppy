@@ -69,7 +69,7 @@ type dagScan struct {
 
 // validation conditions -- should not be callable externally, all scans outside this module MUST be valid
 func validateDAGScan(d *dagScan) (*dagScan, error) {
-	if d.fsEntryID == uuid.Nil {
+	if d.fsEntryID == types.FSEntryID(uuid.Nil) {
 		return nil, types.ErrEmpty{"fsEntryID"}
 	}
 	if !validDAGScanState(d.state) {
