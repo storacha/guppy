@@ -72,7 +72,7 @@ type Directory struct {
 func (d *Directory) isFsEntry() {}
 
 func validateFsEntry(f *fsEntry) error {
-	if f.id == uuid.Nil {
+	if f.id == types.FSEntryID(uuid.Nil) {
 		return types.ErrEmpty{"id"}
 	}
 	if f.path == "" {
@@ -84,7 +84,7 @@ func validateFsEntry(f *fsEntry) error {
 	if f.checksum == nil {
 		return types.ErrEmpty{"checksum"}
 	}
-	if f.sourceID == uuid.Nil {
+	if f.sourceID == types.SourceID(uuid.Nil) {
 		return types.ErrEmpty{"sourceID"}
 	}
 	return nil
@@ -93,7 +93,7 @@ func validateFsEntry(f *fsEntry) error {
 func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) (*File, error) {
 	file := &File{
 		fsEntry: fsEntry{
-			id:           uuid.New(),
+			id:           types.FSEntryID(uuid.New()),
 			path:         path,
 			lastModified: lastModified,
 			mode:         mode,
@@ -111,7 +111,7 @@ func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64,
 func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID types.SourceID) (*Directory, error) {
 	directory := &Directory{
 		fsEntry: fsEntry{
-			id:           uuid.New(),
+			id:           types.FSEntryID(uuid.New()),
 			path:         path,
 			lastModified: lastModified,
 			mode:         mode,

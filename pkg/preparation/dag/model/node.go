@@ -198,7 +198,7 @@ func validateRawNode(node *RawNode) error {
 	if node.cid.Type() != cid.Raw {
 		return fmt.Errorf("invalid CID type: expected Raw, got %x", node.cid.Type())
 	}
-	if node.sourceID == uuid.Nil {
+	if node.sourceID == types.SourceID(uuid.Nil) {
 		return types.ErrEmpty{Field: "sourceID"}
 	}
 	return nil
@@ -228,7 +228,7 @@ type NodeWriter func(cid cid.Cid, size uint64, ufsdata []byte, path string, sour
 func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 	switch n := node.(type) {
 	case *UnixFSNode:
-		return writer(n.cid, n.size, n.ufsdata, "", uuid.Nil, 0)
+		return writer(n.cid, n.size, n.ufsdata, "", types.SourceID(uuid.Nil), 0)
 	case *RawNode:
 		return writer(n.cid, n.size, nil, n.path, n.sourceID, n.offset)
 	default:
