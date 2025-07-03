@@ -34,7 +34,7 @@ type DAGAPI struct {
 type FileAccessorFn func(ctx context.Context, fsEntryID types.FSEntryID) (fs.File, types.SourceID, string, error)
 
 // UploadDAGScanWorker processes DAG scans for an upload until the context is canceled or the work channel is closed.
-func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
+func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	err := d.RestartScansForUpload(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
@@ -48,7 +48,7 @@ func (d DAGAPI) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, u
 				return nil // Channel closed, exit the loop
 			}
 			// Run all pending and awaiting children DAG scans for the given upload.
-			if err := d.RunDagScansForUpload(ctx, uploadID, onScanTerminated, nodeCB); err != nil {
+			if err := d.RunDagScansForUpload(ctx, uploadID, nodeCB); err != nil {
 				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
 			}
 		}
@@ -75,7 +75,7 @@ func (d DAGAPI) RestartScansForUpload(ctx context.Context, uploadID types.Upload
 }
 
 // RunDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
-func (d DAGAPI) RunDagScansForUpload(ctx context.Context, uploadID types.UploadID, onScanTerminated func(types.FSEntryID, error) error, nodeCB func(node model.Node, data []byte) error) error {
+func (d DAGAPI) RunDagScansForUpload(ctx context.Context, uploadID types.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
 		dagScans, err := d.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending, model.DAGScanStateAwaitingChildren)
 		if err != nil {

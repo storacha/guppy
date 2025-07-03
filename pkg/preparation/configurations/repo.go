@@ -7,6 +7,9 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
+// TK: Note that none of these are used by the API, or indeed by anything but
+// the CLI code itself.
+
 type Repo interface {
 	// GetConfigurationByID retrieves a configuration by its unique ID.
 	GetConfigurationByID(ctx context.Context, configID types.ConfigurationID) (*model.Configuration, error)

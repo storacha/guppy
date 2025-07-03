@@ -145,9 +145,9 @@ func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID types.FSEntryID, isD
 // ListConfigurationSources lists all sources associated with a given configuration ID.
 func (r *repo) ListConfigurationSources(ctx context.Context, configurationID types.ConfigurationID) ([]types.SourceID, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT cs.source_id
+		`SELECT cs.source_id, cs.configuration_id
 		FROM configuration_sources cs
-		WHERE cs.configuration_id = ?`, configurationID,
+		--WHERE cs.configuration_id = ?`, configurationID[:],
 	)
 	if err != nil {
 		return nil, err
@@ -156,13 +156,16 @@ func (r *repo) ListConfigurationSources(ctx context.Context, configurationID typ
 	var sources []types.SourceID
 	for rows.Next() {
 		var sourceID types.SourceID
-		if err := rows.Scan(&sourceID); err != nil {
+		var configID types.ConfigurationID
+		if err := rows.Scan(&sourceID, &configID); err != nil {
 			return nil, err
 		}
+		fmt.Printf("sourceID: %s, configID: %s\n", sourceID, configID)
 		sources = append(sources, sourceID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	fmt.Printf("sources: %v\n", sources)
 	return sources, nil
 }
