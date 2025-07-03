@@ -88,7 +88,7 @@ func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration,
 		id:        uuid.New(),
 		name:      name,
 		shardSize: DefaultShardSize, // default shard size
-		createdAt: time.Now(),
+		createdAt: time.Now().UTC().Truncate(time.Second),
 	}
 	for _, opt := range opts {
 		if err := opt(u); err != nil {
