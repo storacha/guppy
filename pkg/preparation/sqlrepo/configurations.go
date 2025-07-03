@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/configurations"
@@ -13,48 +14,77 @@ import (
 
 var _ configurations.Repo = (*repo)(nil)
 
+// CreateConfiguration creates a new configuration in the repository with the given name and options.
+func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
+	configuration, err := configurationsmodel.NewConfiguration(name, options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create configuration model: %w", err)
+	}
+
+	// Grab a copy of the ID to get a slice of, to appease the DB driver.
+	id := configuration.ID()
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO configurations (
+			id,
+			name,
+			created_at,
+			shard_size
+		) VALUES (?, ?, ?, ?)`,
+		id[:],
+		configuration.Name(),
+		configuration.CreatedAt().Unix(),
+		configuration.ShardSize(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert configuration into database: %w", err)
+	}
+	return configuration, nil
+}
+
 // GetConfigurationByID retrieves a configuration by its unique ID from the repository.
 func (r *repo) GetConfigurationByID(ctx context.Context, configurationID types.ConfigurationID) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, created_at, shard_size FROM configurations WHERE id = ?`, configurationID,
+		`SELECT
+			id,
+			name,
+			created_at,
+			shard_size
+		FROM configurations WHERE id = ?`, configurationID[:],
 	)
-	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
-		return row.Scan(id, name, createdAt, shardSize)
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	return configuration, err
+	return r.getConfigurationFromRow(row)
 }
 
 // GetConfigurationByName retrieves a configuration by its name from the repository.
 func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, created_at, shard_size FROM configurations WHERE name = ?`, name,
+		`SELECT
+			id,
+			name,
+			created_at,
+			shard_size
+		FROM configurations WHERE name = ?`, name,
 	)
-	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
-		return row.Scan(id, name, createdAt, shardSize)
+	return r.getConfigurationFromRow(row)
+}
+
+func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Configuration, error) {
+	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(
+		id *types.ConfigurationID,
+		name *string,
+		createdAt *time.Time,
+		shardSize *uint64,
+	) error {
+		return row.Scan(
+			id,
+			name,
+			timestampScanner(createdAt),
+			shardSize,
+		)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return configuration, err
-}
-
-// CreateConfiguration creates a new configuration in the repository with the given name and options.
-func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
-	configuration, err := configurationsmodel.NewConfiguration(name, options...)
-	if err != nil {
-		return nil, err
-	}
-	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO configurations (id, name, created_at, shard_size) VALUES (?, ?, ?, ?)`,
-		configuration.ID(), configuration.Name(), configuration.CreatedAt(), configuration.ShardSize(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return configuration, nil
 }
 
 // DeleteConfiguration deletes a configuration from the repository.
