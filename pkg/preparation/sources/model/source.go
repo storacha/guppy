@@ -66,7 +66,7 @@ func (s *Source) ConnectionParams() ConnectionParams {
 }
 
 func validateSource(s *Source) (*Source, error) {
-	if s.id == uuid.Nil {
+	if s.id == types.SourceID(uuid.Nil) {
 		return nil, types.ErrEmpty{Field: "id"}
 	}
 	if s.name == "" {
@@ -83,7 +83,7 @@ type SourceOption func(*Source) error
 // Returns the created Source or an error if any option fails or validation does not pass.
 func NewSource(name string, path string, opts ...SourceOption) (*Source, error) {
 	src := &Source{
-		id:        uuid.New(),
+		id:        types.SourceID(uuid.New()),
 		name:      name,
 		createdAt: time.Now().UTC().Truncate(time.Second),
 		updatedAt: time.Now().UTC().Truncate(time.Second),

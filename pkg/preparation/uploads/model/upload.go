@@ -100,7 +100,7 @@ func (u *Upload) HasRootFSEntryID() bool {
 
 func (u *Upload) RootFSEntryID() types.FSEntryID {
 	if u.rootFSEntryID == nil {
-		return uuid.Nil // Return an empty FSEntryID if rootFSEntryID is not set
+		return types.FSEntryID(uuid.Nil) // Return an empty FSEntryID if rootFSEntryID is not set
 	}
 	return *u.rootFSEntryID
 }
@@ -191,13 +191,13 @@ func (u *Upload) Restart() error {
 
 func validateUpload(upload *Upload) error {
 
-	if upload.id == uuid.Nil {
+	if upload.id == types.UploadID(uuid.Nil) {
 		return types.ErrEmpty{"upload ID"}
 	}
-	if upload.configurationID == uuid.Nil {
+	if upload.configurationID == types.ConfigurationID(uuid.Nil) {
 		return types.ErrEmpty{"configuration ID"}
 	}
-	if upload.sourceID == uuid.Nil {
+	if upload.sourceID == types.SourceID(uuid.Nil) {
 		return types.ErrEmpty{"source ID"}
 	}
 	if upload.createdAt.IsZero() {
@@ -224,7 +224,7 @@ func validateUpload(upload *Upload) error {
 // NewUpload creates a new Upload instance with the given parameters.
 func NewUpload(configurationID types.ConfigurationID, sourceID types.SourceID) (*Upload, error) {
 	upload := &Upload{
-		id:              uuid.New(),
+		id:              types.UploadID(uuid.New()),
 		configurationID: configurationID,
 		sourceID:        sourceID,
 		createdAt:       time.Now(),
@@ -246,7 +246,8 @@ func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
 	return writer(upload.id, upload.configurationID, upload.sourceID, upload.createdAt, upload.updatedAt, upload.state, upload.errorMessage, upload.rootFSEntryID, upload.rootCID)
 }
 
-// UploadScanner is a function type that defines the signature for scanning uploads from a database row
+// UploadScanner is a function type that defines the signature for scanning
+// uploads from a database row
 type UploadScanner func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **types.FSEntryID, rootCID **cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.

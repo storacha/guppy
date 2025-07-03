@@ -86,7 +86,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 				return fmt.Errorf("running new scan: %w", err)
 			}
 			// check if scan completed successfully
-			if fsEntryID != uuid.Nil {
+			if fsEntryID != types.FSEntryID(uuid.Nil) {
 				close(e.dagWork) // close the work channel to signal completion
 				if err := upload.ScanComplete(fsEntryID); err != nil {
 					return fmt.Errorf("completing scan: %w", err)

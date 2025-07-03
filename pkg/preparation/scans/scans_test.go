@@ -28,8 +28,8 @@ func (m repoErrOnUpdateScan) UpdateScan(ctx context.Context, scan *model.Scan) e
 var _ scans.Repo = (*repoErrOnUpdateScan)(nil)
 
 func newScanAndProcess(t *testing.T) (*model.Scan, scans.Scans) {
-	uploadID := uuid.New()
-	sourceID := uuid.New()
+	uploadID := types.UploadID(uuid.New())
+	sourceID := types.SourceID(uuid.New())
 	scan, err := model.NewScan(uploadID)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create new scan: %v", err))

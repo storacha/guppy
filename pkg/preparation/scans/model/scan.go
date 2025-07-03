@@ -46,10 +46,10 @@ type Scan struct {
 
 // validation conditions -- should not be callable externally, all scans outside this module MUST be valid
 func validateScan(s *Scan) (*Scan, error) {
-	if s.id == uuid.Nil {
+	if s.id == types.ScanID(uuid.Nil) {
 		return nil, types.ErrEmpty{"id"}
 	}
-	if s.uploadID == uuid.Nil {
+	if s.uploadID == types.UploadID(uuid.Nil) {
 		return nil, types.ErrEmpty{"update id"}
 	}
 	if !validScanState(s.state) {
@@ -98,7 +98,7 @@ func (s *Scan) HasRootID() bool {
 
 func (s *Scan) RootID() types.FSEntryID {
 	if s.rootID == nil {
-		return uuid.Nil // Return an empty FSEntryID if rootID is not set
+		return types.FSEntryID(uuid.Nil) // Return an empty FSEntryID if rootID is not set
 	}
 	return *s.rootID
 }
@@ -146,7 +146,7 @@ func (s *Scan) Start() error {
 
 func NewScan(uploadID types.UploadID) (*Scan, error) {
 	scan := &Scan{
-		id:        uuid.New(),
+		id:        types.ScanID(uuid.New()),
 		uploadID:  uploadID,
 		state:     ScanStatePending,
 		createdAt: time.Now().UTC().Truncate(time.Second),
