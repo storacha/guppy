@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS sources (
 CREATE TABLE IF NOT EXISTS configurations (
   id BLOB PRIMARY KEY,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
   shard_size INTEGER NOT NULL
 ) STRICT;
 
