@@ -1,4 +1,5 @@
-package util
+// Package cmdutil provides utility functions specifically for the Guppy CLI.
+package cmdutil
 
 import (
 	"errors"

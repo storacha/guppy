@@ -1,4 +1,4 @@
-package main
+package upload
 
 import (
 	"context"
@@ -16,23 +16,26 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/cmd/util"
+	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/car/sharding"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/urfave/cli/v2"
 )
 
-// upload handles file and directory uploads to Storacha
-func upload(cCtx *cli.Context) error {
-	space := util.MustParseDID(cCtx.String("space"))
+// Upload handles file and directory uploads to Storacha.
+// Note: This doesn't really belong in `internal` in the long run. This was
+// pulled out of `main` without much refactoring, as uploading is still
+// evolving. It should end up implemented within `pkg` before long.
+func Upload(cCtx *cli.Context) error {
+	space := cmdutil.MustParseDID(cCtx.String("space"))
 	proofs := []delegation.Delegation{}
 	if cCtx.String("proof") != "" {
-		proof := util.MustGetProof(cCtx.String("proof"))
+		proof := cmdutil.MustGetProof(cCtx.String("proof"))
 		proofs = append(proofs, proof)
 	}
-	receiptsURL := util.MustGetReceiptsURL()
+	receiptsURL := cmdutil.MustGetReceiptsURL()
 
-	c := util.MustGetClient(proofs...)
+	c := cmdutil.MustGetClient(proofs...)
 
 	// Handle options
 	isCAR := cCtx.String("car") != ""

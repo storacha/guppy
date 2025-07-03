@@ -13,7 +13,8 @@ import (
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
-	"github.com/storacha/guppy/cmd/util"
+	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/internal/upload"
 	"github.com/storacha/guppy/pkg/didmailto"
 	"github.com/urfave/cli/v2"
 )
@@ -92,7 +93,7 @@ func main() {
 						Usage: "Shard uploads into CAR files of approximately this size in bytes.",
 					},
 				},
-				Action: upload,
+				Action: upload.Upload,
 			},
 			{
 				Name:    "ls",
@@ -147,7 +148,7 @@ func main() {
 }
 
 func whoami(cCtx *cli.Context) error {
-	c := util.MustGetClient()
+	c := cmdutil.MustGetClient()
 	fmt.Println(c.DID())
 	return nil
 }
@@ -163,7 +164,7 @@ func login(cCtx *cli.Context) error {
 		return fmt.Errorf("invalid email address: %w", err)
 	}
 
-	c := util.MustGetClient()
+	c := cmdutil.MustGetClient()
 
 	authOk, err := c.RequestAccess(cCtx.Context, accountDid.String())
 	if err != nil {
@@ -193,20 +194,20 @@ func login(cCtx *cli.Context) error {
 }
 
 func reset(cCtx *cli.Context) error {
-	c := util.MustGetClient()
+	c := cmdutil.MustGetClient()
 	return c.Reset()
 }
 
 func ls(cCtx *cli.Context) error {
-	space := util.MustParseDID(cCtx.String("space"))
+	space := cmdutil.MustParseDID(cCtx.String("space"))
 
 	proofs := []delegation.Delegation{}
 	if cCtx.String("proof") != "" {
-		proof := util.MustGetProof(cCtx.String("proof"))
+		proof := cmdutil.MustGetProof(cCtx.String("proof"))
 		proofs = append(proofs, proof)
 	}
 
-	c := util.MustGetClient(proofs...)
+	c := cmdutil.MustGetClient(proofs...)
 
 	listOk, err := c.UploadList(
 		cCtx.Context,
