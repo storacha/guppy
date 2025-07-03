@@ -85,8 +85,8 @@ func NewSource(name string, path string, opts ...SourceOption) (*Source, error) 
 	src := &Source{
 		id:        uuid.New(),
 		name:      name,
-		createdAt: time.Now(),
-		updatedAt: time.Now(),
+		createdAt: time.Now().UTC().Truncate(time.Second),
+		updatedAt: time.Now().UTC().Truncate(time.Second),
 		path:      path,
 		kind:      LocalSourceKind,
 	}
