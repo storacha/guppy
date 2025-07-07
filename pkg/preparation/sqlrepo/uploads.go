@@ -147,7 +147,7 @@ func (r *repo) ListConfigurationSources(ctx context.Context, configurationID typ
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT cs.source_id
 		FROM configuration_sources cs
-		WHERE cs.configuration_id = ?`, configurationID,
+		WHERE cs.configuration_id = ?`, configurationID[:],
 	)
 	if err != nil {
 		return nil, err
