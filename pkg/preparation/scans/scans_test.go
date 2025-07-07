@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/spf13/afero"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
@@ -52,6 +54,37 @@ func newScanAndProcess(t *testing.T) (*model.Scan, scans.Scans) {
 }
 
 func TestExecuteScan(t *testing.T) {
+	t.Run("with a successful scan", func(t *testing.T) {
+		memFS := afero.NewMemMapFs()
+		memFS.MkdirAll("dir1/dir2", 0755)
+		afero.WriteFile(memFS, "a", []byte("file a"), 0644)
+		afero.WriteFile(memFS, "dir1/b", []byte("file b"), 0644)
+		afero.WriteFile(memFS, "dir1/c", []byte("file c"), 0644)
+		afero.WriteFile(memFS, "dir1/dir2/d", []byte("file d"), 0644)
+
+		// Set the last modified time for the files; Afero's in-memory FS doesn't do
+		// that automatically on creation, we expect it to be present.
+		for _, path := range []string{".", "a", "dir1", "dir1/b", "dir1/c", "dir1/dir2", "dir1/dir2/d"} {
+			err := memFS.Chtimes(path, time.Now(), time.Now())
+			require.NoError(t, err)
+		}
+
+		scan, scansProcess := newScanAndProcess(t)
+		scansProcess.SourceAccessor = func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
+			// Use the in-memory filesystem for testing
+			return afero.NewIOFS(memFS), nil
+		}
+		scansProcess.WalkerFn = walker.WalkDir
+
+		err := scansProcess.ExecuteScan(t.Context(), scan, func(entry model.FSEntry) error {
+			return nil
+		})
+
+		require.NoError(t, err)
+		require.NoError(t, scan.Error())
+		require.Equal(t, model.ScanStateCompleted, scan.State())
+	})
+
 	t.Run("with an error updating the scan", func(t *testing.T) {
 		scan, scansProcess := newScanAndProcess(t)
 		scansProcess.Repo = repoErrOnUpdateScan{}
