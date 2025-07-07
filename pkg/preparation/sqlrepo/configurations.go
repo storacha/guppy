@@ -134,9 +134,12 @@ func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.C
 func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID types.ConfigurationID, sourceID types.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO configuration_sources (configuration_id, source_id) VALUES (?, ?)`,
-		configurationID, sourceID,
+		configurationID[:], sourceID[:],
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to add source to configuration: %w", err)
+	}
+	return nil
 }
 
 // RemoveSourceFromConfiguration removes a source from a configuration in the repository.
@@ -145,5 +148,8 @@ func (r *repo) RemoveSourceFromConfiguration(ctx context.Context, configurationI
 		`DELETE FROM configuration_sources WHERE configuration_id = ? AND source_id = ?`,
 		configurationID, sourceID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to remove source from configuration: %w", err)
+	}
+	return nil
 }
