@@ -26,15 +26,19 @@ type RunNewScanFn func(ctx context.Context, uploadID types.UploadID, fsEntryCb f
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
 func (u Uploads) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*model.Upload, error) {
+	log.Debugf("Creating uploads for configuration %s", configurationID)
 	sources, err := u.Repo.ListConfigurationSources(ctx, configurationID)
 	if err != nil {
 		return nil, err
 	}
 
+	log.Debugf("Found %d sources for configuration %s", len(sources), configurationID)
+
 	uploads, err := u.Repo.CreateUploads(ctx, configurationID, sources)
 	if err != nil {
 		return nil, err
 	}
+	log.Debugf("Created %d uploads for configuration %s", len(uploads), configurationID)
 	return uploads, nil
 }
 
@@ -51,6 +55,7 @@ func (u Uploads) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*m
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
 func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...ExecutionOption) error {
 	e := setupExecutor(ctx, upload, u, opts...)
+	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
 	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
 		e.start()
 	}
@@ -64,6 +69,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 		}
 		switch upload.State() {
 		case model.UploadStatePending:
+			// TK: Persist state?
 			err := upload.Start()
 			if err != nil {
 				return fmt.Errorf("starting upload: %w", err)
@@ -205,6 +211,7 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u Uploads,
 }
 
 func (e *executor) start() {
+	log.Debugf("Starting upload execution for upload %s in state %s", e.upload.ID(), e.upload.State())
 	// start the workers for all states not yet handled
 	if e.upload.State() == model.UploadStateScanning {
 		e.runDAGScanWorker()
@@ -218,6 +225,7 @@ func (e *executor) start() {
 }
 
 func (e *executor) runDAGScanWorker() {
+	log.Debugf("Starting DAG scan worker for upload %s", e.upload.ID())
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -229,6 +237,7 @@ func (e *executor) runDAGScanWorker() {
 }
 
 func (e *executor) runShardsWorker() {
+	log.Debugf("Starting shards worker for upload %s", e.upload.ID())
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -238,6 +247,7 @@ func (e *executor) runShardsWorker() {
 }
 
 func (e *executor) uploadWorker() {
+	log.Debugf("Starting upload worker for upload %s", e.upload.ID())
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()

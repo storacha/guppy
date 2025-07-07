@@ -1,11 +1,23 @@
 package preparation
 
-/*import (
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
+	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	dags "github.com/storacha/guppy/pkg/preparation/dag"
+	"github.com/storacha/guppy/pkg/preparation/scans"
+	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
+
+	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sources"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
-	"github.com/storacha/guppy/pkg/preparation/uploads/scans"
 )
 
 type Repo interface {
@@ -17,40 +29,93 @@ type Repo interface {
 }
 
 type API struct {
-	Configurations configurations.API
-	Uploads        uploads.API
-	Sources        sources.API
-	DAGs           dags.API
-	Scans          scans.API
+	Configurations configurations.ConfigurationsAPI
+	Uploads        uploads.Uploads
+	Sources        sources.SourcesAPI
+	DAGs           dags.DAGAPI
+	Scans          scans.Scans
 }
 
 func NewAPI(repo Repo) API {
-	configurations := configurations.API{
+	// The dependencies of the APIs involve a cycle, so we need to declare one
+	// first and initialize it last.
+	var uploadsAPI uploads.Uploads
+
+	configurationsAPI := configurations.ConfigurationsAPI{
 		Repo: repo,
 	}
-	uploads := uploads.API{
-		Repo:                       repo,
-		ConfigurationSourcesLookup: configurations.GetSourceIDsForConfiguration,
 
-		Uploads: uploads.API{
-			Repo:                       repo,
-			ConfigurationSourcesLookup: configurations.GetSourceIDsForConfiguration,
-		},
-		Sources: sources.NewAPI(repo),
-		DAGs:    dags.NewAPI(repo),
-		Scans:   scans.NewAPI(repo, uploads.GetSourceIDForUploadID, sources.GetSourceByID),
+	sourcesAPI := sources.SourcesAPI{
+		Repo: repo,
 	}
-}*/
 
-// HACKME: This package is a placeholder for the preparation package.
+	scansAPI := scans.Scans{
+		Repo: repo,
+		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
+		UploadSourceLookup: func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
+			return uploadsAPI.GetSourceIDForUploadID(ctx, uploadID)
+		},
+		SourceAccessor: sourcesAPI.AccessByID,
+		WalkerFn:       walker.WalkDir,
+	}
 
-// Intended stack:
-// initialize a DB
-// initialize a sqlrepo.Repo
-// initialize configurations.Configurations
-// initialize sources.Sources
-// initialize uploads.Uploads - ConfigurationSourcesLookup = Configurations.GetSourceIDsForConfiguration
-// initialize scans.Scans - SourceAccessor = Sources.GetSourceByID, UploadSourceLookup = Uploads.GetSourceIDForUploadID
-// initialize dagscans.DAGScans - FileAccesor = Scans.OpenFileByID, UnixFSParams = Configurations.GetConfigurationByID (TBD)
+	dagsAPI := dags.DAGAPI{
+		Repo:         repo,
+		FileAccessor: scansAPI.OpenFileByID,
+	}
 
-// put execution code below...
+	uploadsAPI = uploads.Uploads{
+		Repo: repo,
+		RunNewScan: func(ctx context.Context, uploadID types.UploadID, fsEntryCb func(id types.FSEntryID, isDirectory bool) error) (types.FSEntryID, error) {
+			scan, err := repo.CreateScan(ctx, uploadID)
+			if err != nil {
+				return uuid.Nil, fmt.Errorf("command failed to create new scan: %w", err)
+			}
+
+			err = scansAPI.ExecuteScan(ctx, scan, func(entry scansmodel.FSEntry) error {
+				fmt.Println("Processing entry:", entry.Path())
+				// Process each file system entry here
+				return nil
+			})
+
+			if err != nil {
+				return uuid.Nil, fmt.Errorf("command failed to execute scan: %w", err)
+			}
+
+			if scan.State() != scansmodel.ScanStateCompleted {
+				return uuid.Nil, fmt.Errorf("scan did not complete successfully, state: %s, error: %w", scan.State(), scan.Error())
+			}
+
+			if !scan.HasRootID() {
+				return uuid.Nil, errors.New("completed scan did not have a root ID")
+			}
+
+			return scan.RootID(), nil
+		},
+		UploadDAGScanWorker: dagsAPI.UploadDAGScanWorker,
+	}
+
+	return API{
+		Configurations: configurationsAPI,
+		Uploads:        uploadsAPI,
+		Sources:        sourcesAPI,
+		DAGs:           dagsAPI,
+		Scans:          scansAPI,
+	}
+}
+
+func (a API) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
+	return a.Configurations.CreateConfiguration(ctx, name, options...)
+}
+
+func (a API) CreateSource(ctx context.Context, name string, path string, options ...sourcesmodel.SourceOption) (*sourcesmodel.Source, error) {
+	return a.Sources.CreateSource(ctx, name, path, options...)
+}
+
+func (a API) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*uploadsmodel.Upload, error) {
+	return a.Uploads.CreateUploads(ctx, configurationID)
+}
+
+func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload, opts ...uploads.ExecutionOption) error {
+	return a.Uploads.ExecuteUpload(ctx, upload, opts...)
+}
