@@ -21,7 +21,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*mod
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, configuration_id, source_id, created_at, updated_at, state, error_message, root_fs_entry_id, root_cid FROM uploads WHERE id = ?`, uploadID,
 	)
-	upload, err := model.ReadUploadFromDatabase(func(id, configurationID, sourceID *types.SourceID, createdAt, updatedAt *time.Time, state *model.UploadState, errorMessage **string, rootFSEntryID **types.FSEntryID, rootCID **cid.Cid) error {
+	upload, err := model.ReadUploadFromDatabase(func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt, updatedAt *time.Time, state *model.UploadState, errorMessage **string, rootFSEntryID **types.FSEntryID, rootCID **cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		var cidTarget cid.Cid
 		err := row.Scan(id, configurationID, sourceID, timestampScanner(createdAt), timestampScanner(updatedAt), state, &nullErrorMessage, rootFSEntryID, cidScanner{dst: &cidTarget})
@@ -68,7 +68,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID types.Configur
 			return nil, err
 		}
 		insertQuery := `INSERT INTO uploads (id, configuration_id, source_id, created_at, updated_at, state, error_message, root_fs_entry_id, root_cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		err = model.WriteUploadToDatabase(func(id, configurationID, sourceID types.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error {
+		err = model.WriteUploadToDatabase(func(id types.UploadID, configurationID types.ConfigurationID, sourceID types.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error {
 			_, err := r.db.ExecContext(ctx,
 				insertQuery, id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), Null(rootCID))
 			return err
@@ -84,7 +84,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID types.Configur
 // UpdateUpload implements uploads.Repo.
 func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	updateQuery := `UPDATE uploads SET configuration_id = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id, configurationID, sourceID types.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error {
+	return model.WriteUploadToDatabase(func(id types.UploadID, configurationID types.ConfigurationID, sourceID types.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
 			id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), Null(rootCID))

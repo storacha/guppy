@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
@@ -74,12 +75,15 @@ func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Confi
 		createdAt *time.Time,
 		shardSize *uint64,
 	) error {
-		return row.Scan(
-			id,
+		if err := row.Scan(
+			(*uuid.UUID)(id),
 			name,
 			timestampScanner(createdAt),
 			shardSize,
-		)
+		); err != nil {
+			return fmt.Errorf("scanning configuration row: %w", err)
+		}
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
