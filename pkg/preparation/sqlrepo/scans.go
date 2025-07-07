@@ -123,7 +123,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 	}
 	entry, err := r.findFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to find file entry: %w", err)
 	}
 	if entry != nil {
 		// File already exists, return it
@@ -135,13 +135,13 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 
 	newfile, err := scanmodel.NewFile(path, lastModified, mode, size, checksum, sourceID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to make new file entry: %w", err)
 	}
 
 	err = r.createFSEntry(ctx, newfile)
 
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to persist new file entry: %w", err)
 	}
 
 	return newfile, true, nil
@@ -156,7 +156,7 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 	}
 	entry, err := r.findFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID) // size is not used for directories
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to find directory entry: %w", err)
 	}
 	if entry != nil {
 		if dir, ok := entry.(*scanmodel.Directory); ok {
@@ -168,12 +168,12 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 
 	newdir, err := scanmodel.NewDirectory(path, lastModified, mode, checksum, sourceID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to make new directory entry: %w", err)
 	}
 
 	err = r.createFSEntry(ctx, newdir)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("failed to persist new directory entry: %w", err)
 	}
 
 	return newdir, true, nil
