@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/stretchr/testify/require"
@@ -82,20 +83,20 @@ func TestFindOrCreateDirectory(t *testing.T) {
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := uuid.New()
 
-		file, created, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+		dir, created, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
 		require.NoError(t, err)
 		require.True(t, created)
-		require.NotNil(t, file)
+		require.NotNil(t, dir)
 
-		file2, created2, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+		dir2, created2, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
 		require.NoError(t, err)
 		require.False(t, created2)
-		require.Equal(t, file, file2)
+		require.Equal(t, dir, dir2)
 
-		file3, created3, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("different-checksum"), sourceId)
+		dir3, created3, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("different-checksum"), sourceId)
 		require.NoError(t, err)
 		require.True(t, created3)
-		require.NotEqual(t, file.ID(), file3.ID())
+		require.NotEqual(t, dir.ID(), dir3.ID())
 	})
 
 	t.Run("refuses to create a directory entry for a file", func(t *testing.T) {
@@ -105,4 +106,26 @@ func TestFindOrCreateDirectory(t *testing.T) {
 		_, _, err := repo.FindOrCreateDirectory(t.Context(), "some/file.txt", modTime, 0644, []byte("different-checksum"), sourceId)
 		require.ErrorContains(t, err, "cannot create a directory with file mode")
 	})
+}
+
+func TestCreateDirectoryChildren(t *testing.T) {
+	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	modTime := time.Now().UTC().Truncate(time.Second)
+	sourceId := uuid.New()
+
+	dir, _, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+	require.NoError(t, err)
+
+	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	require.NoError(t, err)
+
+	file2, _, err := repo.FindOrCreateFile(t.Context(), "some/another_file.txt", modTime, 0644, 67890, []byte("another-checksum"), sourceId)
+	require.NoError(t, err)
+
+	err = repo.CreateDirectoryChildren(t.Context(), dir, []model.FSEntry{file, file2})
+	require.NoError(t, err)
+
+	children, err := repo.DirectoryChildren(t.Context(), dir)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []model.FSEntry{file, file2}, children)
 }

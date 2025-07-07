@@ -185,9 +185,11 @@ func (r *repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 		INSERT INTO directory_children (directory_id, child_id)
 		VALUES ($1, $2)
 	`
+	parentId := parent.ID()
 
 	for _, child := range children {
-		_, err := r.db.ExecContext(ctx, insertQuery, parent.ID(), child.ID())
+		childId := child.ID()
+		_, err := r.db.ExecContext(ctx, insertQuery, parentId[:], childId[:])
 		if err != nil {
 			return err
 		}
@@ -199,12 +201,13 @@ func (r *repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 // DirectoryChildren retrieves the children of a directory from the repository.
 func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
 	query := `
-		SELECT f.id, f.path, f.last_modified, f.mode, f.size, f.checksum, f.source_id
+		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id
 		FROM directory_children dc
-		JOIN files f ON dc.child_id = f.id
+		JOIN fs_entries fse ON dc.child_id = fse.id
 		WHERE dc.directory_id = $1
 	`
-	rows, err := r.db.QueryContext(ctx, query, dir.ID())
+	dirId := dir.ID()
+	rows, err := r.db.QueryContext(ctx, query, dirId[:])
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +215,24 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 
 	var entries []scanmodel.FSEntry
 	for rows.Next() {
-		entry, err := scanmodel.ReadFSEntryFromDatabase(func(id *types.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *types.SourceID) error {
-			return rows.Scan(id, path, lastModified, mode, size, checksum, sourceID)
+		entry, err := scanmodel.ReadFSEntryFromDatabase(func(
+			id *types.FSEntryID,
+			path *string,
+			lastModified *time.Time,
+			mode *fs.FileMode,
+			size *uint64,
+			checksum *[]byte,
+			sourceID *types.SourceID,
+		) error {
+			return rows.Scan(
+				id,
+				path,
+				timestampScanner(lastModified),
+				mode,
+				size,
+				checksum,
+				sourceID,
+			)
 		})
 		if err != nil {
 			return nil, err
