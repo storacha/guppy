@@ -21,104 +21,106 @@ import (
 
 var log = logging.Logger("guppy/main")
 
-func main() {
-	app := &cli.App{
-		Name:  "guppy",
-		Usage: "interact with the Storacha Network",
-		Commands: []*cli.Command{
-			{
-				Name:   "whoami",
-				Usage:  "Print information about the current agent.",
-				Action: whoami,
+var commands = []*cli.Command{
+	{
+		Name:   "whoami",
+		Usage:  "Print information about the current agent.",
+		Action: whoami,
+	},
+	{
+		Name:      "login",
+		Usage:     "Authenticate this agent with your email address to gain access to all capabilities that have been delegated to it.",
+		UsageText: "login <email>",
+		Action:    login,
+	},
+	{
+		Name:      "reset",
+		Usage:     "Remove all proofs/delegations from the store but retain the agent DID.",
+		UsageText: "reset",
+		Action:    reset,
+	},
+	{
+		Name:    "up",
+		Aliases: []string{"upload"},
+		Usage:   "Store a file(s) to the service and register an upload.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "space",
+				Value: "",
+				Usage: "DID of space to upload to.",
 			},
-			{
-				Name:      "login",
-				Usage:     "Authenticate this agent with your email address to gain access to all capabilities that have been delegated to it.",
-				UsageText: "login <email>",
-				Action:    login,
+			&cli.StringFlag{
+				Name:  "proof",
+				Value: "",
+				Usage: "Path to file containing UCAN proof(s) for the operation.",
 			},
-			{
-				Name:      "reset",
-				Usage:     "Remove all proofs/delegations from the store but retain the agent DID.",
-				UsageText: "reset",
-				Action:    reset,
+			&cli.StringFlag{
+				Name:    "car",
+				Aliases: []string{"c"},
+				Value:   "",
+				Usage:   "Path to CAR file to upload.",
 			},
-			{
-				Name:    "up",
-				Aliases: []string{"upload"},
-				Usage:   "Store a file(s) to the service and register an upload.",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "space",
-						Value: "",
-						Usage: "DID of space to upload to.",
-					},
-					&cli.StringFlag{
-						Name:  "proof",
-						Value: "",
-						Usage: "Path to file containing UCAN proof(s) for the operation.",
-					},
-					&cli.StringFlag{
-						Name:    "car",
-						Aliases: []string{"c"},
-						Value:   "",
-						Usage:   "Path to CAR file to upload.",
-					},
-					&cli.BoolFlag{
-						Name:    "hidden",
-						Aliases: []string{"H"},
-						Value:   false,
-						Usage:   "Include paths that start with \".\".",
-					},
-					&cli.BoolFlag{
-						Name:    "json",
-						Aliases: []string{"j"},
-						Value:   false,
-						Usage:   "Format as newline delimited JSON",
-					},
-					&cli.BoolFlag{
-						Name:    "verbose",
-						Aliases: []string{"v"},
-						Value:   false,
-						Usage:   "Output more details.",
-					},
-					&cli.BoolFlag{
-						Name:  "wrap",
-						Value: true,
-						Usage: "Wrap single input file in a directory. Has no effect on directory or CAR uploads. Pass --no-wrap to disable.",
-					},
-					&cli.IntFlag{
-						Name:  "shard-size",
-						Value: 0,
-						Usage: "Shard uploads into CAR files of approximately this size in bytes.",
-					},
-				},
-				Action: upload.Upload,
+			&cli.BoolFlag{
+				Name:    "hidden",
+				Aliases: []string{"H"},
+				Value:   false,
+				Usage:   "Include paths that start with \".\".",
 			},
-			{
-				Name:    "ls",
-				Aliases: []string{"list"},
-				Usage:   "List uploads in the current space.",
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:  "space",
-						Value: "",
-						Usage: "DID of space to list uploads from.",
-					},
-					&cli.StringFlag{
-						Name:  "proof",
-						Value: "",
-						Usage: "Path to file containing UCAN proof(s) for the operation.",
-					},
-					&cli.BoolFlag{
-						Name:  "shards",
-						Value: false,
-						Usage: "Display shard CID(s) for each upload root.",
-					},
-				},
-				Action: ls,
+			&cli.BoolFlag{
+				Name:    "json",
+				Aliases: []string{"j"},
+				Value:   false,
+				Usage:   "Format as newline delimited JSON",
+			},
+			&cli.BoolFlag{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Value:   false,
+				Usage:   "Output more details.",
+			},
+			&cli.BoolFlag{
+				Name:  "wrap",
+				Value: true,
+				Usage: "Wrap single input file in a directory. Has no effect on directory or CAR uploads. Pass --no-wrap to disable.",
+			},
+			&cli.IntFlag{
+				Name:  "shard-size",
+				Value: 0,
+				Usage: "Shard uploads into CAR files of approximately this size in bytes.",
 			},
 		},
+		Action: upload.Upload,
+	},
+	{
+		Name:    "ls",
+		Aliases: []string{"list"},
+		Usage:   "List uploads in the current space.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "space",
+				Value: "",
+				Usage: "DID of space to list uploads from.",
+			},
+			&cli.StringFlag{
+				Name:  "proof",
+				Value: "",
+				Usage: "Path to file containing UCAN proof(s) for the operation.",
+			},
+			&cli.BoolFlag{
+				Name:  "shards",
+				Value: false,
+				Usage: "Display shard CID(s) for each upload root.",
+			},
+		},
+		Action: ls,
+	},
+}
+
+func main() {
+	app := &cli.App{
+		Name:     "guppy",
+		Usage:    "interact with the Storacha Network",
+		Commands: commands,
 	}
 
 	// set up a context that is canceled when a command is interrupted
