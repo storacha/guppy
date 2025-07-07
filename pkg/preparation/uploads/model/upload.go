@@ -227,8 +227,8 @@ func NewUpload(configurationID types.ConfigurationID, sourceID types.SourceID) (
 		id:              uuid.New(),
 		configurationID: configurationID,
 		sourceID:        sourceID,
-		createdAt:       time.Now(),
-		updatedAt:       time.Now(),
+		createdAt:       time.Now().UTC().Truncate(time.Second),
+		updatedAt:       time.Now().UTC().Truncate(time.Second),
 		state:           UploadStatePending,
 		errorMessage:    nil,
 	}

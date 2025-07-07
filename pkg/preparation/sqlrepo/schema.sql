@@ -57,8 +57,12 @@ CREATE TABLE IF NOT EXISTS uploads (
     )
   ),
   error_message TEXT,
+  root_fs_entry_id BLOB,
+  root_cid BLOB,
   FOREIGN KEY (configuration_id) REFERENCES configurations(id),
-  FOREIGN KEY (source_id) REFERENCES sources(id)
+  FOREIGN KEY (source_id) REFERENCES sources(id),
+  FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id),
+  FOREIGN KEY (root_cid) REFERENCES nodes(cid)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS scans (
