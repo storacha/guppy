@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
-	dags "github.com/storacha/guppy/pkg/preparation/dag"
+	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"

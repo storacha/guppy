@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
-	dagmodel "github.com/storacha/guppy/pkg/preparation/dag/model"
+	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
