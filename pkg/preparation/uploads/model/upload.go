@@ -2,11 +2,11 @@ package model
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 // UploadState represents the state of a scan.
@@ -53,12 +53,12 @@ type Upload struct {
 	id              id.UploadID
 	configurationID id.ConfigurationID
 	sourceID        id.SourceID
-	createdAt       time.Time
-	updatedAt       time.Time     // The last time the upload was updated
-	state           UploadState   // The current state of the upload
-	errorMessage    *string       // Optional error message if the upload fails
-	rootFSEntryID   *id.FSEntryID // The ID of the root file system entry associated with this upload, if any
-	rootCID         *cid.Cid      // The root CID of the upload, if applicable
+	createdAt       timestamp.Timestamp
+	updatedAt       timestamp.Timestamp // The last time the upload was updated
+	state           UploadState         // The current state of the upload
+	errorMessage    *string             // Optional error message if the upload fails
+	rootFSEntryID   *id.FSEntryID       // The ID of the root file system entry associated with this upload, if any
+	rootCID         *cid.Cid            // The root CID of the upload, if applicable
 }
 
 // ID returns the unique identifier of the upload.
@@ -77,7 +77,7 @@ func (u *Upload) SourceID() id.SourceID {
 }
 
 // CreatedAt returns the creation time of the upload.
-func (u *Upload) CreatedAt() time.Time {
+func (u *Upload) CreatedAt() timestamp.Timestamp {
 	return u.createdAt
 }
 
@@ -111,7 +111,7 @@ func (u *Upload) Fail(errorMessage string) error {
 	}
 	u.state = UploadStateFailed
 	u.errorMessage = &errorMessage
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -121,7 +121,7 @@ func (u *Upload) Complete() error {
 	}
 	u.state = UploadStateCompleted
 	u.errorMessage = nil
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -131,7 +131,7 @@ func (u *Upload) Cancel() error {
 	}
 	u.state = UploadStateCanceled
 	u.errorMessage = nil
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -141,7 +141,7 @@ func (u *Upload) Start() error {
 	}
 	u.state = UploadStateScanning
 	u.errorMessage = nil
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -152,7 +152,7 @@ func (u *Upload) ScanComplete(rootFSEntryID id.FSEntryID) error {
 	u.state = UploadStateGeneratingDAG
 	u.errorMessage = nil
 	u.rootFSEntryID = &rootFSEntryID
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -163,7 +163,7 @@ func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 	u.state = UploadStateSharding
 	u.errorMessage = nil
 	u.rootCID = &rootCID
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -173,7 +173,7 @@ func (u *Upload) ShardingComplete() error {
 	}
 	u.state = UploadStateUploading
 	u.errorMessage = nil
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -185,7 +185,7 @@ func (u *Upload) Restart() error {
 	u.rootFSEntryID = nil // Reset root file system entry ID
 	u.rootCID = nil       // Reset root CID if applicable
 	u.errorMessage = nil
-	u.updatedAt = time.Now()
+	u.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -227,8 +227,8 @@ func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Uploa
 		id:              id.New(),
 		configurationID: configurationID,
 		sourceID:        sourceID,
-		createdAt:       time.Now().UTC().Truncate(time.Second),
-		updatedAt:       time.Now().UTC().Truncate(time.Second),
+		createdAt:       timestamp.Now(),
+		updatedAt:       timestamp.Now(),
 		state:           UploadStatePending,
 		errorMessage:    nil,
 	}
@@ -239,7 +239,7 @@ func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Uploa
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error
+type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt timestamp.Timestamp, updatedAt timestamp.Timestamp, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
@@ -247,7 +247,7 @@ func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID **cid.Cid) error
+type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *timestamp.Timestamp, updatedAt *timestamp.Timestamp, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID **cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {
