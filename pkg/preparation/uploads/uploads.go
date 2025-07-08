@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
@@ -18,14 +17,14 @@ var log = logging.Logger("uploads")
 type API struct {
 	Repo                Repo
 	RunNewScan          RunNewScanFn
-	UploadDAGScanWorker func(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+	UploadDAGScanWorker func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 }
 
 // RunNewScanFn is a function that initiates a new scan for a given upload ID, returning the root file system entry ID.
-type RunNewScanFn func(ctx context.Context, uploadID types.UploadID, fsEntryCb func(id types.FSEntryID, isDirectory bool) error) (types.FSEntryID, error)
+type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
-func (a API) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*model.Upload, error) {
+func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*model.Upload, error) {
 	log.Debugf("Creating uploads for configuration %s", configurationID)
 	sources, err := a.Repo.ListConfigurationSources(ctx, configurationID)
 	if err != nil {
@@ -43,12 +42,12 @@ func (a API) CreateUploads(ctx context.Context, configurationID types.Configurat
 }
 
 // GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-func (a API) GetSourceIDForUploadID(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
+func (a API) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
 	return a.Repo.GetSourceIDForUploadID(ctx, uploadID)
 }
 
 // GetUploadByID retrieves an upload by its unique ID.
-func (a API) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*model.Upload, error) {
+func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error) {
 	return a.Repo.GetUploadByID(ctx, uploadID)
 }
 
@@ -76,7 +75,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			}
 			e.start()
 		case model.UploadStateScanning:
-			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id types.FSEntryID, isDirectory bool) error {
+			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
 				err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
 				if err != nil {
 					return fmt.Errorf("creating DAG scan: %w", err)
@@ -92,7 +91,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				return fmt.Errorf("running new scan: %w", err)
 			}
 			// check if scan completed successfully
-			if fsEntryID != uuid.Nil {
+			if fsEntryID != id.Nil {
 				close(e.dagWork) // close the work channel to signal completion
 				if err := upload.ScanComplete(fsEntryID); err != nil {
 					return fmt.Errorf("completing scan: %w", err)

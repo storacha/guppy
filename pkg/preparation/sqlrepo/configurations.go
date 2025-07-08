@@ -9,7 +9,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 var _ configurations.Repo = (*repo)(nil)
@@ -21,8 +21,6 @@ func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...
 		return nil, fmt.Errorf("failed to create configuration model: %w", err)
 	}
 
-	// Grab a copy of the ID to get a slice of, to appease the DB driver.
-	id := configuration.ID()
 	_, err = r.db.ExecContext(ctx,
 		`INSERT INTO configurations (
 			id,
@@ -30,7 +28,7 @@ func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...
 			created_at,
 			shard_size
 		) VALUES (?, ?, ?, ?)`,
-		id[:],
+		configuration.ID(),
 		configuration.Name(),
 		configuration.CreatedAt().Unix(),
 		configuration.ShardSize(),
@@ -42,14 +40,14 @@ func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...
 }
 
 // GetConfigurationByID retrieves a configuration by its unique ID from the repository.
-func (r *repo) GetConfigurationByID(ctx context.Context, configurationID types.ConfigurationID) (*configurationsmodel.Configuration, error) {
+func (r *repo) GetConfigurationByID(ctx context.Context, configurationID id.ConfigurationID) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
 			name,
 			created_at,
 			shard_size
-		FROM configurations WHERE id = ?`, configurationID[:],
+		FROM configurations WHERE id = ?`, configurationID,
 	)
 	return r.getConfigurationFromRow(row)
 }
@@ -69,7 +67,7 @@ func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*config
 
 func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Configuration, error) {
 	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(
-		id *types.ConfigurationID,
+		id *id.ConfigurationID,
 		name *string,
 		createdAt *time.Time,
 		shardSize *uint64,
@@ -88,7 +86,7 @@ func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Confi
 }
 
 // DeleteConfiguration deletes a configuration from the repository.
-func (r *repo) DeleteConfiguration(ctx context.Context, configurationID types.ConfigurationID) error {
+func (r *repo) DeleteConfiguration(ctx context.Context, configurationID id.ConfigurationID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configurations WHERE id = ?`,
 		configurationID,
@@ -116,7 +114,7 @@ func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.C
 
 	var configurations []*configurationsmodel.Configuration
 	for rows.Next() {
-		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
+		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *id.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
 			return rows.Scan(id, name, createdAt, shardSize)
 		})
 		if err != nil {
@@ -131,10 +129,10 @@ func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.C
 }
 
 // AddSourceToConfiguration adds a source to a configuration in the repository.
-func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID types.ConfigurationID, sourceID types.SourceID) error {
+func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO configuration_sources (configuration_id, source_id) VALUES (?, ?)`,
-		configurationID[:], sourceID[:],
+		configurationID, sourceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add source to configuration: %w", err)
@@ -143,7 +141,7 @@ func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID typ
 }
 
 // RemoveSourceFromConfiguration removes a source from a configuration in the repository.
-func (r *repo) RemoveSourceFromConfiguration(ctx context.Context, configurationID types.ConfigurationID, sourceID types.SourceID) error {
+func (r *repo) RemoveSourceFromConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configuration_sources WHERE configuration_id = ? AND source_id = ?`,
 		configurationID, sourceID,

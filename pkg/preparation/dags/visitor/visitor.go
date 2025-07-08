@@ -9,12 +9,12 @@ import (
 	dagpb "github.com/ipld/go-codec-dagpb"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // Repo defines the interface for a repository that manages file system entries during a scan
 type Repo interface {
-	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, path string, sourceID types.SourceID, offset uint64) (*model.RawNode, bool, error)
+	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error)
 	FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, ufsdata []byte) (*model.UnixFSNode, bool, error)
 	CreateLinks(ctx context.Context, parent cid.Cid, links []model.LinkParams) error
 }
@@ -70,12 +70,12 @@ func (v UnixFSNodeVisitor) VisitUnixFSNode(cid cid.Cid, size uint64, ufsData []b
 // UnixFSVisitor is a struct that implements the file.UnixFSVisitor interface.
 type UnixFSVisitor struct {
 	UnixFSNodeVisitor
-	sourceID       types.SourceID
+	sourceID       id.SourceID
 	path           string // path is the root path of the scan
 	readerPosition ReaderPosition
 }
 
-func NewUnixFSVisitor(ctx context.Context, repo Repo, sourceID types.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSVisitor {
+func NewUnixFSVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSVisitor {
 	return UnixFSVisitor{
 		UnixFSNodeVisitor: NewUnixFSNodeVisitor(ctx, repo, cb),
 		sourceID:          sourceID,

@@ -12,7 +12,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 const BlockSize = 1 << 20         // 1 MiB
@@ -31,10 +31,10 @@ type API struct {
 }
 
 // FileAccessorFn is a function type that retrieves a file for a given fsEntryID.
-type FileAccessorFn func(ctx context.Context, fsEntryID types.FSEntryID) (fs.File, types.SourceID, string, error)
+type FileAccessorFn func(ctx context.Context, fsEntryID id.FSEntryID) (fs.File, id.SourceID, string, error)
 
 // UploadDAGScanWorker processes DAG scans for an upload until the context is canceled or the work channel is closed.
-func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, nodeCB func(node model.Node, data []byte) error) error {
+func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	err := a.RestartScansForUpload(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
@@ -56,7 +56,7 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 }
 
 // RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
-func (a API) RestartScansForUpload(ctx context.Context, uploadID types.UploadID) error {
+func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) error {
 	// restart all canceled/running dag scans
 	restartableDagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCanceled, model.DAGScanStateRunning)
 	if err != nil {
@@ -75,7 +75,7 @@ func (a API) RestartScansForUpload(ctx context.Context, uploadID types.UploadID)
 }
 
 // RunDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
-func (a API) RunDagScansForUpload(ctx context.Context, uploadID types.UploadID, nodeCB func(node model.Node, data []byte) error) error {
+func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
 		dagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending, model.DAGScanStateAwaitingChildren)
 		if err != nil {

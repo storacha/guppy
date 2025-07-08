@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // MaxShardSize is the maximum allowed size for a shard, set to 4GB
@@ -26,7 +26,7 @@ var ErrShardSizeTooSmall = errors.New("Shard size must be at least 128 bytes")
 
 // Configuration represents the configuration for an upload or uploads
 type Configuration struct {
-	id        types.ConfigurationID
+	id        id.ConfigurationID
 	name      string
 	createdAt time.Time
 
@@ -34,7 +34,7 @@ type Configuration struct {
 }
 
 // ID returns the unique identifier of the configuration.
-func (u *Configuration) ID() types.ConfigurationID {
+func (u *Configuration) ID() id.ConfigurationID {
 	return u.id
 }
 
@@ -67,7 +67,7 @@ func WithShardSize(shardSize uint64) ConfigurationOption {
 
 // validateConfiguration checks if the configuration is valid.
 func validateConfiguration(u *Configuration) (*Configuration, error) {
-	if u.id == uuid.Nil {
+	if u.id == id.Nil {
 		return nil, types.ErrEmpty{Field: "id"}
 	}
 	if u.name == "" {
@@ -85,7 +85,7 @@ func validateConfiguration(u *Configuration) (*Configuration, error) {
 // NewConfiguration creates a new Configuration instance with the given name and options.
 func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration, error) {
 	u := &Configuration{
-		id:        uuid.New(),
+		id:        id.New(),
 		name:      name,
 		shardSize: DefaultShardSize, // default shard size
 		createdAt: time.Now().UTC().Truncate(time.Second),
@@ -99,7 +99,7 @@ func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration,
 }
 
 // ConfigurationRowScanner is a function type for scanning a configuration row from the database.
-type ConfigurationRowScanner func(id *types.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error
+type ConfigurationRowScanner func(id *id.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error
 
 // ReadConfigurationFromDatabase reads a Configuration from the database using the provided scanner function.
 func ReadConfigurationFromDatabase(scanner ConfigurationRowScanner) (*Configuration, error) {

@@ -4,13 +4,13 @@ import (
 	"context"
 
 	"github.com/storacha/guppy/pkg/preparation/sources/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // Repo defines the interface for a repository that manages sources.
 type Repo interface {
 	// GetSourceByID retrieves a source by its unique ID.
-	GetSourceByID(ctx context.Context, sourceID types.SourceID) (*model.Source, error)
+	GetSourceByID(ctx context.Context, sourceID id.SourceID) (*model.Source, error)
 	// GetSourceByName retrieves a source by its name.
 	GetSourceByName(ctx context.Context, name string) (*model.Source, error)
 	// CreateSource creates a new source with the given name, path, and options.

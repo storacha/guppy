@@ -11,7 +11,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // API is a dependency container for executing scans on a repository.
@@ -26,10 +26,10 @@ type API struct {
 type WalkerFn func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
 
 // SourceAccessorFn is a function type that retrieves the file system for a given source ID.
-type SourceAccessorFn func(ctx context.Context, sourceID types.SourceID) (fs.FS, error)
+type SourceAccessorFn func(ctx context.Context, sourceID id.SourceID) (fs.FS, error)
 
 // UploadSourceLookupFn is a function type that retrieves the source ID for a given upload ID.
-type UploadSourceLookupFn func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error)
+type UploadSourceLookupFn func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
 
 // ExecuteScan executes a scan on the given source, creating files and directories in the repository.
 func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
@@ -98,7 +98,7 @@ func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
 }
 
 // GetFileByID retrieves a file by its ID from the repository, returning an error if not found.
-func (a API) GetFileByID(ctx context.Context, fileID types.FSEntryID) (*model.File, error) {
+func (a API) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
 	file, err := a.Repo.GetFileByID(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
@@ -110,14 +110,14 @@ func (a API) GetFileByID(ctx context.Context, fileID types.FSEntryID) (*model.Fi
 }
 
 // OpenFileByID retrieves a file by its ID and opens it for reading, returning an error if not found or if the file cannot be opened.
-func (a API) OpenFileByID(ctx context.Context, fileID types.FSEntryID) (fs.File, types.SourceID, string, error) {
+func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id.SourceID, string, error) {
 	file, err := a.GetFileByID(ctx, fileID)
 	if err != nil {
-		return nil, types.SourceID{}, "", err
+		return nil, id.SourceID{}, "", err
 	}
 	fsFile, err := a.OpenFile(ctx, file)
 	if err != nil {
-		return nil, types.SourceID{}, "", err
+		return nil, id.SourceID{}, "", err
 	}
 	return fsFile, file.SourceID(), file.Path(), nil
 }

@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreateScan(t *testing.T) {
 	t.Run("with an upload ID", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
-		uploadID := uuid.New()
+		uploadID := id.New()
 
 		scan, err := repo.CreateScan(t.Context(), uploadID)
 		require.NoError(t, err)
@@ -29,13 +29,13 @@ func TestCreateScan(t *testing.T) {
 
 	t.Run("with a nil upload ID", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
-		_, err := repo.CreateScan(t.Context(), uuid.Nil)
+		_, err := repo.CreateScan(t.Context(), id.Nil)
 		require.ErrorContains(t, err, "update id cannot be empty")
 	})
 
 	t.Run("when the DB fails", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
-		uploadID := uuid.New()
+		uploadID := id.New()
 
 		// Simulate a DB failure by canceling the context before the operation.
 		ctx, cancel := context.WithCancel(t.Context())
@@ -50,7 +50,7 @@ func TestFindOrCreateFile(t *testing.T) {
 	t.Run("finds a matching file entry, or creates a new one", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
-		sourceId := uuid.New()
+		sourceId := id.New()
 
 		file, created, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
 		require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestFindOrCreateFile(t *testing.T) {
 	t.Run("refuses to create a file entry for a directory", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
-		sourceId := uuid.New()
+		sourceId := id.New()
 		_, _, err := repo.FindOrCreateFile(t.Context(), "some/directory", modTime, fs.ModeDir|0644, 12345, []byte("checksum"), sourceId)
 		require.ErrorContains(t, err, "cannot create a file with directory mode")
 	})
@@ -81,7 +81,7 @@ func TestFindOrCreateDirectory(t *testing.T) {
 	t.Run("finds a matching directory entry, or creates a new one", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
-		sourceId := uuid.New()
+		sourceId := id.New()
 
 		dir, created, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
 		require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestFindOrCreateDirectory(t *testing.T) {
 	t.Run("refuses to create a directory entry for a file", func(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
-		sourceId := uuid.New()
+		sourceId := id.New()
 		_, _, err := repo.FindOrCreateDirectory(t.Context(), "some/file.txt", modTime, 0644, []byte("different-checksum"), sourceId)
 		require.ErrorContains(t, err, "cannot create a directory with file mode")
 	})
@@ -111,7 +111,7 @@ func TestFindOrCreateDirectory(t *testing.T) {
 func TestCreateDirectoryChildren(t *testing.T) {
 	repo := sqlrepo.New(testutil.CreateTestDB(t))
 	modTime := time.Now().UTC().Truncate(time.Second)
-	sourceId := uuid.New()
+	sourceId := id.New()
 
 	dir, _, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
 	require.NoError(t, err)

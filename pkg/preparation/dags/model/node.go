@@ -3,9 +3,9 @@ package model
 import (
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // LinkParams holds the parameters for creating a new Link.
@@ -171,7 +171,7 @@ func NewUnixFSNode(cid cid.Cid, size uint64, ufsdata []byte) (*UnixFSNode, error
 type RawNode struct {
 	node
 	path     string
-	sourceID types.SourceID
+	sourceID id.SourceID
 	offset   uint64
 }
 
@@ -181,7 +181,7 @@ func (n *RawNode) Path() string {
 }
 
 // SourceID returns the source ID for the raw node
-func (n *RawNode) SourceID() types.SourceID {
+func (n *RawNode) SourceID() id.SourceID {
 	return n.sourceID
 }
 
@@ -198,14 +198,14 @@ func validateRawNode(node *RawNode) error {
 	if node.cid.Type() != cid.Raw {
 		return fmt.Errorf("invalid CID type: expected Raw, got %x", node.cid.Type())
 	}
-	if node.sourceID == uuid.Nil {
+	if node.sourceID == id.Nil {
 		return types.ErrEmpty{Field: "sourceID"}
 	}
 	return nil
 }
 
 // NewRawNode creates a new RawNode instance with the provided CID, Size, path, source ID, and offset.
-func NewRawNode(cid cid.Cid, size uint64, path string, sourceID types.SourceID, offset uint64) (*RawNode, error) {
+func NewRawNode(cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*RawNode, error) {
 	node := &RawNode{
 		node: node{
 			cid:  cid,
@@ -222,13 +222,13 @@ func NewRawNode(cid cid.Cid, size uint64, path string, sourceID types.SourceID, 
 }
 
 // NodeWriter is a function type for writing a Node to the database.
-type NodeWriter func(cid cid.Cid, size uint64, ufsdata []byte, path string, sourceID types.SourceID, offset uint64) error
+type NodeWriter func(cid cid.Cid, size uint64, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error
 
 // WriteNodeToDatabase writes a Node to the database using the provided writer function.
 func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 	switch n := node.(type) {
 	case *UnixFSNode:
-		return writer(n.cid, n.size, n.ufsdata, "", uuid.Nil, 0)
+		return writer(n.cid, n.size, n.ufsdata, "", id.Nil, 0)
 	case *RawNode:
 		return writer(n.cid, n.size, nil, n.path, n.sourceID, n.offset)
 	default:
@@ -237,14 +237,14 @@ func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 }
 
 // NodeScanner is a function type for scanning a Node from the database.
-type NodeScanner func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *types.SourceID, offset *uint64) error
+type NodeScanner func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error
 
 // ReadNodeFromDatabase reads a Node from the database using the provided scanner function.
 func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 	var node node
 	var ufsdata []byte
 	var path string
-	var sourceID types.SourceID
+	var sourceID id.SourceID
 	var offset uint64
 	if err := scanner(&node.cid, &node.size, &ufsdata, &path, &sourceID, &offset); err != nil {
 		return nil, err
