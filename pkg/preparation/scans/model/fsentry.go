@@ -3,17 +3,17 @@ package model
 import (
 	"fmt"
 	"io/fs"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 type FSEntry interface {
 	ID() id.FSEntryID
 	// Path is the path within the datasource
 	Path() string
-	LastModified() time.Time
+	LastModified() timestamp.Timestamp
 	Mode() fs.FileMode
 	// Checksum is a way to uniquely identify the file or directory.
 	// For files, it's a hash of path, modified, mode, and size
@@ -26,7 +26,7 @@ type FSEntry interface {
 type fsEntry struct {
 	id           id.FSEntryID
 	path         string
-	lastModified time.Time
+	lastModified timestamp.Timestamp
 	mode         fs.FileMode
 	checksum     []byte      // checksum is the hash of the
 	sourceID     id.SourceID // sourceID is the ID of the source this entry belongs to
@@ -40,7 +40,7 @@ func (f *fsEntry) Path() string {
 	return f.path
 }
 
-func (f *fsEntry) LastModified() time.Time {
+func (f *fsEntry) LastModified() timestamp.Timestamp {
 	return f.lastModified
 }
 
@@ -90,7 +90,7 @@ func validateFsEntry(f *fsEntry) error {
 	return nil
 }
 
-func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*File, error) {
+func NewFile(path string, lastModified timestamp.Timestamp, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*File, error) {
 	file := &File{
 		fsEntry: fsEntry{
 			id:           id.New(),
@@ -108,7 +108,7 @@ func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64,
 	return file, nil
 }
 
-func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*Directory, error) {
+func NewDirectory(path string, lastModified timestamp.Timestamp, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*Directory, error) {
 	directory := &Directory{
 		fsEntry: fsEntry{
 			id:           id.New(),
@@ -125,7 +125,7 @@ func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksu
 	return directory, nil
 }
 
-type FSEntryWriter func(id id.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) error
+type FSEntryWriter func(id id.FSEntryID, path string, lastModified timestamp.Timestamp, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) error
 
 func WriteFSEntryToDatabase(entry FSEntry, writer FSEntryWriter) error {
 	size := uint64(0)
@@ -135,7 +135,7 @@ func WriteFSEntryToDatabase(entry FSEntry, writer FSEntryWriter) error {
 	return writer(entry.ID(), entry.Path(), entry.LastModified(), entry.Mode(), size, entry.Checksum(), entry.SourceID())
 }
 
-type FSEntryScanner func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error
+type FSEntryScanner func(id *id.FSEntryID, path *string, lastModified *timestamp.Timestamp, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error
 
 func ReadFSEntryFromDatabase(scanner FSEntryScanner) (FSEntry, error) {
 	fsEntry := &fsEntry{}

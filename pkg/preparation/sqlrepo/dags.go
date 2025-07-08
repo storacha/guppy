@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 var _ dags.Repo = (*repo)(nil)
@@ -54,7 +54,7 @@ type sqlScanner interface {
 }
 
 func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
-	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
+	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *timestamp.Timestamp, updatedAt *timestamp.Timestamp, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		var cidTarget cid.Cid
 		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, &nullErrorMessage, state, cidScanner{dst: &cidTarget}, kind)
@@ -265,7 +265,7 @@ func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.Director
 
 // UpdateDAGScan updates a DAG scan in the repository.
 func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
-	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cid *cid.Cid) error {
+	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt timestamp.Timestamp, updatedAt timestamp.Timestamp, errorMessage *string, state model.DAGScanState, cid *cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, created_at = ?, updated_at = ?, error_message = ?, state = ?, cid = ? WHERE fs_entry_id = ?`,
 			kind,

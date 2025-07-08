@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 // Repo defines the interface for a repository that manages file system entries during a scan
 type Repo interface {
-	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*model.File, bool, error)
-	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*model.Directory, bool, error)
+	FindOrCreateFile(ctx context.Context, path string, lastModified timestamp.Timestamp, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*model.File, bool, error)
+	FindOrCreateDirectory(ctx context.Context, path string, lastModified timestamp.Timestamp, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*model.Directory, bool, error)
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
 }
 
@@ -47,7 +47,7 @@ func (v ScanVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, 
 	if err != nil {
 		return nil, fmt.Errorf("reading file info: %w", err)
 	}
-	file, created, err := v.repo.FindOrCreateFile(v.ctx, path, info.ModTime(), info.Mode(), uint64(info.Size()), checksum.FileChecksum(path, info, v.sourceID), v.sourceID)
+	file, created, err := v.repo.FindOrCreateFile(v.ctx, path, timestamp.New(info.ModTime()), info.Mode(), uint64(info.Size()), checksum.FileChecksum(path, info, v.sourceID), v.sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating file: %w", err)
 	}
@@ -66,7 +66,7 @@ func (v ScanVisitor) VisitDirectory(path string, dirEntry fs.DirEntry, children 
 	if err != nil {
 		return nil, fmt.Errorf("reading directory info: %w", err)
 	}
-	dir, created, err := v.repo.FindOrCreateDirectory(v.ctx, path, info.ModTime(), info.Mode(), checksum.DirChecksum(path, info, v.sourceID, children), v.sourceID)
+	dir, created, err := v.repo.FindOrCreateDirectory(v.ctx, path, timestamp.New(info.ModTime()), info.Mode(), checksum.DirChecksum(path, info, v.sourceID, children), v.sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("creating directory: %w", err)
 	}

@@ -2,10 +2,10 @@ package model
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 // ScanState represents the state of a scan.
@@ -38,8 +38,8 @@ type Scan struct {
 	id           id.ScanID
 	uploadID     id.UploadID
 	rootID       *id.FSEntryID // rootID is the ID of the root directory of the scan, if it has been completed
-	createdAt    time.Time
-	updatedAt    time.Time
+	createdAt    timestamp.Timestamp
+	updatedAt    timestamp.Timestamp
 	errorMessage *string
 	state        ScanState
 }
@@ -74,11 +74,11 @@ func (s *Scan) UploadID() id.UploadID {
 	return s.uploadID
 }
 
-func (s *Scan) CreatedAt() time.Time {
+func (s *Scan) CreatedAt() timestamp.Timestamp {
 	return s.createdAt
 }
 
-func (s *Scan) UpdatedAt() time.Time {
+func (s *Scan) UpdatedAt() timestamp.Timestamp {
 	return s.updatedAt
 }
 
@@ -109,7 +109,7 @@ func (s *Scan) Fail(errorMessage string) error {
 	}
 	s.state = ScanStateFailed
 	s.errorMessage = &errorMessage
-	s.updatedAt = time.Now()
+	s.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -119,7 +119,7 @@ func (s *Scan) Complete(rootID id.FSEntryID) error {
 	}
 	s.state = ScanStateCompleted
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = timestamp.Now()
 	s.rootID = &rootID
 	return nil
 }
@@ -130,7 +130,7 @@ func (s *Scan) Cancel() error {
 	}
 	s.state = ScanStateCanceled
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -140,7 +140,7 @@ func (s *Scan) Start() error {
 	}
 	s.state = ScanStateRunning
 	s.errorMessage = nil
-	s.updatedAt = time.Now()
+	s.updatedAt = timestamp.Now()
 	return nil
 }
 
@@ -149,8 +149,8 @@ func NewScan(uploadID id.UploadID) (*Scan, error) {
 		id:        id.New(),
 		uploadID:  uploadID,
 		state:     ScanStatePending,
-		createdAt: time.Now().UTC().Truncate(time.Second),
-		updatedAt: time.Now().UTC().Truncate(time.Second),
+		createdAt: timestamp.Now(),
+		updatedAt: timestamp.Now(),
 	}
 	return validateScan(scan)
 }
@@ -159,8 +159,8 @@ type ScanScanner func(
 	id *id.ScanID,
 	uploadID *id.UploadID,
 	rootID **id.FSEntryID,
-	createdAt *time.Time,
-	updatedAt *time.Time,
+	createdAt *timestamp.Timestamp,
+	updatedAt *timestamp.Timestamp,
 	state *ScanState,
 	errorMessage **string,
 ) error
@@ -186,8 +186,8 @@ type ScanWriter func(
 	id id.ScanID,
 	uploadID id.UploadID,
 	rootID *id.FSEntryID,
-	createdAt time.Time,
-	updatedAt time.Time,
+	createdAt timestamp.Timestamp,
+	updatedAt timestamp.Timestamp,
 	state ScanState,
 	errorMessage *string,
 ) error

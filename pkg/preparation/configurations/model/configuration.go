@@ -3,10 +3,10 @@ package model
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 // MaxShardSize is the maximum allowed size for a shard, set to 4GB
@@ -28,7 +28,7 @@ var ErrShardSizeTooSmall = errors.New("Shard size must be at least 128 bytes")
 type Configuration struct {
 	id        id.ConfigurationID
 	name      string
-	createdAt time.Time
+	createdAt timestamp.Timestamp
 
 	shardSize uint64 // blob size in bytes
 }
@@ -44,7 +44,7 @@ func (u *Configuration) Name() string {
 }
 
 // CreatedAt returns the creation time of the configuration.
-func (u *Configuration) CreatedAt() time.Time {
+func (u *Configuration) CreatedAt() timestamp.Timestamp {
 	return u.createdAt
 }
 
@@ -88,7 +88,7 @@ func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration,
 		id:        id.New(),
 		name:      name,
 		shardSize: DefaultShardSize, // default shard size
-		createdAt: time.Now().UTC().Truncate(time.Second),
+		createdAt: timestamp.Now(),
 	}
 	for _, opt := range opts {
 		if err := opt(u); err != nil {
@@ -99,7 +99,7 @@ func NewConfiguration(name string, opts ...ConfigurationOption) (*Configuration,
 }
 
 // ConfigurationRowScanner is a function type for scanning a configuration row from the database.
-type ConfigurationRowScanner func(id *id.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error
+type ConfigurationRowScanner func(id *id.ConfigurationID, name *string, createdAt *timestamp.Timestamp, shardSize *uint64) error
 
 // ReadConfigurationFromDatabase reads a Configuration from the database using the provided scanner function.
 func ReadConfigurationFromDatabase(scanner ConfigurationRowScanner) (*Configuration, error) {

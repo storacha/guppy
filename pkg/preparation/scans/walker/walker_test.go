@@ -4,13 +4,13 @@ import (
 	"io/fs"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/spf13/afero"
 	"github.com/storacha/go-ucanto/core/iterable"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,10 +75,10 @@ type mockFSVisitor struct {
 
 func (v *mockFSVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, error) {
 	v.visitedFiles = append(v.visitedFiles, path)
-	return model.NewFile(path, time.Now(), 0, 0, []byte(path), id.New())
+	return model.NewFile(path, timestamp.Now(), 0, 0, []byte(path), id.New())
 }
 func (v *mockFSVisitor) VisitDirectory(path string, dirEntry fs.DirEntry, children []model.FSEntry) (*model.Directory, error) {
 	v.visitedDirectories = append(v.visitedDirectories, path)
 	v.visitedChildren[path] = children
-	return model.NewDirectory(path, time.Now(), 0, []byte(path), id.New())
+	return model.NewDirectory(path, timestamp.Now(), 0, []byte(path), id.New())
 }

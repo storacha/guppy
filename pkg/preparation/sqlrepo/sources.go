@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcemodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 var _ sources.Repo = (*repo)(nil)
@@ -34,8 +34,8 @@ func (r *repo) CreateSource(ctx context.Context, name string, path string, optio
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		src.ID(),
 		src.Name(),
-		src.CreatedAt().Unix(),
-		src.UpdatedAt().Unix(),
+		src.CreatedAt(),
+		src.UpdatedAt(),
 		src.Kind(),
 		src.Path(),
 		src.ConnectionParams(),
@@ -85,7 +85,7 @@ func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 		id *id.SourceID,
 		name *string,
 		createdAt,
-		updatedAt *time.Time,
+		updatedAt *timestamp.Timestamp,
 		kind *sourcemodel.SourceKind,
 		path *string,
 		connectionParamsBytes *[]byte,
@@ -93,8 +93,8 @@ func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 		err := row.Scan(
 			id,
 			name,
-			timestampScanner(createdAt),
-			timestampScanner(updatedAt),
+			createdAt,
+			updatedAt,
 			kind,
 			path,
 			connectionParamsBytes,
