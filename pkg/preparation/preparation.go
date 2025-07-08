@@ -5,18 +5,17 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sources"
-	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
@@ -52,7 +51,7 @@ func NewAPI(repo Repo) API {
 	scansAPI := scans.API{
 		Repo: repo,
 		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
-		UploadSourceLookup: func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
+		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
 			return uploadsAPI.GetSourceIDForUploadID(ctx, uploadID)
 		},
 		SourceAccessor: sourcesAPI.AccessByID,
@@ -66,10 +65,10 @@ func NewAPI(repo Repo) API {
 
 	uploadsAPI = uploads.API{
 		Repo: repo,
-		RunNewScan: func(ctx context.Context, uploadID types.UploadID, fsEntryCb func(id types.FSEntryID, isDirectory bool) error) (types.FSEntryID, error) {
+		RunNewScan: func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error) {
 			scan, err := repo.CreateScan(ctx, uploadID)
 			if err != nil {
-				return uuid.Nil, fmt.Errorf("command failed to create new scan: %w", err)
+				return id.Nil, fmt.Errorf("command failed to create new scan: %w", err)
 			}
 
 			err = scansAPI.ExecuteScan(ctx, scan, func(entry scansmodel.FSEntry) error {
@@ -79,15 +78,15 @@ func NewAPI(repo Repo) API {
 			})
 
 			if err != nil {
-				return uuid.Nil, fmt.Errorf("command failed to execute scan: %w", err)
+				return id.Nil, fmt.Errorf("command failed to execute scan: %w", err)
 			}
 
 			if scan.State() != scansmodel.ScanStateCompleted {
-				return uuid.Nil, fmt.Errorf("scan did not complete successfully, state: %s, error: %w", scan.State(), scan.Error())
+				return id.Nil, fmt.Errorf("scan did not complete successfully, state: %s, error: %w", scan.State(), scan.Error())
 			}
 
 			if !scan.HasRootID() {
-				return uuid.Nil, errors.New("completed scan did not have a root ID")
+				return id.Nil, errors.New("completed scan did not have a root ID")
 			}
 
 			return scan.RootID(), nil
@@ -112,7 +111,7 @@ func (a API) CreateSource(ctx context.Context, name string, path string, options
 	return a.Sources.CreateSource(ctx, name, path, options...)
 }
 
-func (a API) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*uploadsmodel.Upload, error) {
+func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*uploadsmodel.Upload, error) {
 	return a.Uploads.CreateUploads(ctx, configurationID)
 }
 

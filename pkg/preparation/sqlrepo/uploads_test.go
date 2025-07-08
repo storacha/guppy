@@ -5,7 +5,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestCreateUploads(t *testing.T) {
 	require.NoError(t, err)
 	source2, err := repo.CreateSource(t.Context(), "source2 name", "source2/path")
 	require.NoError(t, err)
-	sourceIDs := []types.SourceID{source1.ID(), source2.ID()}
+	sourceIDs := []id.SourceID{source1.ID(), source2.ID()}
 
 	uploads, err := repo.CreateUploads(t.Context(), configuration.ID(), sourceIDs)
 	require.NoError(t, err)

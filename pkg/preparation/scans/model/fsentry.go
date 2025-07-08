@@ -5,12 +5,12 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 type FSEntry interface {
-	ID() types.FSEntryID
+	ID() id.FSEntryID
 	// Path is the path within the datasource
 	Path() string
 	LastModified() time.Time
@@ -19,20 +19,20 @@ type FSEntry interface {
 	// For files, it's a hash of path, modified, mode, and size
 	// For directories, it's a hash of path and modified, plus the concatenation of the checksums of all its children.
 	Checksum() []byte
-	SourceID() types.SourceID
+	SourceID() id.SourceID
 	isFsEntry()
 }
 
 type fsEntry struct {
-	id           types.FSEntryID
+	id           id.FSEntryID
 	path         string
 	lastModified time.Time
 	mode         fs.FileMode
-	checksum     []byte         // checksum is the hash of the
-	sourceID     types.SourceID // sourceID is the ID of the source this entry belongs to
+	checksum     []byte      // checksum is the hash of the
+	sourceID     id.SourceID // sourceID is the ID of the source this entry belongs to
 }
 
-func (f *fsEntry) ID() types.FSEntryID {
+func (f *fsEntry) ID() id.FSEntryID {
 	return f.id
 }
 
@@ -51,7 +51,7 @@ func (f *fsEntry) Mode() fs.FileMode {
 func (f *fsEntry) Checksum() []byte {
 	return f.checksum
 }
-func (f *fsEntry) SourceID() types.SourceID {
+func (f *fsEntry) SourceID() id.SourceID {
 	return f.sourceID
 }
 
@@ -72,7 +72,7 @@ type Directory struct {
 func (d *Directory) isFsEntry() {}
 
 func validateFsEntry(f *fsEntry) error {
-	if f.id == uuid.Nil {
+	if f.id == id.Nil {
 		return types.ErrEmpty{"id"}
 	}
 	if f.path == "" {
@@ -84,16 +84,16 @@ func validateFsEntry(f *fsEntry) error {
 	if f.checksum == nil {
 		return types.ErrEmpty{"checksum"}
 	}
-	if f.sourceID == uuid.Nil {
+	if f.sourceID == id.Nil {
 		return types.ErrEmpty{"sourceID"}
 	}
 	return nil
 }
 
-func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) (*File, error) {
+func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*File, error) {
 	file := &File{
 		fsEntry: fsEntry{
-			id:           uuid.New(),
+			id:           id.New(),
 			path:         path,
 			lastModified: lastModified,
 			mode:         mode,
@@ -108,10 +108,10 @@ func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64,
 	return file, nil
 }
 
-func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID types.SourceID) (*Directory, error) {
+func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*Directory, error) {
 	directory := &Directory{
 		fsEntry: fsEntry{
-			id:           uuid.New(),
+			id:           id.New(),
 			path:         path,
 			lastModified: lastModified,
 			mode:         mode,
@@ -125,7 +125,7 @@ func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksu
 	return directory, nil
 }
 
-type FSEntryWriter func(id types.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) error
+type FSEntryWriter func(id id.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) error
 
 func WriteFSEntryToDatabase(entry FSEntry, writer FSEntryWriter) error {
 	size := uint64(0)
@@ -135,7 +135,7 @@ func WriteFSEntryToDatabase(entry FSEntry, writer FSEntryWriter) error {
 	return writer(entry.ID(), entry.Path(), entry.LastModified(), entry.Mode(), size, entry.Checksum(), entry.SourceID())
 }
 
-type FSEntryScanner func(id *types.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *types.SourceID) error
+type FSEntryScanner func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error
 
 func ReadFSEntryFromDatabase(scanner FSEntryScanner) (FSEntry, error) {
 	fsEntry := &fsEntry{}

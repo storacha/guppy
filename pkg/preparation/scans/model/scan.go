@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // ScanState represents the state of a scan.
@@ -35,9 +35,9 @@ func validScanState(state ScanState) bool {
 
 // Scan represents a single scan of a source, usually associated with an upload
 type Scan struct {
-	id           types.ScanID
-	uploadID     types.UploadID
-	rootID       *types.FSEntryID // rootID is the ID of the root directory of the scan, if it has been completed
+	id           id.ScanID
+	uploadID     id.UploadID
+	rootID       *id.FSEntryID // rootID is the ID of the root directory of the scan, if it has been completed
 	createdAt    time.Time
 	updatedAt    time.Time
 	errorMessage *string
@@ -46,10 +46,10 @@ type Scan struct {
 
 // validation conditions -- should not be callable externally, all scans outside this module MUST be valid
 func validateScan(s *Scan) (*Scan, error) {
-	if s.id == uuid.Nil {
+	if s.id == id.Nil {
 		return nil, types.ErrEmpty{"id"}
 	}
-	if s.uploadID == uuid.Nil {
+	if s.uploadID == id.Nil {
 		return nil, types.ErrEmpty{"update id"}
 	}
 	if !validScanState(s.state) {
@@ -66,11 +66,11 @@ func validateScan(s *Scan) (*Scan, error) {
 
 // accessors
 
-func (s *Scan) ID() types.ScanID {
+func (s *Scan) ID() id.ScanID {
 	return s.id
 }
 
-func (s *Scan) UploadID() types.UploadID {
+func (s *Scan) UploadID() id.UploadID {
 	return s.uploadID
 }
 
@@ -96,9 +96,9 @@ func (s *Scan) HasRootID() bool {
 	return s.rootID != nil
 }
 
-func (s *Scan) RootID() types.FSEntryID {
+func (s *Scan) RootID() id.FSEntryID {
 	if s.rootID == nil {
-		return uuid.Nil // Return an empty FSEntryID if rootID is not set
+		return id.Nil // Return an empty FSEntryID if rootID is not set
 	}
 	return *s.rootID
 }
@@ -113,7 +113,7 @@ func (s *Scan) Fail(errorMessage string) error {
 	return nil
 }
 
-func (s *Scan) Complete(rootID types.FSEntryID) error {
+func (s *Scan) Complete(rootID id.FSEntryID) error {
 	if s.state != ScanStateRunning {
 		return fmt.Errorf("cannot complete scan in state %s", s.state)
 	}
@@ -144,9 +144,9 @@ func (s *Scan) Start() error {
 	return nil
 }
 
-func NewScan(uploadID types.UploadID) (*Scan, error) {
+func NewScan(uploadID id.UploadID) (*Scan, error) {
 	scan := &Scan{
-		id:        uuid.New(),
+		id:        id.New(),
 		uploadID:  uploadID,
 		state:     ScanStatePending,
 		createdAt: time.Now().UTC().Truncate(time.Second),
@@ -156,9 +156,9 @@ func NewScan(uploadID types.UploadID) (*Scan, error) {
 }
 
 type ScanScanner func(
-	id *types.ScanID,
-	uploadID *types.UploadID,
-	rootID **types.FSEntryID,
+	id *id.ScanID,
+	uploadID *id.UploadID,
+	rootID **id.FSEntryID,
 	createdAt *time.Time,
 	updatedAt *time.Time,
 	state *ScanState,
@@ -183,9 +183,9 @@ func ReadScanFromDatabase(scanner ScanScanner) (*Scan, error) {
 }
 
 type ScanWriter func(
-	id types.ScanID,
-	uploadID types.UploadID,
-	rootID *types.FSEntryID,
+	id id.ScanID,
+	uploadID id.UploadID,
+	rootID *id.FSEntryID,
 	createdAt time.Time,
 	updatedAt time.Time,
 	state ScanState,

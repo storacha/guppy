@@ -5,7 +5,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,5 +47,5 @@ func TestAddSourceToConfiguration(t *testing.T) {
 	sources, err := repo.ListConfigurationSources(t.Context(), configuration.ID())
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, []types.SourceID{source1.ID(), source2.ID()}, sources)
+	require.ElementsMatch(t, []id.SourceID{source1.ID(), source2.ID()}, sources)
 }
