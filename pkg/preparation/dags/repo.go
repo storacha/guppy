@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
-	"github.com/storacha/guppy/pkg/preparation/dag/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 

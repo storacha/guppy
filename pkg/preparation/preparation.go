@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
-	dags "github.com/storacha/guppy/pkg/preparation/dag"
+	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
@@ -29,27 +29,27 @@ type Repo interface {
 }
 
 type API struct {
-	Configurations configurations.ConfigurationsAPI
-	Uploads        uploads.Uploads
-	Sources        sources.SourcesAPI
-	DAGs           dags.DAGAPI
-	Scans          scans.Scans
+	Configurations configurations.API
+	Uploads        uploads.API
+	Sources        sources.API
+	DAGs           dags.API
+	Scans          scans.API
 }
 
 func NewAPI(repo Repo) API {
 	// The dependencies of the APIs involve a cycle, so we need to declare one
 	// first and initialize it last.
-	var uploadsAPI uploads.Uploads
+	var uploadsAPI uploads.API
 
-	configurationsAPI := configurations.ConfigurationsAPI{
+	configurationsAPI := configurations.API{
 		Repo: repo,
 	}
 
-	sourcesAPI := sources.SourcesAPI{
+	sourcesAPI := sources.API{
 		Repo: repo,
 	}
 
-	scansAPI := scans.Scans{
+	scansAPI := scans.API{
 		Repo: repo,
 		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
 		UploadSourceLookup: func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
@@ -59,12 +59,12 @@ func NewAPI(repo Repo) API {
 		WalkerFn:       walker.WalkDir,
 	}
 
-	dagsAPI := dags.DAGAPI{
+	dagsAPI := dags.API{
 		Repo:         repo,
 		FileAccessor: scansAPI.OpenFileByID,
 	}
 
-	uploadsAPI = uploads.Uploads{
+	uploadsAPI = uploads.API{
 		Repo: repo,
 		RunNewScan: func(ctx context.Context, uploadID types.UploadID, fsEntryCb func(id types.FSEntryID, isDirectory bool) error) (types.FSEntryID, error) {
 			scan, err := repo.CreateScan(ctx, uploadID)

@@ -29,7 +29,7 @@ func (m repoErrOnUpdateScan) UpdateScan(ctx context.Context, scan *model.Scan) e
 
 var _ scans.Repo = (*repoErrOnUpdateScan)(nil)
 
-func newScanAndProcess(t *testing.T) (*model.Scan, scans.Scans) {
+func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 	uploadID := uuid.New()
 	sourceID := uuid.New()
 	scan, err := model.NewScan(uploadID)
@@ -37,7 +37,7 @@ func newScanAndProcess(t *testing.T) (*model.Scan, scans.Scans) {
 		panic(fmt.Sprintf("failed to create new scan: %v", err))
 	}
 
-	scansProcess := scans.Scans{
+	scansAPI := scans.API{
 		Repo: sqlrepo.New(testutil.CreateTestDB(t)),
 		UploadSourceLookup: func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
 			return sourceID, nil
@@ -50,7 +50,7 @@ func newScanAndProcess(t *testing.T) (*model.Scan, scans.Scans) {
 		},
 	}
 
-	return scan, scansProcess
+	return scan, scansAPI
 }
 
 func TestExecuteScan(t *testing.T) {
@@ -69,7 +69,7 @@ func TestExecuteScan(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.SourceAccessor = func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
 			// Use the in-memory filesystem for testing
 			return afero.NewIOFS(memFS), nil
@@ -86,7 +86,7 @@ func TestExecuteScan(t *testing.T) {
 	})
 
 	t.Run("with an error updating the scan", func(t *testing.T) {
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.Repo = repoErrOnUpdateScan{}
 
 		err := scansProcess.ExecuteScan(t.Context(), scan, func(entry model.FSEntry) error {
@@ -97,7 +97,7 @@ func TestExecuteScan(t *testing.T) {
 	})
 
 	t.Run("with an error looking up the source ID", func(t *testing.T) {
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.UploadSourceLookup = func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
 			return types.SourceID{}, fmt.Errorf("couldn't look up source ID for upload ID %s", uploadID)
 		}
@@ -112,7 +112,7 @@ func TestExecuteScan(t *testing.T) {
 	})
 
 	t.Run("with an error accessing the source", func(t *testing.T) {
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.SourceAccessor = func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
 			return nil, fmt.Errorf("couldn't access source for source ID %s", sourceID)
 		}
@@ -127,7 +127,7 @@ func TestExecuteScan(t *testing.T) {
 	})
 
 	t.Run("with an error walking the source", func(t *testing.T) {
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.WalkerFn = func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
 			return nil, fmt.Errorf("error walking the source at root %s", root)
 		}
@@ -143,7 +143,7 @@ func TestExecuteScan(t *testing.T) {
 
 	t.Run("when the context is canceled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
-		scan, scansProcess := newScanAndProcess(t)
+		scan, scansProcess := newScanAndAPI(t)
 		scansProcess.WalkerFn = func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
 			cancel() // Cancel the context to simulate a cancelation
 			return nil, ctx.Err()

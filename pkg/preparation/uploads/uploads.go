@@ -8,14 +8,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
-	dagmodel "github.com/storacha/guppy/pkg/preparation/dag/model"
+	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var log = logging.Logger("uploads")
 
-type Uploads struct {
+type API struct {
 	Repo                Repo
 	RunNewScan          RunNewScanFn
 	UploadDAGScanWorker func(ctx context.Context, work <-chan struct{}, uploadID types.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
@@ -25,16 +25,16 @@ type Uploads struct {
 type RunNewScanFn func(ctx context.Context, uploadID types.UploadID, fsEntryCb func(id types.FSEntryID, isDirectory bool) error) (types.FSEntryID, error)
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
-func (u Uploads) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*model.Upload, error) {
+func (a API) CreateUploads(ctx context.Context, configurationID types.ConfigurationID) ([]*model.Upload, error) {
 	log.Debugf("Creating uploads for configuration %s", configurationID)
-	sources, err := u.Repo.ListConfigurationSources(ctx, configurationID)
+	sources, err := a.Repo.ListConfigurationSources(ctx, configurationID)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Debugf("Found %d sources for configuration %s", len(sources), configurationID)
 
-	uploads, err := u.Repo.CreateUploads(ctx, configurationID, sources)
+	uploads, err := a.Repo.CreateUploads(ctx, configurationID, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -43,18 +43,18 @@ func (u Uploads) CreateUploads(ctx context.Context, configurationID types.Config
 }
 
 // GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-func (u Uploads) GetSourceIDForUploadID(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
-	return u.Repo.GetSourceIDForUploadID(ctx, uploadID)
+func (a API) GetSourceIDForUploadID(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
+	return a.Repo.GetSourceIDForUploadID(ctx, uploadID)
 }
 
 // GetUploadByID retrieves an upload by its unique ID.
-func (u Uploads) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*model.Upload, error) {
-	return u.Repo.GetUploadByID(ctx, uploadID)
+func (a API) GetUploadByID(ctx context.Context, uploadID types.UploadID) (*model.Upload, error) {
+	return a.Repo.GetUploadByID(ctx, uploadID)
 }
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
-func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...ExecutionOption) error {
-	e := setupExecutor(ctx, upload, u, opts...)
+func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...ExecutionOption) error {
+	e := setupExecutor(ctx, upload, a, opts...)
 	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
 	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
 		e.start()
@@ -76,8 +76,8 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 			}
 			e.start()
 		case model.UploadStateScanning:
-			fsEntryID, err := u.RunNewScan(ctx, upload.ID(), func(id types.FSEntryID, isDirectory bool) error {
-				err := u.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
+			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id types.FSEntryID, isDirectory bool) error {
+				err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
 				if err != nil {
 					return fmt.Errorf("creating DAG scan: %w", err)
 				}
@@ -112,7 +112,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			rootCid, err := u.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
+			rootCid, err := a.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
 			if err != nil {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
@@ -164,7 +164,7 @@ func (u Uploads) ExecuteUpload(ctx context.Context, upload *model.Upload, opts .
 			return fmt.Errorf("unknown upload state: %s", upload.State())
 		}
 		// persist the state change
-		if err := u.Repo.UpdateUpload(ctx, upload); err != nil {
+		if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
 			return fmt.Errorf("updating upload: %w", err)
 		}
 	}
@@ -183,10 +183,10 @@ type executor struct {
 	shardResult       chan error
 	uploadResult      chan error
 	upload            *model.Upload
-	u                 Uploads
+	u                 API
 }
 
-func setupExecutor(originalCtx context.Context, upload *model.Upload, u Uploads, opts ...ExecutionOption) *executor {
+func setupExecutor(originalCtx context.Context, upload *model.Upload, u API, opts ...ExecutionOption) *executor {
 	ctx, cancel := context.WithCancel(originalCtx)
 	dagWork := make(chan struct{}, 1)
 	dagResult := make(chan error, 1)
