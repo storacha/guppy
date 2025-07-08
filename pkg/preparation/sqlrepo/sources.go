@@ -31,16 +31,16 @@ func (r *repo) CreateSource(ctx context.Context, name string, path string, optio
 			created_at,
 			updated_at,
 			kind,
-			path --,
-			--connection_params
-		) VALUES (?, ?, ?, ?, ?, ?)`,
+			path,
+			connection_params
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id[:],
 		src.Name(),
 		src.CreatedAt().Unix(),
 		src.UpdatedAt().Unix(),
 		src.Kind(),
 		src.Path(),
-		// src.ConnectionParams(),
+		src.ConnectionParams(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert source into database: %w", err)
@@ -57,8 +57,8 @@ func (r *repo) GetSourceByID(ctx context.Context, sourceID types.SourceID) (*sou
 			created_at,
 			updated_at,
 			kind,
-			path --,
-			--connection_params
+			path,
+			connection_params
 		FROM sources WHERE id = ?`, sourceID[:],
 	)
 
@@ -74,8 +74,8 @@ func (r *repo) GetSourceByName(ctx context.Context, name string) (*sourcemodel.S
 			created_at,
 			updated_at,
 			kind,
-			path --,
-			--connection_params
+			path,
+			connection_params
 		FROM sources WHERE name = ?`, name,
 	)
 
@@ -90,7 +90,7 @@ func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 		updatedAt *time.Time,
 		kind *sourcemodel.SourceKind,
 		path *string,
-		connectionParams *sourcemodel.ConnectionParams,
+		connectionParamsBytes *[]byte,
 	) error {
 		err := row.Scan(
 			id,
@@ -99,7 +99,7 @@ func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 			timestampScanner(updatedAt),
 			kind,
 			path,
-			// connectionParams,
+			connectionParamsBytes,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to scan source: %w", err)
