@@ -14,8 +14,8 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
-// Scans is a dependency container for executing scans on a repository.
-type Scans struct {
+// API is a dependency container for executing scans on a repository.
+type API struct {
 	Repo               Repo
 	UploadSourceLookup UploadSourceLookupFn
 	SourceAccessor     SourceAccessorFn
@@ -32,15 +32,15 @@ type SourceAccessorFn func(ctx context.Context, sourceID types.SourceID) (fs.FS,
 type UploadSourceLookupFn func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error)
 
 // ExecuteScan executes a scan on the given source, creating files and directories in the repository.
-func (s Scans) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
+func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
 	err := scan.Start()
 	if err != nil {
 		return fmt.Errorf("starting scan: %w", err)
 	}
-	if err := s.Repo.UpdateScan(ctx, scan); err != nil {
+	if err := a.Repo.UpdateScan(ctx, scan); err != nil {
 		return fmt.Errorf("updating scan: %w", err)
 	}
-	fsEntry, err := s.executeScan(ctx, scan, fsEntryCb)
+	fsEntry, err := a.executeScan(ctx, scan, fsEntryCb)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			if err := scan.Cancel(); err != nil {
@@ -56,22 +56,22 @@ func (s Scans) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func
 			return fmt.Errorf("completing scan: %w", err)
 		}
 	}
-	if err := s.Repo.UpdateScan(context.WithoutCancel(ctx), scan); err != nil {
+	if err := a.Repo.UpdateScan(context.WithoutCancel(ctx), scan); err != nil {
 		return fmt.Errorf("updating scan after execute: %w", err)
 	}
 	return nil
 }
 
-func (s Scans) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) (model.FSEntry, error) {
-	sourceID, err := s.UploadSourceLookup(ctx, scan.UploadID())
+func (a API) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) (model.FSEntry, error) {
+	sourceID, err := a.UploadSourceLookup(ctx, scan.UploadID())
 	if err != nil {
 		return nil, fmt.Errorf("looking up source ID: %w", err)
 	}
-	fsys, err := s.SourceAccessor(ctx, sourceID)
+	fsys, err := a.SourceAccessor(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("accessing source: %w", err)
 	}
-	fsEntry, err := s.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, s.Repo, sourceID, fsEntryCb))
+	fsEntry, err := a.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, a.Repo, sourceID, fsEntryCb))
 	if err != nil {
 		return nil, fmt.Errorf("recursively creating directories: %w", err)
 	}
@@ -79,8 +79,8 @@ func (s Scans) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func
 }
 
 // OpenFile opens a file for reading, ensuring the checksum matches the expected value.
-func (s Scans) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
-	fsys, err := s.SourceAccessor(ctx, file.SourceID())
+func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
+	fsys, err := a.SourceAccessor(ctx, file.SourceID())
 	if err != nil {
 		return nil, fmt.Errorf("accessing source for file %s: %w", file.ID(), err)
 	}
@@ -98,8 +98,8 @@ func (s Scans) OpenFile(ctx context.Context, file *model.File) (fs.File, error) 
 }
 
 // GetFileByID retrieves a file by its ID from the repository, returning an error if not found.
-func (s Scans) GetFileByID(ctx context.Context, fileID types.FSEntryID) (*model.File, error) {
-	file, err := s.Repo.GetFileByID(ctx, fileID)
+func (a API) GetFileByID(ctx context.Context, fileID types.FSEntryID) (*model.File, error) {
+	file, err := a.Repo.GetFileByID(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
 	}
@@ -110,12 +110,12 @@ func (s Scans) GetFileByID(ctx context.Context, fileID types.FSEntryID) (*model.
 }
 
 // OpenFileByID retrieves a file by its ID and opens it for reading, returning an error if not found or if the file cannot be opened.
-func (s Scans) OpenFileByID(ctx context.Context, fileID types.FSEntryID) (fs.File, types.SourceID, string, error) {
-	file, err := s.GetFileByID(ctx, fileID)
+func (a API) OpenFileByID(ctx context.Context, fileID types.FSEntryID) (fs.File, types.SourceID, string, error) {
+	file, err := a.GetFileByID(ctx, fileID)
 	if err != nil {
 		return nil, types.SourceID{}, "", err
 	}
-	fsFile, err := s.OpenFile(ctx, file)
+	fsFile, err := a.OpenFile(ctx, file)
 	if err != nil {
 		return nil, types.SourceID{}, "", err
 	}
