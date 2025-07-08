@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // SourceKind represents the kind/type of a source.
@@ -21,7 +21,7 @@ const (
 
 // Source represents a data source.
 type Source struct {
-	id               types.SourceID
+	id               id.SourceID
 	name             string
 	createdAt        time.Time
 	updatedAt        time.Time
@@ -31,7 +31,7 @@ type Source struct {
 }
 
 // ID returns the unique identifier of the source.
-func (s *Source) ID() types.SourceID {
+func (s *Source) ID() id.SourceID {
 	return s.id
 }
 
@@ -66,7 +66,7 @@ func (s *Source) ConnectionParams() ConnectionParams {
 }
 
 func validateSource(s *Source) (*Source, error) {
-	if s.id == uuid.Nil {
+	if s.id == id.Nil {
 		return nil, types.ErrEmpty{Field: "id"}
 	}
 	if s.name == "" {
@@ -83,7 +83,7 @@ type SourceOption func(*Source) error
 // Returns the created Source or an error if any option fails or validation does not pass.
 func NewSource(name string, path string, opts ...SourceOption) (*Source, error) {
 	src := &Source{
-		id:        uuid.New(),
+		id:        id.New(),
 		name:      name,
 		createdAt: time.Now().UTC().Truncate(time.Second),
 		updatedAt: time.Now().UTC().Truncate(time.Second),
@@ -99,7 +99,7 @@ func NewSource(name string, path string, opts ...SourceOption) (*Source, error) 
 }
 
 // SourceRowScanner is a function type for scanning a source row from the database.
-type SourceRowScanner func(id *types.SourceID, name *string, createdAt *time.Time, updatedAt *time.Time, kind *SourceKind, path *string, connectionParamsBytes *[]byte) error
+type SourceRowScanner func(id *id.SourceID, name *string, createdAt *time.Time, updatedAt *time.Time, kind *SourceKind, path *string, connectionParamsBytes *[]byte) error
 
 // ReadSourceFromDatabase reads a Source from the database using the provided scanner function.
 func ReadSourceFromDatabase(scanner SourceRowScanner) (*Source, error) {

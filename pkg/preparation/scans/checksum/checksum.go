@@ -6,10 +6,10 @@ import (
 	"io/fs"
 
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-func FileChecksum(path string, info fs.FileInfo, sourceID types.SourceID) []byte {
+func FileChecksum(path string, info fs.FileInfo, sourceID id.SourceID) []byte {
 	hasher := sha256.New()
 	hasher.Write([]byte(path))
 	modTimeBytes, _ := info.ModTime().MarshalBinary()
@@ -20,11 +20,11 @@ func FileChecksum(path string, info fs.FileInfo, sourceID types.SourceID) []byte
 	sizeBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(sizeBytes, uint64(info.Size()))
 	hasher.Write(sizeBytes)
-	hasher.Write([]byte(sourceID[:]))
+	hasher.Write(sourceID[:])
 	return hasher.Sum(nil)
 }
 
-func DirChecksum(path string, info fs.FileInfo, sourceID types.SourceID, children []model.FSEntry) []byte {
+func DirChecksum(path string, info fs.FileInfo, sourceID id.SourceID, children []model.FSEntry) []byte {
 	hasher := sha256.New()
 	hasher.Write([]byte(path))
 	modTimeBytes, _ := info.ModTime().MarshalBinary()
@@ -35,6 +35,6 @@ func DirChecksum(path string, info fs.FileInfo, sourceID types.SourceID, childre
 	for _, child := range children {
 		hasher.Write(child.Checksum())
 	}
-	hasher.Write([]byte(sourceID[:]))
+	hasher.Write(sourceID[:])
 	return hasher.Sum(nil)
 }

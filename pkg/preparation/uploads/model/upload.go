@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // UploadState represents the state of a scan.
@@ -50,29 +50,29 @@ func RestartableState(state UploadState) bool {
 
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
 type Upload struct {
-	id              types.UploadID
-	configurationID types.ConfigurationID
-	sourceID        types.SourceID
+	id              id.UploadID
+	configurationID id.ConfigurationID
+	sourceID        id.SourceID
 	createdAt       time.Time
-	updatedAt       time.Time        // The last time the upload was updated
-	state           UploadState      // The current state of the upload
-	errorMessage    *string          // Optional error message if the upload fails
-	rootFSEntryID   *types.FSEntryID // The ID of the root file system entry associated with this upload, if any
-	rootCID         *cid.Cid         // The root CID of the upload, if applicable
+	updatedAt       time.Time     // The last time the upload was updated
+	state           UploadState   // The current state of the upload
+	errorMessage    *string       // Optional error message if the upload fails
+	rootFSEntryID   *id.FSEntryID // The ID of the root file system entry associated with this upload, if any
+	rootCID         *cid.Cid      // The root CID of the upload, if applicable
 }
 
 // ID returns the unique identifier of the upload.
-func (u *Upload) ID() types.UploadID {
+func (u *Upload) ID() id.UploadID {
 	return u.id
 }
 
 // ConfigurationID returns the ID of the configuration associated with the upload.
-func (u *Upload) ConfigurationID() types.ConfigurationID {
+func (u *Upload) ConfigurationID() id.ConfigurationID {
 	return u.configurationID
 }
 
 // SourceID returns the ID of the source associated with the upload.
-func (u *Upload) SourceID() types.SourceID {
+func (u *Upload) SourceID() id.SourceID {
 	return u.sourceID
 }
 
@@ -98,9 +98,9 @@ func (u *Upload) HasRootFSEntryID() bool {
 	return u.rootFSEntryID != nil
 }
 
-func (u *Upload) RootFSEntryID() types.FSEntryID {
+func (u *Upload) RootFSEntryID() id.FSEntryID {
 	if u.rootFSEntryID == nil {
-		return uuid.Nil // Return an empty FSEntryID if rootFSEntryID is not set
+		return id.Nil // Return an empty FSEntryID if rootFSEntryID is not set
 	}
 	return *u.rootFSEntryID
 }
@@ -145,7 +145,7 @@ func (u *Upload) Start() error {
 	return nil
 }
 
-func (u *Upload) ScanComplete(rootFSEntryID types.FSEntryID) error {
+func (u *Upload) ScanComplete(rootFSEntryID id.FSEntryID) error {
 	if u.state != UploadStateScanning {
 		return fmt.Errorf("cannot complete scan in state %s", u.state)
 	}
@@ -191,13 +191,13 @@ func (u *Upload) Restart() error {
 
 func validateUpload(upload *Upload) error {
 
-	if upload.id == uuid.Nil {
+	if upload.id == id.Nil {
 		return types.ErrEmpty{"upload ID"}
 	}
-	if upload.configurationID == uuid.Nil {
+	if upload.configurationID == id.Nil {
 		return types.ErrEmpty{"configuration ID"}
 	}
-	if upload.sourceID == uuid.Nil {
+	if upload.sourceID == id.Nil {
 		return types.ErrEmpty{"source ID"}
 	}
 	if upload.createdAt.IsZero() {
@@ -222,9 +222,9 @@ func validateUpload(upload *Upload) error {
 }
 
 // NewUpload creates a new Upload instance with the given parameters.
-func NewUpload(configurationID types.ConfigurationID, sourceID types.SourceID) (*Upload, error) {
+func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Upload, error) {
 	upload := &Upload{
-		id:              uuid.New(),
+		id:              id.New(),
 		configurationID: configurationID,
 		sourceID:        sourceID,
 		createdAt:       time.Now().UTC().Truncate(time.Second),
@@ -239,7 +239,7 @@ func NewUpload(configurationID types.ConfigurationID, sourceID types.SourceID) (
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id types.UploadID, configurationID types.ConfigurationID, sourceID types.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *types.FSEntryID, rootCID *cid.Cid) error
+type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
@@ -247,7 +247,7 @@ func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *types.UploadID, configurationID *types.ConfigurationID, sourceID *types.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **types.FSEntryID, rootCID **cid.Cid) error
+type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID **cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {

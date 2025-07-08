@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/storacha/guppy/pkg/preparation/sources/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // ErrUnrecognizedSourceKind is returned when a source kind is not recognized.
@@ -36,7 +36,7 @@ func (a API) Access(source *model.Source) (fs.FS, error) {
 }
 
 // AccessByID retrieves a source by its ID and returns an fs.FS for it, or an error if the source kind is not supported.
-func (a API) AccessByID(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
+func (a API) AccessByID(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
 	source, err := a.Repo.GetSourceByID(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)

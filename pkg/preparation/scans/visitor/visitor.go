@@ -8,13 +8,13 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // Repo defines the interface for a repository that manages file system entries during a scan
 type Repo interface {
-	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID types.SourceID) (*model.File, bool, error)
-	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID types.SourceID) (*model.Directory, bool, error)
+	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*model.File, bool, error)
+	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*model.Directory, bool, error)
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
 }
 
@@ -26,12 +26,12 @@ type FSEntryCallback func(entry model.FSEntry) error
 type ScanVisitor struct {
 	repo     Repo
 	ctx      context.Context
-	sourceID types.SourceID
+	sourceID id.SourceID
 	cb       FSEntryCallback
 }
 
 // NewScanVisitor creates a new ScanVisitor with the provided context, repository, source ID, and callback function.
-func NewScanVisitor(ctx context.Context, repo Repo, sourceID types.SourceID, cb FSEntryCallback) ScanVisitor {
+func NewScanVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, cb FSEntryCallback) ScanVisitor {
 	return ScanVisitor{
 		repo:     repo,
 		ctx:      ctx,

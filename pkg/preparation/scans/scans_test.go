@@ -7,14 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/afero"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,8 +29,8 @@ func (m repoErrOnUpdateScan) UpdateScan(ctx context.Context, scan *model.Scan) e
 var _ scans.Repo = (*repoErrOnUpdateScan)(nil)
 
 func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
-	uploadID := uuid.New()
-	sourceID := uuid.New()
+	uploadID := id.New()
+	sourceID := id.New()
 	scan, err := model.NewScan(uploadID)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create new scan: %v", err))
@@ -39,10 +38,10 @@ func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 
 	scansAPI := scans.API{
 		Repo: sqlrepo.New(testutil.CreateTestDB(t)),
-		UploadSourceLookup: func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
+		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
 			return sourceID, nil
 		},
-		SourceAccessor: func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
+		SourceAccessor: func(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
 			return nil, nil
 		},
 		WalkerFn: func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
@@ -70,7 +69,7 @@ func TestExecuteScan(t *testing.T) {
 		}
 
 		scan, scansProcess := newScanAndAPI(t)
-		scansProcess.SourceAccessor = func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
+		scansProcess.SourceAccessor = func(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
 			// Use the in-memory filesystem for testing
 			return afero.NewIOFS(memFS), nil
 		}
@@ -98,8 +97,8 @@ func TestExecuteScan(t *testing.T) {
 
 	t.Run("with an error looking up the source ID", func(t *testing.T) {
 		scan, scansProcess := newScanAndAPI(t)
-		scansProcess.UploadSourceLookup = func(ctx context.Context, uploadID types.UploadID) (types.SourceID, error) {
-			return types.SourceID{}, fmt.Errorf("couldn't look up source ID for upload ID %s", uploadID)
+		scansProcess.UploadSourceLookup = func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
+			return id.SourceID{}, fmt.Errorf("couldn't look up source ID for upload ID %s", uploadID)
 		}
 
 		err := scansProcess.ExecuteScan(t.Context(), scan, func(entry model.FSEntry) error {
@@ -113,7 +112,7 @@ func TestExecuteScan(t *testing.T) {
 
 	t.Run("with an error accessing the source", func(t *testing.T) {
 		scan, scansProcess := newScanAndAPI(t)
-		scansProcess.SourceAccessor = func(ctx context.Context, sourceID types.SourceID) (fs.FS, error) {
+		scansProcess.SourceAccessor = func(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
 			return nil, fmt.Errorf("couldn't access source for source ID %s", sourceID)
 		}
 

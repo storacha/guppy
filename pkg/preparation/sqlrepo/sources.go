@@ -9,7 +9,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcemodel "github.com/storacha/guppy/pkg/preparation/sources/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 var _ sources.Repo = (*repo)(nil)
@@ -21,8 +21,6 @@ func (r *repo) CreateSource(ctx context.Context, name string, path string, optio
 		return nil, fmt.Errorf("failed to create source model: %w", err)
 	}
 
-	// Grab a copy of the ID to get a slice of, to appease the DB driver.
-	id := src.ID()
 	_, err = r.db.ExecContext(
 		ctx,
 		`INSERT INTO sources (
@@ -34,7 +32,7 @@ func (r *repo) CreateSource(ctx context.Context, name string, path string, optio
 			path,
 			connection_params
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id[:],
+		src.ID(),
 		src.Name(),
 		src.CreatedAt().Unix(),
 		src.UpdatedAt().Unix(),
@@ -49,7 +47,7 @@ func (r *repo) CreateSource(ctx context.Context, name string, path string, optio
 }
 
 // GetSourceByID retrieves a source by its unique ID from the repository.
-func (r *repo) GetSourceByID(ctx context.Context, sourceID types.SourceID) (*sourcemodel.Source, error) {
+func (r *repo) GetSourceByID(ctx context.Context, sourceID id.SourceID) (*sourcemodel.Source, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
@@ -59,7 +57,7 @@ func (r *repo) GetSourceByID(ctx context.Context, sourceID types.SourceID) (*sou
 			kind,
 			path,
 			connection_params
-		FROM sources WHERE id = ?`, sourceID[:],
+		FROM sources WHERE id = ?`, sourceID,
 	)
 
 	return r.getSourceFromRow(row)
@@ -84,7 +82,7 @@ func (r *repo) GetSourceByName(ctx context.Context, name string) (*sourcemodel.S
 
 func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 	src, err := sourcemodel.ReadSourceFromDatabase(func(
-		id *types.SourceID,
+		id *id.SourceID,
 		name *string,
 		createdAt,
 		updatedAt *time.Time,
