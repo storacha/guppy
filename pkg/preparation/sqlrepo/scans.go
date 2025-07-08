@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 var _ scans.Repo = (*repo)(nil)
@@ -41,7 +41,7 @@ func (r *repo) CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel
 			uploadID id.UploadID,
 			rootID *id.FSEntryID,
 			createdAt,
-			updatedAt time.Time,
+			updatedAt timestamp.Timestamp,
 			state scanmodel.ScanState,
 			errorMessage *string) error {
 			result, err := r.db.ExecContext(
@@ -50,8 +50,8 @@ func (r *repo) CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel
 				id,
 				uploadID,
 				Null(rootID),
-				createdAt.Unix(),
-				updatedAt.Unix(),
+				createdAt,
+				updatedAt,
 				state,
 				NullString(errorMessage),
 			)
@@ -91,16 +91,16 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 		id *id.ScanID,
 		uploadID *id.UploadID,
 		rootID **id.FSEntryID,
-		createdAt *time.Time,
-		updatedAt *time.Time,
+		createdAt *timestamp.Timestamp,
+		updatedAt *timestamp.Timestamp,
 		state *scanmodel.ScanState,
 		errorMessage **string) error {
 		return row.Scan(
 			id,
 			uploadID,
 			rootID,
-			timestampScanner(createdAt),
-			timestampScanner(updatedAt),
+			createdAt,
+			updatedAt,
 			state,
 			errorMessage,
 		)
@@ -117,7 +117,7 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 // FindOrCreateFile finds or creates a file entry in the repository with the given parameters.
 // If the file already exists, it returns the existing file and false.
 // If the file does not exist, it creates a new file entry and returns it along with true.
-func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*scanmodel.File, bool, error) {
+func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified timestamp.Timestamp, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*scanmodel.File, bool, error) {
 	if mode.IsDir() {
 		return nil, false, errors.New("cannot create a file with directory mode")
 	}
@@ -150,7 +150,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 // FindOrCreateDirectory finds or creates a directory entry in the repository with the given parameters.
 // If the directory already exists, it returns the existing directory and false.
 // If the directory does not exist, it creates a new directory entry and returns it along with true.
-func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*scanmodel.Directory, bool, error) {
+func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified timestamp.Timestamp, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*scanmodel.Directory, bool, error) {
 	if !mode.IsDir() {
 		return nil, false, errors.New("cannot create a directory with file mode")
 	}
@@ -215,7 +215,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 		entry, err := scanmodel.ReadFSEntryFromDatabase(func(
 			id *id.FSEntryID,
 			path *string,
-			lastModified *time.Time,
+			lastModified *timestamp.Timestamp,
 			mode *fs.FileMode,
 			size *uint64,
 			checksum *[]byte,
@@ -224,7 +224,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 			return rows.Scan(
 				id,
 				path,
-				timestampScanner(lastModified),
+				lastModified,
 				mode,
 				size,
 				checksum,
@@ -247,7 +247,7 @@ func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 		WHERE id = $1
 	`
 
-	return scanmodel.WriteScanToDatabase(scan, func(id id.ScanID, uploadID id.UploadID, rootID *id.FSEntryID, createdAt, updatedAt time.Time, state scanmodel.ScanState, errorMessage *string) error {
+	return scanmodel.WriteScanToDatabase(scan, func(id id.ScanID, uploadID id.UploadID, rootID *id.FSEntryID, createdAt, updatedAt timestamp.Timestamp, state scanmodel.ScanState, errorMessage *string) error {
 		_, err := r.db.ExecContext(ctx, query, id, uploadID, Null(rootID), createdAt, updatedAt, state, NullString(errorMessage))
 		return err
 	})
@@ -258,7 +258,7 @@ func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, path, last_modified, mode, size, checksum, source_id FROM fs_entries WHERE id = ?`, fileID,
 	)
-	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error {
+	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *timestamp.Timestamp, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error {
 		return row.Scan(id, path, lastModified, mode, size, checksum, sourceID)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -273,7 +273,7 @@ func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	return nil, errors.New("found entry is not a file")
 }
 
-func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (scanmodel.FSEntry, error) {
+func (r *repo) findFSEntry(ctx context.Context, path string, lastModified timestamp.Timestamp, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (scanmodel.FSEntry, error) {
 	query := `
 		SELECT id, path, last_modified, mode, size, checksum, source_id
 		FROM fs_entries
@@ -288,7 +288,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		ctx,
 		query,
 		path,
-		lastModified.Unix(),
+		lastModified,
 		mode,
 		size,
 		checksum,
@@ -297,7 +297,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
 		id *id.FSEntryID,
 		path *string,
-		lastModified *time.Time,
+		lastModified *timestamp.Timestamp,
 		mode *fs.FileMode,
 		size *uint64,
 		checksum *[]byte,
@@ -306,7 +306,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		return row.Scan(
 			id,
 			path,
-			timestampScanner(lastModified),
+			lastModified,
 			mode,
 			size,
 			checksum,
@@ -330,7 +330,7 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 		func(
 			id id.FSEntryID,
 			path string,
-			lastModified time.Time,
+			lastModified timestamp.Timestamp,
 			mode fs.FileMode,
 			size uint64,
 			checksum []byte,
@@ -341,7 +341,7 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 				insertQuery,
 				id,
 				path,
-				lastModified.Unix(),
+				lastModified,
 				mode,
 				size,
 				checksum,

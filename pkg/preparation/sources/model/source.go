@@ -2,10 +2,10 @@ package model
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 // SourceKind represents the kind/type of a source.
@@ -23,8 +23,8 @@ const (
 type Source struct {
 	id               id.SourceID
 	name             string
-	createdAt        time.Time
-	updatedAt        time.Time
+	createdAt        timestamp.Timestamp
+	updatedAt        timestamp.Timestamp
 	kind             SourceKind
 	path             string // Path is the path to the storage root.
 	connectionParams ConnectionParams
@@ -41,12 +41,12 @@ func (s *Source) Name() string {
 }
 
 // CreatedAt returns the creation time of the source.
-func (s *Source) CreatedAt() time.Time {
+func (s *Source) CreatedAt() timestamp.Timestamp {
 	return s.createdAt
 }
 
 // UpdatedAt returns the last update time of the source.
-func (s *Source) UpdatedAt() time.Time {
+func (s *Source) UpdatedAt() timestamp.Timestamp {
 	return s.updatedAt
 }
 
@@ -85,8 +85,8 @@ func NewSource(name string, path string, opts ...SourceOption) (*Source, error) 
 	src := &Source{
 		id:        id.New(),
 		name:      name,
-		createdAt: time.Now().UTC().Truncate(time.Second),
-		updatedAt: time.Now().UTC().Truncate(time.Second),
+		createdAt: timestamp.Now(),
+		updatedAt: timestamp.Now(),
 		path:      path,
 		kind:      LocalSourceKind,
 	}
@@ -99,7 +99,7 @@ func NewSource(name string, path string, opts ...SourceOption) (*Source, error) 
 }
 
 // SourceRowScanner is a function type for scanning a source row from the database.
-type SourceRowScanner func(id *id.SourceID, name *string, createdAt *time.Time, updatedAt *time.Time, kind *SourceKind, path *string, connectionParamsBytes *[]byte) error
+type SourceRowScanner func(id *id.SourceID, name *string, createdAt *timestamp.Timestamp, updatedAt *timestamp.Timestamp, kind *SourceKind, path *string, connectionParamsBytes *[]byte) error
 
 // ReadSourceFromDatabase reads a Source from the database using the provided scanner function.
 func ReadSourceFromDatabase(scanner SourceRowScanner) (*Source, error) {

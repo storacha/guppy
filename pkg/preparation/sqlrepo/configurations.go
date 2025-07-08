@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/types/timestamp"
 )
 
 var _ configurations.Repo = (*repo)(nil)
@@ -30,7 +30,7 @@ func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...
 		) VALUES (?, ?, ?, ?)`,
 		configuration.ID(),
 		configuration.Name(),
-		configuration.CreatedAt().Unix(),
+		configuration.CreatedAt(),
 		configuration.ShardSize(),
 	)
 	if err != nil {
@@ -69,13 +69,13 @@ func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Confi
 	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(
 		id *id.ConfigurationID,
 		name *string,
-		createdAt *time.Time,
+		createdAt *timestamp.Timestamp,
 		shardSize *uint64,
 	) error {
 		return row.Scan(
 			id,
 			name,
-			timestampScanner(createdAt),
+			createdAt,
 			shardSize,
 		)
 	})
@@ -114,7 +114,7 @@ func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.C
 
 	var configurations []*configurationsmodel.Configuration
 	for rows.Next() {
-		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *id.ConfigurationID, name *string, createdAt *time.Time, shardSize *uint64) error {
+		configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(id *id.ConfigurationID, name *string, createdAt *timestamp.Timestamp, shardSize *uint64) error {
 			return rows.Scan(id, name, createdAt, shardSize)
 		})
 		if err != nil {
