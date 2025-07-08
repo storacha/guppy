@@ -8,7 +8,7 @@ import (
 	"github.com/ipfs/go-cid"
 	dagpb "github.com/ipld/go-codec-dagpb"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/storacha/guppy/pkg/preparation/dag/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 

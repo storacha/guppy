@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
-	dags "github.com/storacha/guppy/pkg/preparation/dag"
-	"github.com/storacha/guppy/pkg/preparation/dag/model"
+	"github.com/storacha/guppy/pkg/preparation/dags"
+	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
