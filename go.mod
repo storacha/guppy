@@ -4,6 +4,7 @@ go 1.24.4
 
 require (
 	github.com/briandowns/spinner v1.23.2
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-log/v2 v2.6.0
 	github.com/ipld/go-ipld-prime v0.21.1-0.20240917223228-6148356a4c2e

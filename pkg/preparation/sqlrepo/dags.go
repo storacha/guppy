@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -50,6 +51,33 @@ func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []mod
 		}
 	}
 	return nil
+}
+
+func (r *repo) LinksForCID(ctx context.Context, c cid.Cid) ([]*model.Link, error) {
+	query := `SELECT name, t_size, hash, parent_id, ordering FROM links WHERE parent_id = ?`
+	rows, err := r.db.QueryContext(ctx, query, c.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*model.Link
+	for rows.Next() {
+		link, err := model.ReadLinkFromDatabase(func(name *string, tSize *uint64, hash, parent *cid.Cid, order *uint64) error {
+			return rows.Scan(name, tSize, util.DbCid(hash), util.DbCid(parent), order)
+		})
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(links, func(a, b *model.Link) int {
+		return int(a.Order() - b.Order())
+	})
+	return links, nil
 }
 
 type sqlScanner interface {
