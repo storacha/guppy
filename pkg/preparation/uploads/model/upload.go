@@ -192,16 +192,16 @@ func (u *Upload) Restart() error {
 func validateUpload(upload *Upload) error {
 
 	if upload.id == id.Nil {
-		return types.ErrEmpty{"upload ID"}
+		return types.ErrEmpty{Field: "upload ID"}
 	}
 	if upload.configurationID == id.Nil {
-		return types.ErrEmpty{"configuration ID"}
+		return types.ErrEmpty{Field: "configuration ID"}
 	}
 	if upload.sourceID == id.Nil {
-		return types.ErrEmpty{"source ID"}
+		return types.ErrEmpty{Field: "source ID"}
 	}
 	if upload.createdAt.IsZero() {
-		return types.ErrEmpty{"created at"}
+		return types.ErrEmpty{Field: "created at"}
 	}
 	if !validUploadState(upload.state) {
 		return fmt.Errorf("invalid upload state: %s", upload.state)
@@ -216,7 +216,7 @@ func validateUpload(upload *Upload) error {
 		return fmt.Errorf("root CID is set but upload has not completed file system scan")
 	}
 	if upload.updatedAt.IsZero() {
-		return types.ErrEmpty{"updated at"}
+		return types.ErrEmpty{Field: "updated at"}
 	}
 	return nil
 }

@@ -47,10 +47,10 @@ type Scan struct {
 // validation conditions -- should not be callable externally, all scans outside this module MUST be valid
 func validateScan(s *Scan) (*Scan, error) {
 	if s.id == id.Nil {
-		return nil, types.ErrEmpty{"id"}
+		return nil, types.ErrEmpty{Field: "id"}
 	}
 	if s.uploadID == id.Nil {
-		return nil, types.ErrEmpty{"update id"}
+		return nil, types.ErrEmpty{Field: "update id"}
 	}
 	if !validScanState(s.state) {
 		return nil, fmt.Errorf("invalid scan state: %s", s.state)
