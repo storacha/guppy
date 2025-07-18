@@ -138,10 +138,35 @@ func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 }
 
 func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []byte, path string, sourceID id.SourceID, offset uint64) (model.Node, error) {
-	findQuery := `SELECT cid, size, ufsdata, path, source_id, offset FROM nodes WHERE cid = ? AND size = ? AND ufsdata = ? AND path = ? AND source_id = ? AND offset = ?`
-	row := r.db.QueryRowContext(ctx, findQuery, c.Bytes(), size, ufsData, path, sourceID, offset)
+	findQuery := `
+		SELECT
+			cid,
+			size,
+			ufsdata,
+			path,
+			source_id,
+			offset
+		FROM nodes
+		WHERE cid = ?
+		  AND size = ?
+			AND ((ufsdata = ?) OR (? IS NULL AND ufsdata IS NULL))
+		  AND path = ?
+		  AND source_id = ?
+		  AND offset = ?
+	`
+	row := r.db.QueryRowContext(
+		ctx,
+		findQuery,
+		c.Bytes(),
+		size,
+		// Twice for NULL check
+		ufsData, ufsData,
+		path,
+		sourceID,
+		offset,
+	)
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(cid, size, ufsdata, path, sourceID, offset)
+		return row.Scan(cidScanner{dst: cid}, size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
