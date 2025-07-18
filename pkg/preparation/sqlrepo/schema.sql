@@ -130,3 +130,26 @@ CREATE TABLE IF NOT EXISTS links (
   FOREIGN KEY (hash) REFERENCES nodes(cid),
   PRIMARY KEY (name, t_size, hash, parent_id, ordering)
 ) STRICT;
+
+-- The fact that a node has been assigned to a shard.
+CREATE TABLE IF NOT EXISTS nodes_in_shards (
+  -- Which node we're talking about
+  node_cid BLOB NOT NULL,
+  -- Which shard this node is in
+  shard_id BLOB NOT NULL,
+  -- Offset of the node in the shard
+  -- If NULL, has not yet been calculated
+  shard_offset INTEGER
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS shards (
+  -- UUID identifying the shard locally
+  id BLOB PRIMARY KEY,
+  -- The upload this shard belongs to
+  upload_id BLOB NOT NULL,
+  -- The CID of the completed shard
+  -- If NULL, has not yet been calculated (and maybe cannot be, if still
+  -- accepting new nodes)
+  cid BLOB,
+  state TEXT NOT NULL
+) STRICT;

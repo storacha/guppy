@@ -9,6 +9,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -75,7 +76,7 @@ func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Confi
 		return row.Scan(
 			id,
 			name,
-			timestampScanner(createdAt),
+			util.TimestampScanner(createdAt),
 			shardSize,
 		)
 	})

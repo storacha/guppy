@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -50,12 +51,12 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			id,
 			configurationID,
 			sourceID,
-			timestampScanner(createdAt),
-			timestampScanner(updatedAt),
+			util.TimestampScanner(createdAt),
+			util.TimestampScanner(updatedAt),
 			state,
 			&nullErrorMessage,
 			rootFSEntryID,
-			cidScanner{dst: &cidTarget},
+			util.CidScanner{Dst: &cidTarget},
 		)
 		if err != nil {
 			return err

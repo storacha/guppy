@@ -1,4 +1,4 @@
-package sqlrepo
+package util
 
 import (
 	"database/sql"
@@ -30,20 +30,20 @@ func (ts tsScanner) Scan(value any) error {
 
 // timestampScanner returns a sql.Scanner that scans a timestamp (as an integer
 // of Unix time in seconds) into the given time.Time pointer.
-func timestampScanner(t *time.Time) tsScanner {
+func TimestampScanner(t *time.Time) tsScanner {
 	return tsScanner{dst: t}
 }
 
-// cidScanner returns a sql.Scanner that scans a CID from a byte slice into the
-type cidScanner struct {
-	dst *cid.Cid
+// CidScanner returns a sql.Scanner that scans a CID from a byte slice into the
+type CidScanner struct {
+	Dst *cid.Cid
 }
 
-var _ sql.Scanner = cidScanner{}
+var _ sql.Scanner = CidScanner{}
 
-func (cs cidScanner) Scan(value any) error {
+func (cs CidScanner) Scan(value any) error {
 	if value == nil {
-		*cs.dst = cid.Undef
+		*cs.Dst = cid.Undef
 		return nil
 	}
 	switch v := value.(type) {
@@ -52,7 +52,7 @@ func (cs cidScanner) Scan(value any) error {
 		if err != nil {
 			return fmt.Errorf("failed to cast to cid: %w", err)
 		}
-		*cs.dst = c
+		*cs.Dst = c
 	default:
 		return fmt.Errorf("unsupported type for cid scanning: %T (%v)", v, v)
 	}
