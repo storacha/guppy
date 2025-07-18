@@ -2,6 +2,7 @@ package uploads
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -9,6 +10,7 @@ import (
 )
 
 type Repo interface {
+	DB() *sql.DB
 	// GetUploadByID retrieves an upload by its unique ID.
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error)
 	// GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.

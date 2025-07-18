@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
 const BlockSize = 1 << 20         // 1 MiB
@@ -54,6 +55,8 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 		}
 	}
 }
+
+var _ uploads.UploadDAGScanWorkerFn = API{}.UploadDAGScanWorker
 
 // RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
 func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) error {
@@ -165,7 +168,10 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	reader := visitor.ReaderPositionFromReader(f)
 	visitor := visitor.NewUnixFSVisitor(ctx, a.Repo, sourceID, path, reader, nodeCB)
 	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
-	return l.(cidlink.Link).Cid, err
+	if err != nil {
+		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
+	}
+	return l.(cidlink.Link).Cid, nil
 }
 
 func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.DirectoryDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {

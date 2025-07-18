@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/ipfs/go-cid"
@@ -58,9 +59,9 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *timestamp.Timestamp, updatedAt *timestamp.Timestamp, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		var cidTarget cid.Cid
-		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, &nullErrorMessage, state, util.CidScanner{Dst: &cidTarget}, kind)
+		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, state, &nullErrorMessage, util.CidScanner{Dst: &cidTarget}, kind)
 		if err != nil {
-			return err
+			return fmt.Errorf("scanning dag scan: %w", err)
 		}
 		if nullErrorMessage.Valid {
 			*errorMessage = &nullErrorMessage.String
@@ -78,7 +79,6 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 
 // DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID and optional states.
 func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
-
 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE upload_id = $1`
 	if len(states) > 0 {
 		query += " AND state IN ("
@@ -269,7 +269,7 @@ func (r *repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 
 // GetChildScans finds scans for child nodes of a given directory scan's file system entry.
 func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
-	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.parent_id = ?`
+	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, directoryScans.FsEntryID())
 	if err != nil {
 		return nil, err
@@ -300,7 +300,7 @@ func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			updatedAt,
 			errorMessage,
 			state,
-			cid.Bytes(),
+			Null(cid),
 			fsEntryID,
 		)
 		return err

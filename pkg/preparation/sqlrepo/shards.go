@@ -219,3 +219,5 @@ func (r *repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		return err
 	})
 }
+
+// TK: What if the block that opens a shard doesn't fit either?

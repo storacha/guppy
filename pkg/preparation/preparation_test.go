@@ -1,8 +1,11 @@
 package preparation_test
 
 import (
+	"io/fs"
 	"testing"
+	"time"
 
+	"github.com/spf13/afero"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
@@ -10,9 +13,28 @@ import (
 )
 
 func TestExecuteUpload(t *testing.T) {
+	memFS := afero.NewMemMapFs()
+	memFS.MkdirAll("dir1/dir2", 0755)
+	afero.WriteFile(memFS, "a", []byte("file a"), 0644)
+	afero.WriteFile(memFS, "dir1/b", []byte("file b"), 0644)
+	afero.WriteFile(memFS, "dir1/c", []byte("file c"), 0644)
+	afero.WriteFile(memFS, "dir1/dir2/d", []byte("file d"), 0644)
+
+	// Set the last modified time for the files; Afero's in-memory FS doesn't do
+	// that automatically on creation, we expect it to be present.
+	for _, path := range []string{".", "a", "dir1", "dir1/b", "dir1/c", "dir1/dir2", "dir1/dir2/d"} {
+		err := memFS.Chtimes(path, time.Now(), time.Now())
+		require.NoError(t, err)
+	}
 	repo := sqlrepo.New(testutil.CreateTestDB(t))
 
-	api := preparation.NewAPI(repo)
+	api := preparation.NewAPI(
+		repo,
+		preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+			require.Equal(t, ".", path, "test expects root to be '.'")
+			return afero.NewIOFS(memFS), nil
+		}),
+	)
 
 	configuration, err := api.CreateConfiguration(t.Context(), "Large Upload Configuration")
 	require.NoError(t, err)
@@ -27,6 +49,7 @@ func TestExecuteUpload(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, upload := range uploads {
-		api.ExecuteUpload(t.Context(), upload)
+		err = api.ExecuteUpload(t.Context(), upload)
+		require.NoError(t, err)
 	}
 }

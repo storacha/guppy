@@ -137,6 +137,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to make new file entry: %w", err)
 	}
+	fmt.Println("FindOrCreateFile: Creating new file entry:", newfile.ID(), "at path:", path)
 
 	err = r.createFSEntry(ctx, newfile)
 
@@ -170,6 +171,7 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to make new directory entry: %w", err)
 	}
+	fmt.Println("FindOrCreateDirectory: Creating new directory entry:", newdir.ID(), "at path:", path)
 
 	err = r.createFSEntry(ctx, newdir)
 	if err != nil {
@@ -336,6 +338,7 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 			checksum []byte,
 			sourceID id.SourceID,
 		) error {
+			fmt.Println("Creating FSEntry:", id, "at path:", path)
 			_, err := r.db.ExecContext(
 				ctx,
 				insertQuery,

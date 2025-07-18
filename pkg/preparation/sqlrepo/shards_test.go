@@ -89,6 +89,10 @@ func TestAddNodeToUploadShards(t *testing.T) {
 
 	foundNodeCids = nodesInShard(t, db, secondShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid3}, foundNodeCids)
+
+	// at the end, closes the open shard
+
+	// BOOKMARK
 }
 
 // (Until the repo has a way to query for this itself...)
