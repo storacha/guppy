@@ -10,6 +10,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -57,7 +58,7 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		var cidTarget cid.Cid
-		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, &nullErrorMessage, state, cidScanner{dst: &cidTarget}, kind)
+		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, &nullErrorMessage, state, util.CidScanner{Dst: &cidTarget}, kind)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,7 @@ func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 		var path string
 		var size uint64
 		var cid cid.Cid
-		if err := rows.Scan(&path, &size, cidScanner{dst: &cid}); err != nil {
+		if err := rows.Scan(&path, &size, util.CidScanner{Dst: &cid}); err != nil {
 			return nil, err
 		}
 		link := model.LinkParams{
@@ -166,7 +167,7 @@ func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []b
 		offset,
 	)
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(cidScanner{dst: cid}, size, ufsdata, path, sourceID, offset)
+		return row.Scan(util.CidScanner{Dst: cid}, size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
