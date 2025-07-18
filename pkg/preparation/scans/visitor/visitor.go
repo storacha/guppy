@@ -31,9 +31,9 @@ type ScanVisitor struct {
 }
 
 // NewScanVisitor creates a new ScanVisitor with the provided context, repository, source ID, and callback function.
-func NewScanVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, cb FSEntryCallback) ScanVisitor {
+func NewScanVisitor(ctx context.Context, Repo Repo, sourceID id.SourceID, cb FSEntryCallback) ScanVisitor {
 	return ScanVisitor{
-		repo:     repo,
+		repo:     Repo,
 		ctx:      ctx,
 		sourceID: sourceID,
 		cb:       cb,

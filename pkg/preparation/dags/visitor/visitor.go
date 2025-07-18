@@ -30,9 +30,9 @@ type UnixFSNodeVisitor struct {
 }
 
 // NewUnixFSNodeVisitor creates a new UnixFSNodeVisitor with the provided context, repository, source ID, path, and callback function.
-func NewUnixFSNodeVisitor(ctx context.Context, repo Repo, cb NodeCallback) UnixFSNodeVisitor {
+func NewUnixFSNodeVisitor(ctx context.Context, Repo Repo, cb NodeCallback) UnixFSNodeVisitor {
 	return UnixFSNodeVisitor{
-		repo: repo,
+		repo: Repo,
 		ctx:  ctx,
 		cb:   cb,
 	}
