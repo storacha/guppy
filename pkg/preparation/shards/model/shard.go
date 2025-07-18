@@ -63,6 +63,14 @@ func validateShard(s *Shard) (*Shard, error) {
 	return s, nil
 }
 
+func (s *Shard) Close() error {
+	if s.state != ShardStateOpen {
+		return fmt.Errorf("cannot close shard in state %s", s.state)
+	}
+	s.state = ShardStateClosed
+	return nil
+}
+
 type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,

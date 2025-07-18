@@ -166,6 +166,30 @@ func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []b
 		sourceID,
 		offset,
 	)
+	return r.getNodeFromRow(row)
+}
+
+func (r *repo) findNodeByCid(ctx context.Context, c cid.Cid) (model.Node, error) {
+	findQuery := `
+		SELECT
+			cid,
+			size,
+			ufsdata,
+			path,
+			source_id,
+			offset
+		FROM nodes
+		WHERE cid = ?
+	`
+	row := r.db.QueryRowContext(
+		ctx,
+		findQuery,
+		c.Bytes(),
+	)
+	return r.getNodeFromRow(row)
+}
+
+func (r *repo) getNodeFromRow(row *sql.Row) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
 		return row.Scan(util.CidScanner{Dst: cid}, size, ufsdata, path, sourceID, offset)
 	})
