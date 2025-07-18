@@ -53,6 +53,21 @@ func (r *repo) GetConfigurationByID(ctx context.Context, configurationID id.Conf
 	return r.getConfigurationFromRow(row)
 }
 
+// GetConfigurationByUploadID retrieves the configuration associated with an upload.
+func (r *repo) GetConfigurationByUploadID(ctx context.Context, uploadID id.UploadID) (*configurationsmodel.Configuration, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT
+			c.id,
+			c.name,
+			c.created_at,
+			c.shard_size
+		FROM configurations c
+		INNER JOIN uploads u ON u.configuration_id = c.id
+		WHERE u.id = ?`, uploadID,
+	)
+	return r.getConfigurationFromRow(row)
+}
+
 // GetConfigurationByName retrieves a configuration by its name from the repository.
 func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
