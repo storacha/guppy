@@ -14,17 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TK: Is the shard size the max total size of the nodes, or the max size of the
-// full shard CAR blob?
-
-func TestAddNodeToUploadShard(t *testing.T) {
-	const shardSize = 128
-	const nodeSize = 32
-
+func TestAddNodeToUploadShards(t *testing.T) {
 	db := testutil.CreateTestDB(t)
 	repo := sqlrepo.New(db)
 
-	configuration, err := repo.CreateConfiguration(t.Context(), "Test Config", configurationsmodel.WithShardSize(shardSize))
+	configuration, err := repo.CreateConfiguration(t.Context(), "Test Config", configurationsmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 	source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 	require.NoError(t, err)
@@ -39,37 +33,62 @@ func TestAddNodeToUploadShard(t *testing.T) {
 	openShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 0)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, nodeSize, "some/path", source.ID(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, "some/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	err = repo.AddNodeToUploadShard(t.Context(), upload.ID(), nodeCid1)
+	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
 	require.NoError(t, err)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
-	shard := openShards[0]
+	firstShard := openShards[0]
 
-	foundNodeCids := nodesInShard(t, db, shard.ID())
-	require.Len(t, foundNodeCids, 1)
-	require.Equal(t, nodeCid1, foundNodeCids[0])
+	foundNodeCids := nodesInShard(t, db, firstShard.ID())
+	require.ElementsMatch(t, []cid.Cid{nodeCid1}, foundNodeCids)
 
 	// with an open shard with room, adds the node to the shard
 
 	nodeCid2 := randomCID(t)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, nodeSize, "some/other/path", source.ID(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 1<<14, "some/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	err = repo.AddNodeToUploadShard(t.Context(), upload.ID(), nodeCid2)
+	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
 	require.NoError(t, err)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
+	require.Equal(t, firstShard.ID(), openShards[0].ID())
 
-	foundNodeCids = nodesInShard(t, db, shard.ID())
-	require.Len(t, foundNodeCids, 2)
+	foundNodeCids = nodesInShard(t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1, nodeCid2}, foundNodeCids)
+
+	// with an open shard without room, closes the shard and creates another
+
+	nodeCid3 := randomCID(t)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 1<<15, "yet/other/path", source.ID(), 0)
+	require.NoError(t, err)
+
+	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
+	require.NoError(t, err)
+
+	closedShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+	require.NoError(t, err)
+	require.Len(t, closedShards, 1)
+	require.Equal(t, firstShard.ID(), closedShards[0].ID())
+
+	foundNodeCids = nodesInShard(t, db, firstShard.ID())
+	require.ElementsMatch(t, []cid.Cid{nodeCid1, nodeCid2}, foundNodeCids)
+
+	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	require.NoError(t, err)
+	require.Len(t, openShards, 1)
+	secondShard := openShards[0]
+	require.NotEqual(t, firstShard.ID(), secondShard.ID())
+
+	foundNodeCids = nodesInShard(t, db, secondShard.ID())
+	require.ElementsMatch(t, []cid.Cid{nodeCid3}, foundNodeCids)
 }
 
 // (Until the repo has a way to query for this itself...)

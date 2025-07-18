@@ -10,6 +10,6 @@ import (
 
 // Repo defines the interface for interacting with DAG scans, nodes, and links in the repository.
 type Repo interface {
-	AddNodeToUploadShard(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
+	AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
 	ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error)
 }
