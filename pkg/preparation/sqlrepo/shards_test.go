@@ -1,6 +1,7 @@
 package sqlrepo_test
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -31,17 +32,17 @@ func TestAddNodeToUploadShard(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, uploads, 1)
 	upload := uploads[0]
-	nodeCid := randomCID(t)
+	nodeCid1 := randomCID(t)
 
 	// with no shards, creates a new shard and adds the node to it
 
 	openShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 0)
-
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid, nodeSize, "some/path", source.ID(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, nodeSize, "some/path", source.ID(), 0)
 	require.NoError(t, err)
-	err = repo.AddNodeToUploadShard(t.Context(), upload.ID(), nodeCid)
+
+	err = repo.AddNodeToUploadShard(t.Context(), upload.ID(), nodeCid1)
 	require.NoError(t, err)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
@@ -49,10 +50,34 @@ func TestAddNodeToUploadShard(t *testing.T) {
 	require.Len(t, openShards, 1)
 	shard := openShards[0]
 
-	// (Until the repo has a way to query for this itself...)
-	rows, err := db.QueryContext(t.Context(), `SELECT node_cid FROM nodes_in_shards WHERE shard_id = ?`, shard.ID())
+	foundNodeCids := nodesInShard(t, db, shard.ID())
+	require.Len(t, foundNodeCids, 1)
+	require.Equal(t, nodeCid1, foundNodeCids[0])
+
+	// with an open shard with room, adds the node to the shard
+
+	nodeCid2 := randomCID(t)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, nodeSize, "some/other/path", source.ID(), 0)
+	require.NoError(t, err)
+
+	err = repo.AddNodeToUploadShard(t.Context(), upload.ID(), nodeCid2)
+	require.NoError(t, err)
+
+	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	require.NoError(t, err)
+	require.Len(t, openShards, 1)
+
+	foundNodeCids = nodesInShard(t, db, shard.ID())
+	require.Len(t, foundNodeCids, 2)
+	require.ElementsMatch(t, []cid.Cid{nodeCid1, nodeCid2}, foundNodeCids)
+}
+
+// (Until the repo has a way to query for this itself...)
+func nodesInShard(t *testing.T, db *sql.DB, shardID id.ShardID) []cid.Cid {
+	rows, err := db.QueryContext(t.Context(), `SELECT node_cid FROM nodes_in_shards WHERE shard_id = ?`, shardID)
 	require.NoError(t, err)
 	defer rows.Close()
+
 	var foundNodeCids []cid.Cid
 	for rows.Next() {
 		var foundNodeCid cid.Cid
@@ -60,6 +85,5 @@ func TestAddNodeToUploadShard(t *testing.T) {
 		require.NoError(t, err)
 		foundNodeCids = append(foundNodeCids, foundNodeCid)
 	}
-	require.Len(t, foundNodeCids, 1)
-	require.Equal(t, nodeCid, foundNodeCids[0])
+	return foundNodeCids
 }

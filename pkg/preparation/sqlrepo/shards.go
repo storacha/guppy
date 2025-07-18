@@ -13,9 +13,20 @@ import (
 var _ shards.Repo = (*repo)(nil)
 
 func (r *repo) AddNodeToUploadShard(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error {
-	shard, err := r.createShard(ctx, uploadID)
+	openShards, err := r.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+	}
+
+	var shard *model.Shard
+
+	if len(openShards) == 0 {
+		shard, err = r.createShard(ctx, uploadID)
+		if err != nil {
+			return fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+		}
+	} else {
+		shard = openShards[0]
 	}
 
 	err = r.addNodeToShard(ctx, shard.ID(), nodeCID)
