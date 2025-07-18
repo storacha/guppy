@@ -31,6 +31,10 @@ func (id *ID) Scan(src any) error {
 	return nil
 }
 
+func (id ID) String() string {
+	return uuid.UUID(id).String()
+}
+
 // SourceID is an alias for ID and uniquely identifies a source.
 type SourceID = ID
 
@@ -45,3 +49,6 @@ type ScanID = ID
 
 // FSEntryID is an alias for ID and uniquely identifies a filesystem entry.
 type FSEntryID = ID
+
+// FSEntryID is an alias for ID and uniquely identifies a shard.
+type ShardID = ID
