@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
@@ -178,14 +179,18 @@ type executor struct {
 	uploadResult      chan error
 	upload            *model.Upload
 	u                 Uploads
+	done             chan struct{} // Channel to signal completion
 }
 
 func setupExecutor(originalCtx context.Context, upload *model.Upload, u Uploads, opts ...ExecutionOption) *executor {
 	ctx, cancel := context.WithCancel(originalCtx)
 	dagWork := make(chan struct{}, 1)
+	// Buffer result channels to prevent goroutine leaks
 	dagResult := make(chan error, 1)
 	shardResult := make(chan error, 1)
 	uploadResult := make(chan error, 1)
+	done := make(chan struct{})
+	
 	executor := &executor{
 		remainingRestarts: defaultMaxRestarts,
 		originalCtx:       originalCtx,
@@ -197,6 +202,7 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u Uploads,
 		uploadResult:      uploadResult,
 		upload:            upload,
 		u:                 u,
+		done:             done,
 	}
 	for _, opt := range opts {
 		opt(executor)
@@ -221,10 +227,26 @@ func (e *executor) runDAGScanWorker() {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		e.dagResult <- e.u.UploadDAGScanWorker(e.ctx, e.dagWork, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
-			log.Debugf("DAG scan worker found node %s", node.CID())
-			return nil
-		})
+		select {
+		case <-e.ctx.Done():
+			e.dagResult <- e.ctx.Err()
+			return
+		default:
+			err := e.u.UploadDAGScanWorker(e.ctx, e.dagWork, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
+				select {
+				case <-e.ctx.Done():
+					return e.ctx.Err()
+				default:
+					log.Debugf("DAG scan worker found node %s", node.CID())
+					return nil
+				}
+			})
+			// Always send result, even if nil
+			select {
+			case e.dagResult <- err:
+			case <-e.ctx.Done():
+			}
+		}
 	}()
 }
 
@@ -232,8 +254,17 @@ func (e *executor) runShardsWorker() {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		// put the worker for shards processing here, when it exists
-		e.shardResult <- nil // Placeholder for shard processing result
+		select {
+		case <-e.ctx.Done():
+			e.shardResult <- e.ctx.Err()
+			return
+		default:
+			// put the worker for shards processing here, when it exists
+			select {
+			case e.shardResult <- nil: // Placeholder for shard processing result
+			case <-e.ctx.Done():
+			}
+		}
 	}()
 }
 
@@ -241,14 +272,42 @@ func (e *executor) uploadWorker() {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		// put the worker for upload processing here, when it exists
-		e.uploadResult <- nil // Placeholder for upload processing result
+		select {
+		case <-e.ctx.Done():
+			e.uploadResult <- e.ctx.Err()
+			return
+		default:
+			// put the worker for upload processing here, when it exists
+			select {
+			case e.uploadResult <- nil: // Placeholder for upload processing result
+			case <-e.ctx.Done():
+			}
+		}
 	}()
 }
 
 func (e *executor) shutdown() {
 	e.cancel()
-	e.wg.Wait()
+	// Create a channel for timeout
+	done := make(chan struct{})
+	
+	// Wait for goroutines in a separate goroutine
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+	
+	// Wait with timeout
+	select {
+	case <-done:
+		// All goroutines completed
+	case <-time.After(30 * time.Second):
+		log.Warnf("Shutdown timed out waiting for goroutines to complete")
+	}
+	
+	// Clean up channels
+	close(e.dagWork)
+	close(e.done)
 }
 
 func (e *executor) reset() {
