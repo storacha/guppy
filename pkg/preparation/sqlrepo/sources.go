@@ -9,6 +9,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcemodel "github.com/storacha/guppy/pkg/preparation/sources/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -93,8 +94,8 @@ func (r *repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 		err := row.Scan(
 			id,
 			name,
-			timestampScanner(createdAt),
-			timestampScanner(updatedAt),
+			util.TimestampScanner(createdAt),
+			util.TimestampScanner(updatedAt),
 			kind,
 			path,
 			connectionParamsBytes,

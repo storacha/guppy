@@ -5,9 +5,12 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
+
+var log = logging.Logger("preparation/dags/model/dagscan")
 
 // DAGScanState represents the state of a DAG scan.
 type DAGScanState string
@@ -117,6 +120,8 @@ func (d *dagScan) CID() cid.Cid {
 }
 
 func (d *dagScan) Fail(errorMessage string) error {
+	log.Debugf("Failing DAG scan %s with error: %s", d.fsEntryID, errorMessage)
+	panic(nil)
 	if TerminatedState(d.state) {
 		return fmt.Errorf("cannot fail dag scan in state %s", d.state)
 	}

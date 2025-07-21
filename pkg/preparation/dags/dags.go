@@ -7,16 +7,20 @@ import (
 	"io/fs"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode/data/builder"
 	dagpb "github.com/ipld/go-codec-dagpb"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
 const BlockSize = 1 << 20         // 1 MiB
 const DefaultLinksPerBlock = 1024 // Default number of links per block for UnixFS
+
+var log = logging.Logger("preparation/dags")
 
 func init() {
 	// Set the default links per block for UnixFS.
@@ -45,6 +49,7 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 			return ctx.Err() // Exit if the context is canceled
 		case _, ok := <-work:
 			if !ok {
+				log.Debug("work channel closed, exiting upload DAG scan worker")
 				return nil // Channel closed, exit the loop
 			}
 			// Run all pending and awaiting children DAG scans for the given upload.
@@ -54,6 +59,8 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 		}
 	}
 }
+
+var _ uploads.UploadDAGScanWorkerFn = API{}.UploadDAGScanWorker
 
 // RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
 func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) error {
@@ -165,7 +172,10 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	reader := visitor.ReaderPositionFromReader(f)
 	visitor := visitor.NewUnixFSVisitor(ctx, a.Repo, sourceID, path, reader, nodeCB)
 	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
-	return l.(cidlink.Link).Cid, err
+	if err != nil {
+		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
+	}
+	return l.(cidlink.Link).Cid, nil
 }
 
 func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.DirectoryDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {

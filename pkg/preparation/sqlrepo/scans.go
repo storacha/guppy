@@ -10,6 +10,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -99,8 +100,8 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 			id,
 			uploadID,
 			rootID,
-			timestampScanner(createdAt),
-			timestampScanner(updatedAt),
+			util.TimestampScanner(createdAt),
+			util.TimestampScanner(updatedAt),
 			state,
 			errorMessage,
 		)
@@ -224,7 +225,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 			return rows.Scan(
 				id,
 				path,
-				timestampScanner(lastModified),
+				util.TimestampScanner(lastModified),
 				mode,
 				size,
 				checksum,
@@ -306,7 +307,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		return row.Scan(
 			id,
 			path,
-			timestampScanner(lastModified),
+			util.TimestampScanner(lastModified),
 			mode,
 			size,
 			checksum,

@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -57,9 +59,9 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		var cidTarget cid.Cid
-		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, &nullErrorMessage, state, cidScanner{dst: &cidTarget}, kind)
+		err := sqlScanner.Scan(fsEntryID, uploadID, createdAt, updatedAt, state, &nullErrorMessage, util.CidScanner{Dst: &cidTarget}, kind)
 		if err != nil {
-			return err
+			return fmt.Errorf("scanning dag scan: %w", err)
 		}
 		if nullErrorMessage.Valid {
 			*errorMessage = &nullErrorMessage.String
@@ -77,7 +79,6 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 
 // DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID and optional states.
 func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
-
 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE upload_id = $1`
 	if len(states) > 0 {
 		query += " AND state IN ("
@@ -121,7 +122,7 @@ func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 		var path string
 		var size uint64
 		var cid cid.Cid
-		if err := rows.Scan(&path, &size, cidScanner{dst: &cid}); err != nil {
+		if err := rows.Scan(&path, &size, util.CidScanner{Dst: &cid}); err != nil {
 			return nil, err
 		}
 		link := model.LinkParams{
@@ -165,8 +166,32 @@ func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []b
 		sourceID,
 		offset,
 	)
+	return r.getNodeFromRow(row)
+}
+
+func (r *repo) findNodeByCid(ctx context.Context, c cid.Cid) (model.Node, error) {
+	findQuery := `
+		SELECT
+			cid,
+			size,
+			ufsdata,
+			path,
+			source_id,
+			offset
+		FROM nodes
+		WHERE cid = ?
+	`
+	row := r.db.QueryRowContext(
+		ctx,
+		findQuery,
+		c.Bytes(),
+	)
+	return r.getNodeFromRow(row)
+}
+
+func (r *repo) getNodeFromRow(row *sql.Row) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(cidScanner{dst: cid}, size, ufsdata, path, sourceID, offset)
+		return row.Scan(util.CidScanner{Dst: cid}, size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -244,7 +269,7 @@ func (r *repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 
 // GetChildScans finds scans for child nodes of a given directory scan's file system entry.
 func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
-	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.parent_id = ?`
+	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, directoryScans.FsEntryID())
 	if err != nil {
 		return nil, err
@@ -263,6 +288,23 @@ func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.Director
 	return dagScans, rows.Err()
 }
 
+// func (r *repo) GetDAGScanByFsEntryID(ctx context.Context, fsEntryID id.FSEntryID) ([]model.DAGScan, error) {
+// 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE dag_scans.fs_entry_id = ?`
+// 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
+// 	defer row.Close()
+// 	scanner := r.dagScanScanner(row)
+// 	var dagScans []model.DAGScan
+// 	for row.Next() {
+// 		ds, err := model.ReadDAGScanFromDatabase(scanner)
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		dagScans = append(dagScans, ds)
+// 	}
+
+// 	return dagScans, row.Err()
+// }
+
 // UpdateDAGScan updates a DAG scan in the repository.
 func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cid *cid.Cid) error {
@@ -275,7 +317,7 @@ func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			updatedAt,
 			errorMessage,
 			state,
-			cid.Bytes(),
+			Null(cid),
 			fsEntryID,
 		)
 		return err

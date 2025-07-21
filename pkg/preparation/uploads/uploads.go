@@ -12,12 +12,18 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-var log = logging.Logger("uploads")
+var log = logging.Logger("preparation/uploads")
+
+type UploadDAGScanWorkerFn func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
+type UploadShardWorkerFn func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error
 
 type API struct {
-	Repo                Repo
-	RunNewScan          RunNewScanFn
-	UploadDAGScanWorker func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+	Repo                  Repo
+	RunNewScan            RunNewScanFn
+	UploadDAGScanWorker   UploadDAGScanWorkerFn
+	AddNodeToUploadShards AddNodeToUploadShardsFn
+	UploadShardWorker     UploadShardWorkerFn
 }
 
 // RunNewScanFn is a function that initiates a new scan for a given upload ID, returning the root file system entry ID.
@@ -68,6 +74,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 		}
 		switch upload.State() {
 		case model.UploadStatePending:
+			log.Debugf("Starting upload %s in state %s", upload.ID(), upload.State())
 			// TK: Persist state?
 			err := upload.Start()
 			if err != nil {
@@ -75,8 +82,9 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			}
 			e.start()
 		case model.UploadStateScanning:
+			log.Debugf("Running new scan for upload %s in state %s", upload.ID(), upload.State())
 			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-				err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
+				_, err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
 				if err != nil {
 					return fmt.Errorf("creating DAG scan: %w", err)
 				}
@@ -92,7 +100,9 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			}
 			// check if scan completed successfully
 			if fsEntryID != id.Nil {
+				log.Debugf("Scan completed successfully, root fs entry ID: %s", fsEntryID)
 				close(e.dagWork) // close the work channel to signal completion
+				// TK: Persist state?
 				if err := upload.ScanComplete(fsEntryID); err != nil {
 					return fmt.Errorf("completing scan: %w", err)
 				}
@@ -102,29 +112,34 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				}
 			}
 		case model.UploadStateGeneratingDAG:
+			log.Debugf("Waiting for DAG scan worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the DAG scan worker to finish
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case err := <-e.dagResult:
 				if err != nil {
 					return fmt.Errorf("DAG scan worker error: %w", err)
 				}
-			case <-ctx.Done():
-				return ctx.Err()
 			}
+			fmt.Println(upload.RootFSEntryID())
 			rootCid, err := a.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
 			if err != nil {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
 			if rootCid != cid.Undef {
+				// TK: Persist state?
 				if err := upload.DAGGenerationComplete(rootCid); err != nil {
 					return fmt.Errorf("completing DAG generation: %w", err)
 				}
 			} else {
+				panic("restarting 2")
 				if err := e.restart(); err != nil {
 					return fmt.Errorf("restarting upload: %w", err)
 				}
 			}
 		case model.UploadStateSharding:
+			log.Debugf("Waiting for shards worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the shards worker to finish
 			select {
 			case err := <-e.shardResult:
@@ -135,10 +150,12 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				return ctx.Err()
 			}
 			// just advance as this is currently a placeholder
+			// TK: Persist state?
 			if err := upload.ShardingComplete(); err != nil {
 				return fmt.Errorf("completing sharding: %w", err)
 			}
 		case model.UploadStateUploading:
+			log.Debugf("Waiting for upload worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the upload worker to finish
 			select {
 			case err := <-e.uploadResult:
@@ -149,6 +166,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				return ctx.Err()
 			}
 			// just advance as this is currently a placeholder
+			// TK: Persist state?
 			if err := upload.Complete(); err != nil {
 				return fmt.Errorf("completing upload: %w", err)
 			}
@@ -177,6 +195,7 @@ type executor struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	dagWork           chan struct{}
+	shardWork         chan struct{}
 	wg                sync.WaitGroup
 	dagResult         chan error
 	shardResult       chan error
@@ -188,6 +207,7 @@ type executor struct {
 func setupExecutor(originalCtx context.Context, upload *model.Upload, u API, opts ...ExecutionOption) *executor {
 	ctx, cancel := context.WithCancel(originalCtx)
 	dagWork := make(chan struct{}, 1)
+	shardWork := make(chan struct{}, 1)
 	dagResult := make(chan error, 1)
 	shardResult := make(chan error, 1)
 	uploadResult := make(chan error, 1)
@@ -197,6 +217,7 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u API, opt
 		ctx:               ctx,
 		cancel:            cancel,
 		dagWork:           dagWork,
+		shardWork:         shardWork,
 		dagResult:         dagResult,
 		shardResult:       shardResult,
 		uploadResult:      uploadResult,
@@ -219,7 +240,7 @@ func (e *executor) start() {
 		e.runShardsWorker()
 	}
 	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
-		e.uploadWorker()
+		// e.runUploadWorker()
 	}
 }
 
@@ -229,7 +250,11 @@ func (e *executor) runDAGScanWorker() {
 	go func() {
 		defer e.wg.Done()
 		e.dagResult <- e.u.UploadDAGScanWorker(e.ctx, e.dagWork, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
-			log.Debugf("DAG scan worker found node %s", node.CID())
+			if err := e.u.AddNodeToUploadShards(e.ctx, e.upload.ID(), node.CID()); err != nil {
+				return fmt.Errorf("adding node to upload shard: %w", err)
+			}
+			// TK: Only signal if there's a new *closed* shard, ideally.
+			e.shardWork <- struct{}{} // signal that there is work to be done for shards
 			return nil
 		})
 	}()
@@ -242,10 +267,11 @@ func (e *executor) runShardsWorker() {
 		defer e.wg.Done()
 		// put the worker for shards processing here, when it exists
 		e.shardResult <- nil // Placeholder for shard processing result
+		// e.shardResult <- e.u.UploadShardWorker(e.ctx, e.shardWork, e.upload.ID())
 	}()
 }
 
-func (e *executor) uploadWorker() {
+func (e *executor) runUploadWorker() {
 	log.Debugf("Starting upload worker for upload %s", e.upload.ID())
 	e.wg.Add(1)
 	go func() {
