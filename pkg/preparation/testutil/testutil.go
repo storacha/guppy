@@ -12,7 +12,9 @@ import (
 // CreateTestDB creates a temporary SQLite database for testing. It returns the
 // database connection, a cleanup function, and any error encountered.
 func CreateTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite", ":memory:")
+	t.Helper()
+
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
 	require.NoError(t, err, "failed to open in-memory SQLite database")
 
 	t.Cleanup(func() {

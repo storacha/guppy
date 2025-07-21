@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"os"
 
 	"github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -23,13 +22,19 @@ func (e ErrUnrecognizedSourceKind) Error() string {
 // API is the API for accessing and managing sources.
 type API struct {
 	Repo Repo
+	// GetLocalFSForPathFn is called to get an fs.FS for a [model.LocalSourceKind] source.
+	GetLocalFSForPathFn func(path string) (fs.FS, error)
 }
 
 // Access returns an fs.FS for the given source, or an error if the source kind is not supported.
 func (a API) Access(source *model.Source) (fs.FS, error) {
 	switch source.Kind() {
 	case model.LocalSourceKind:
-		return os.DirFS(source.Path()), nil
+		fs, err := a.GetLocalFSForPathFn(source.Path())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get local FS for path %s: %w", source.Path(), err)
+		}
+		return fs, nil
 	default:
 		return nil, ErrUnrecognizedSourceKind{Kind: source.Kind()}
 	}

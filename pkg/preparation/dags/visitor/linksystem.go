@@ -13,6 +13,7 @@ import (
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/linking"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/k0kubun/pp/v3"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -71,6 +72,7 @@ func (v unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototy
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("unixFSNodeVisitorEncoderChooser: choosing unixFSNodeVisitorEncoder for link prototype %v\n", lp)
 	return unixFSNodeVisitorEncoder{
 		v:        v.v,
 		original: original,
@@ -82,8 +84,10 @@ func (v unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error
 	if err != nil {
 		return fmt.Errorf("encoding node: %w", err)
 	}
+	pp.Print(node)
 	pbNode, ok := node.(dagpb.PBNode)
 	if !ok {
+		panic(fmt.Sprintf("expected PBNode, got %T", node))
 		return fmt.Errorf("failed to cast node to PBNode")
 	}
 	ufsData := pbNode.FieldData().Must().Bytes()
@@ -149,6 +153,23 @@ func (v rawVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("encoding node: %w", err)
 	}
+
+	// 	cid, data, err := encode(func(n datamodel.Node, w io.Writer) error {
+	// 	data, err := node.AsBytes()
+	// 	if err != nil {
+	// 		return fmt.Errorf("getting bytes from node: %w", err)
+	// 	}
+	// 	_, err = w.Write(data)
+	// 	if err != nil {
+	// 		return fmt.Errorf("writing bytes to writer: %w", err)
+	// 	}
+	// 	return nil
+	// }, cid.Raw, node, w)
+
+	// if err != nil {
+	// 	return fmt.Errorf("encoding node: %w", err)
+	// }
+
 	return v.v.VisitRawNode(cid, uint64(len(data)), data)
 }
 

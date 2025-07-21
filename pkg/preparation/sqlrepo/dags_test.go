@@ -33,3 +33,19 @@ func TestFindOrCreateRawNode(t *testing.T) {
 		require.NotEqual(t, rawNode.CID(), rawNode3.CID())
 	})
 }
+
+// func TestUpdateDAGScan(t *testing.T) {
+// 	t.Run("updates the DAG scan state and error message", func(t *testing.T) {
+// 		repo := sqlrepo.New(testutil.CreateTestDB(t))
+// 		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), false, id.New())
+// 		require.NoError(t, err)
+
+// 		err = repo.UpdateDAGScan(t.Context(), dagScan)
+// 		require.NoError(t, err)
+
+// 		updatedScan, err := repo.GetDA(t.Context(), dagScan.ID())
+// 		require.NoError(t, err)
+// 		require.Equal(t, sqlrepo.DAGScanStateFailed, updatedScan.State)
+// 		require.Equal(t, "some error", updatedScan.ErrorMessage)
+// 	})
+// }
