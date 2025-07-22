@@ -10,7 +10,7 @@ import (
 )
 
 type rawNodeVisitorEncoder struct {
-	v              UnixFSFileNodeVisitor
+	visitRawNode   func(cid cid.Cid, size uint64, data []byte) error
 	originalEncode codec.Encoder
 }
 
@@ -20,5 +20,5 @@ func (e rawNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("encoding node: %w", err)
 	}
-	return e.v.visitRawNode(cid, uint64(len(data)), data)
+	return e.visitRawNode(cid, uint64(len(data)), data)
 }

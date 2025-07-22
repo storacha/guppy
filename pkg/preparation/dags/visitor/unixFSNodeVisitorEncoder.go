@@ -11,8 +11,8 @@ import (
 )
 
 type unixFSNodeVisitorEncoder struct {
-	v              UnixFSDirectoryNodeVisitor
-	originalEncode codec.Encoder
+	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
+	originalEncode  codec.Encoder
 }
 
 // Encode encodes the node as a UnixFS node and visits it using the
@@ -33,7 +33,7 @@ func (e unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error
 		_, link := iter.Next()
 		links = append(links, link)
 	}
-	if err := e.v.visitUnixFSNode(cid, uint64(len(data)), ufsData, links, data); err != nil {
+	if err := e.visitUnixFSNode(cid, uint64(len(data)), ufsData, links, data); err != nil {
 		return fmt.Errorf("visiting unixfs node: %w", err)
 	}
 	return nil

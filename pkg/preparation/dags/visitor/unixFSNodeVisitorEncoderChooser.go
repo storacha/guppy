@@ -1,12 +1,14 @@
 package visitor
 
 import (
+	"github.com/ipfs/go-cid"
+	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime/codec"
 	"github.com/ipld/go-ipld-prime/datamodel"
 )
 
 type unixFSNodeVisitorEncoderChooser struct {
-	v               UnixFSDirectoryNodeVisitor
+	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
 	originalChooser func(datamodel.LinkPrototype) (codec.Encoder, error)
 }
 
@@ -16,7 +18,7 @@ func (ec unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkProtot
 		return nil, err
 	}
 	return unixFSNodeVisitorEncoder{
-		v:              ec.v,
-		originalEncode: originalEncode,
+		visitUnixFSNode: ec.visitUnixFSNode,
+		originalEncode:  originalEncode,
 	}.Encode, nil
 }

@@ -65,7 +65,7 @@ func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
 	ls.StorageWriteOpener = noopStorage
 	// use the visitor encoder chooser to handle encoding
 	ls.EncoderChooser = unixFSNodeVisitorEncoderChooser{
-		v:               v,
+		visitUnixFSNode: v.visitUnixFSNode,
 		originalChooser: ls.EncoderChooser,
 	}.EncoderChooser
 
@@ -76,7 +76,8 @@ func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
 func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 	ls := v.UnixFSDirectoryNodeVisitor.LinkSystem()
 	ls.EncoderChooser = unixFSOrRawVisitorEncoderChooser{
-		v:               v,
+		visitUnixFSNode: v.visitUnixFSNode,
+		visitRawNode:    v.visitRawNode,
 		originalChooser: ls.EncoderChooser,
 	}.EncoderChooser
 	return ls
