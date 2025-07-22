@@ -8,8 +8,8 @@ import (
 )
 
 type unixFSNodeVisitorEncoderChooser struct {
-	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
 	originalChooser func(datamodel.LinkPrototype) (codec.Encoder, error)
+	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
 }
 
 func (ec unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
