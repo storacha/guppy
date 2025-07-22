@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/ipfs/go-cid"
-	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime/codec"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/linking"
@@ -56,49 +55,6 @@ func noopStorage(lc linking.LinkContext) (io.Writer, linking.BlockWriteCommitter
 	}, nil
 }
 
-type unixFSNodeVisitorEncoderChooser struct {
-	v        UnixFSNodeVisitor
-	original func(datamodel.LinkPrototype) (codec.Encoder, error)
-}
-
-type unixFSNodeVisitorEncoder struct {
-	v        UnixFSNodeVisitor
-	original codec.Encoder
-}
-
-func (v unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
-	original, err := v.original(lp)
-	if err != nil {
-		return nil, err
-	}
-	return unixFSNodeVisitorEncoder{
-		v:        v.v,
-		original: original,
-	}.Encode, nil
-}
-
-func (v unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
-	cid, data, err := encode(v.original, cid.DagProtobuf, node, w)
-	if err != nil {
-		return fmt.Errorf("encoding node: %w", err)
-	}
-	pbNode, ok := node.(dagpb.PBNode)
-	if !ok {
-		return fmt.Errorf("failed to cast node to PBNode")
-	}
-	ufsData := pbNode.FieldData().Must().Bytes()
-	links := make([]dagpb.PBLink, 0, pbNode.FieldLinks().Length())
-	iter := pbNode.FieldLinks().Iterator()
-	for !iter.Done() {
-		_, link := iter.Next()
-		links = append(links, link)
-	}
-	if err := v.v.VisitUnixFSNode(cid, uint64(len(data)), ufsData, links, data); err != nil {
-		return fmt.Errorf("visiting unixfs node: %w", err)
-	}
-	return nil
-}
-
 // LinkSystem returns a LinkSystem that visits UnixFS nodes using UnixFSNodeVisitor when links are stored.
 func (v UnixFSNodeVisitor) LinkSystem() *linking.LinkSystem {
 	ls := cidlink.DefaultLinkSystem()
@@ -114,42 +70,6 @@ func (v UnixFSNodeVisitor) LinkSystem() *linking.LinkSystem {
 	}.EncoderChooser
 
 	return &ls
-}
-
-type unixFSVisitorEncoderChooser struct {
-	v        UnixFSVisitor
-	original func(datamodel.LinkPrototype) (codec.Encoder, error)
-}
-
-type rawVisitorEncoder struct {
-	v        UnixFSVisitor
-	original codec.Encoder
-}
-
-func (v unixFSVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
-	original, err := v.original(lp)
-	if err != nil {
-		return nil, err
-	}
-	if lp.(cidlink.LinkPrototype).Codec == cid.DagProtobuf {
-		return unixFSNodeVisitorEncoder{
-			v:        v.v.UnixFSNodeVisitor,
-			original: original,
-		}.Encode, nil
-	}
-	return rawVisitorEncoder{
-		v:        v.v,
-		original: original,
-	}.Encode, nil
-}
-
-func (v rawVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
-	// Implement the encoding logic here
-	cid, data, err := encode(v.original, cid.Raw, node, w)
-	if err != nil {
-		return fmt.Errorf("encoding node: %w", err)
-	}
-	return v.v.VisitRawNode(cid, uint64(len(data)), data)
 }
 
 // LinkSystem returns a LinkSystem that visits raw nodes or UnixFS nodes using UnixFSVisitor when links are stored.
