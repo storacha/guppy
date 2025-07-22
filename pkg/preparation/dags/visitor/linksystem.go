@@ -56,7 +56,7 @@ func noopStorage(lc linking.LinkContext) (io.Writer, linking.BlockWriteCommitter
 }
 
 // LinkSystem returns a LinkSystem that visits UnixFS nodes using UnixFSNodeVisitor when links are stored.
-func (v UnixFSNodeVisitor) LinkSystem() *linking.LinkSystem {
+func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
 	ls := cidlink.DefaultLinkSystem()
 
 	// uses identity hasher to avoid extra hash computation, since we will do that in the encode step
@@ -65,19 +65,19 @@ func (v UnixFSNodeVisitor) LinkSystem() *linking.LinkSystem {
 	ls.StorageWriteOpener = noopStorage
 	// use the visitor encoder chooser to handle encoding
 	ls.EncoderChooser = unixFSNodeVisitorEncoderChooser{
-		v:        v,
-		original: ls.EncoderChooser,
+		v:               v,
+		originalChooser: ls.EncoderChooser,
 	}.EncoderChooser
 
 	return &ls
 }
 
 // LinkSystem returns a LinkSystem that visits raw nodes or UnixFS nodes using UnixFSVisitor when links are stored.
-func (v UnixFSVisitor) LinkSystem() *linking.LinkSystem {
-	ls := v.UnixFSNodeVisitor.LinkSystem()
-	ls.EncoderChooser = unixFSVisitorEncoderChooser{
-		v:        v,
-		original: ls.EncoderChooser,
+func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
+	ls := v.UnixFSDirectoryNodeVisitor.LinkSystem()
+	ls.EncoderChooser = unixFSOrRawVisitorEncoderChooser{
+		v:               v,
+		originalChooser: ls.EncoderChooser,
 	}.EncoderChooser
 	return ls
 }

@@ -11,14 +11,14 @@ import (
 )
 
 type unixFSNodeVisitorEncoder struct {
-	v        UnixFSNodeVisitor
-	original codec.Encoder
+	v              UnixFSDirectoryNodeVisitor
+	originalEncode codec.Encoder
 }
 
 // Encode encodes the node as a UnixFS node and visits it using the
 // UnixFSNodeVisitor. The node must be a PBNode, containing UnixFS data.
-func (v unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
-	cid, data, err := encode(v.original, cid.DagProtobuf, node, w)
+func (e unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
+	cid, data, err := encode(e.originalEncode, cid.DagProtobuf, node, w)
 	if err != nil {
 		return fmt.Errorf("encoding node: %w", err)
 	}
@@ -33,7 +33,7 @@ func (v unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error
 		_, link := iter.Next()
 		links = append(links, link)
 	}
-	if err := v.v.VisitUnixFSNode(cid, uint64(len(data)), ufsData, links, data); err != nil {
+	if err := e.v.visitUnixFSNode(cid, uint64(len(data)), ufsData, links, data); err != nil {
 		return fmt.Errorf("visiting unixfs node: %w", err)
 	}
 	return nil

@@ -6,17 +6,17 @@ import (
 )
 
 type unixFSNodeVisitorEncoderChooser struct {
-	v        UnixFSNodeVisitor
-	original func(datamodel.LinkPrototype) (codec.Encoder, error)
+	v               UnixFSDirectoryNodeVisitor
+	originalChooser func(datamodel.LinkPrototype) (codec.Encoder, error)
 }
 
-func (v unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
-	original, err := v.original(lp)
+func (ec unixFSNodeVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
+	originalEncode, err := ec.originalChooser(lp)
 	if err != nil {
 		return nil, err
 	}
 	return unixFSNodeVisitorEncoder{
-		v:        v.v,
-		original: original,
+		v:              ec.v,
+		originalEncode: originalEncode,
 	}.Encode, nil
 }

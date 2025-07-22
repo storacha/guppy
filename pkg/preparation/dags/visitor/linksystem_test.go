@@ -45,7 +45,7 @@ func TestUnixFSVisitorLinkSystem(t *testing.T) {
 	sourceID := id.New()
 	reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 
-	v := visitor.NewUnixFSVisitor(
+	v := visitor.NewUnixFSFileNodeVisitor(
 		t.Context(),
 		repo,
 		sourceID,
