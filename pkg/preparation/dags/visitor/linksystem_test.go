@@ -2,10 +2,16 @@ package visitor_test
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-unixfsnode/data"
 	"github.com/ipfs/go-unixfsnode/data/builder"
+	dagpb "github.com/ipld/go-codec-dagpb"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
+	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -14,12 +20,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// From "github.com/ipfs/go-unixfsnode/data/builder"
+var (
+	fileLinkProto = cidlink.LinkPrototype{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    uint64(multicodec.DagPb),
+			MhType:   multihash.SHA2_256,
+			MhLength: 32,
+		},
+	}
+	leafLinkProto = cidlink.LinkPrototype{
+		Prefix: cid.Prefix{
+			Version:  1,
+			Codec:    uint64(multicodec.Raw),
+			MhType:   multihash.SHA2_256,
+			MhLength: 32,
+		},
+	}
+)
+
 func TestUnixFSVisitorLinkSystem(t *testing.T) {
 	repo := sqlrepo.New(testutil.CreateTestDB(t))
 	sourceID := id.New()
 	reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 
-	visitor := visitor.NewUnixFSVisitor(
+	v := visitor.NewUnixFSVisitor(
 		t.Context(),
 		repo,
 		sourceID,
@@ -28,8 +54,41 @@ func TestUnixFSVisitorLinkSystem(t *testing.T) {
 		func(node model.Node, data []byte) error { return nil },
 	)
 
-	link, _, err := builder.BuildUnixFSFile(reader, "size-16", visitor.LinkSystem())
-	require.NoError(t, err)
+	t.Run("encodes a UnixFS node", func(t *testing.T) {
+		node, err := builder.BuildUnixFS(func(b *builder.Builder) {
+			builder.FileSize(b, 128)
+			builder.BlockSizes(b, []uint64{8, 8, 8, 8, 8, 8, 8, 8})
+		})
 
-	fmt.Printf("link: %v\n", link)
+		dpbb := dagpb.Type.PBNode.NewBuilder()
+		pbm, err := dpbb.BeginMap(2)
+		require.NoError(t, err)
+		pblb, err := pbm.AssembleEntry("Links")
+		require.NoError(t, err)
+		pbl, err := pblb.BeginList(0)
+		require.NoError(t, err)
+		err = pbl.Finish()
+		require.NoError(t, err)
+		err = pbm.AssembleKey().AssignString("Data")
+		require.NoError(t, err)
+		err = pbm.AssembleValue().AssignBytes(data.EncodeUnixFSData(node))
+		require.NoError(t, err)
+		err = pbm.Finish()
+		require.NoError(t, err)
+		pbnode := dpbb.Build()
+
+		encoderChooser := v.LinkSystem().EncoderChooser
+		encoder, err := encoderChooser(fileLinkProto)
+		require.NoError(t, err)
+		err = encoder(pbnode, bytes.NewBuffer(nil))
+		require.NoError(t, err)
+	})
+
+	t.Run("encodes a leaf node", func(t *testing.T) {
+		encoderChooser := v.LinkSystem().EncoderChooser
+		encoder, err := encoderChooser(leafLinkProto)
+		require.NoError(t, err)
+		err = encoder(basicnode.NewBytes([]byte{}), bytes.NewBuffer(nil))
+		require.NoError(t, err)
+	})
 }
