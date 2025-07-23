@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -33,7 +34,20 @@ func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, cb NodeCallba
 }
 
 // visitUnixFSNode is called for each UnixFS node found during the scan.
-func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error {
+func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
+	size := uint64(len(data))
+	pbNode, ok := datamodelNode.(dagpb.PBNode)
+	if !ok {
+		return fmt.Errorf("failed to cast node to PBNode")
+	}
+	ufsData := pbNode.FieldData().Must().Bytes()
+	pbLinks := make([]dagpb.PBLink, 0, pbNode.FieldLinks().Length())
+	iter := pbNode.FieldLinks().Iterator()
+	for !iter.Done() {
+		_, pbLink := iter.Next()
+		pbLinks = append(pbLinks, pbLink)
+	}
+
 	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, ufsData)
 	if err != nil {
 		return fmt.Errorf("creating unixfs node: %w", err)
@@ -81,7 +95,9 @@ func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.Source
 }
 
 // visitRawNode is called for each raw node found during the scan.
-func (v UnixFSFileNodeVisitor) visitRawNode(cid cid.Cid, size uint64, data []byte) error {
+func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
+	size := uint64(len(data))
+
 	// this raw block has already been read, so we subtract its size to get the beginning offset
 	offset := v.readerPosition.Offset() - size
 	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.path, v.sourceID, offset)
