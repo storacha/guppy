@@ -3,43 +3,51 @@ package visitor
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/ipfs/go-cid"
 	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-// Repo defines the interface for a repository that manages file system entries during a scan
-type Repo interface {
-	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error)
-	FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, ufsdata []byte) (*model.UnixFSNode, bool, error)
-	CreateLinks(ctx context.Context, parent cid.Cid, links []model.LinkParams) error
-}
-
 // NodeCallback is a function type that is called for each node created during the scan.
 type NodeCallback func(node model.Node, data []byte) error
 
-// UnixFSNodeVisitor is a struct that implements the directory.UnixFSNodeVisitor interface.
-type UnixFSNodeVisitor struct {
+// A UnixFSDirectoryNodeVisitor provides a link system for
+// [builder.BuildUnixFSDirectory] which visits produced nodes with [cb] as
+// they're encoded.
+type UnixFSDirectoryNodeVisitor struct {
 	repo Repo
 	ctx  context.Context
 	cb   NodeCallback
 }
 
-// NewUnixFSNodeVisitor creates a new UnixFSNodeVisitor with the provided context, repository, source ID, path, and callback function.
-func NewUnixFSNodeVisitor(ctx context.Context, repo Repo, cb NodeCallback) UnixFSNodeVisitor {
-	return UnixFSNodeVisitor{
+// NewUnixFSDirectoryNodeVisitor creates a new [UnixFSDirectoryNodeVisitor].
+func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, cb NodeCallback) UnixFSDirectoryNodeVisitor {
+	return UnixFSDirectoryNodeVisitor{
 		repo: repo,
 		ctx:  ctx,
 		cb:   cb,
 	}
 }
 
-// VisitUnixFSNode is called for each UnixFS node found during the scan.
-func (v UnixFSNodeVisitor) VisitUnixFSNode(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error {
+// visitUnixFSNode is called for each UnixFS node found during the scan.
+func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
+	size := uint64(len(data))
+	pbNode, ok := datamodelNode.(dagpb.PBNode)
+	if !ok {
+		return fmt.Errorf("failed to cast node to PBNode")
+	}
+	ufsData := pbNode.FieldData().Must().Bytes()
+	pbLinks := make([]dagpb.PBLink, 0, pbNode.FieldLinks().Length())
+	iter := pbNode.FieldLinks().Iterator()
+	for !iter.Done() {
+		_, pbLink := iter.Next()
+		pbLinks = append(pbLinks, pbLink)
+	}
+
 	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, ufsData)
 	if err != nil {
 		return fmt.Errorf("creating unixfs node: %w", err)
@@ -67,25 +75,29 @@ func (v UnixFSNodeVisitor) VisitUnixFSNode(cid cid.Cid, size uint64, ufsData []b
 	return nil
 }
 
-// UnixFSVisitor is a struct that implements the file.UnixFSVisitor interface.
-type UnixFSVisitor struct {
-	UnixFSNodeVisitor
+// A UnixFSFileNodeVisitor provides a link system for
+// [builder.BuildUnixFSFile] which visits produced nodes with [cb] as
+// they're encoded.
+type UnixFSFileNodeVisitor struct {
+	UnixFSDirectoryNodeVisitor
 	sourceID       id.SourceID
 	path           string // path is the root path of the scan
 	readerPosition ReaderPosition
 }
 
-func NewUnixFSVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSVisitor {
-	return UnixFSVisitor{
-		UnixFSNodeVisitor: NewUnixFSNodeVisitor(ctx, repo, cb),
-		sourceID:          sourceID,
-		path:              path,
-		readerPosition:    readerPosition,
+func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSFileNodeVisitor {
+	return UnixFSFileNodeVisitor{
+		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, cb),
+		sourceID:                   sourceID,
+		path:                       path,
+		readerPosition:             readerPosition,
 	}
 }
 
-// VisitRawNode is called for each raw node found during the scan.
-func (v UnixFSVisitor) VisitRawNode(cid cid.Cid, size uint64, data []byte) error {
+// visitRawNode is called for each raw node found during the scan.
+func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
+	size := uint64(len(data))
+
 	// this raw block has already been read, so we subtract its size to get the beginning offset
 	offset := v.readerPosition.Offset() - size
 	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.path, v.sourceID, offset)
@@ -98,34 +110,4 @@ func (v UnixFSVisitor) VisitRawNode(cid cid.Cid, size uint64, data []byte) error
 		}
 	}
 	return nil
-}
-
-type ReaderPosition interface {
-	io.Reader
-	Offset() uint64
-}
-
-// ReaderPositionFromReader creates a ReaderPosition from an io.Reader.
-func ReaderPositionFromReader(r io.Reader) ReaderPosition {
-	return &readerPosition{
-		reader: r,
-		offset: 0,
-	}
-}
-
-type readerPosition struct {
-	reader io.Reader
-	offset uint64
-}
-
-func (frp *readerPosition) Read(p []byte) (n int, err error) {
-	n, err = frp.reader.Read(p)
-	if n > 0 {
-		frp.offset += uint64(n)
-	}
-	return n, err
-}
-
-func (frp *readerPosition) Offset() uint64 {
-	return frp.offset
 }
