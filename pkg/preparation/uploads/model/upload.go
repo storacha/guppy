@@ -60,7 +60,7 @@ func RestartableState(state UploadState) bool {
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
 type Upload struct {
 	id              id.UploadID
-	configurationID id.ConfigurationID
+	spaceID id.SpaceID
 	sourceID        id.SourceID
 	createdAt       time.Time
 	updatedAt       time.Time     // The last time the upload was updated
@@ -75,10 +75,11 @@ func (u *Upload) ID() id.UploadID {
 	return u.id
 }
 
-// ConfigurationID returns the ID of the configuration associated with the upload.
-func (u *Upload) ConfigurationID() id.ConfigurationID {
-	return u.configurationID
+// SpaceID returns the ID of the space associated with the upload.
+func (u *Upload) SpaceID() id.SpaceID {
+	return u.spaceID
 }
+
 
 // SourceID returns the ID of the source associated with the upload.
 func (u *Upload) SourceID() id.SourceID {
@@ -196,8 +197,8 @@ func validateUpload(upload *Upload) error {
 	if upload.id == id.Nil {
 		return types.ErrEmpty{Field: "upload ID"}
 	}
-	if upload.configurationID == id.Nil {
-		return types.ErrEmpty{Field: "configuration ID"}
+	if upload.spaceID == id.Nil {
+		return types.ErrEmpty{Field: "space ID"}
 	}
 	if upload.sourceID == id.Nil {
 		return types.ErrEmpty{Field: "source ID"}
@@ -224,10 +225,10 @@ func validateUpload(upload *Upload) error {
 }
 
 // NewUpload creates a new Upload instance with the given parameters.
-func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Upload, error) {
+func NewUpload(spaceID id.SpaceID, sourceID id.SourceID) (*Upload, error) {
 	upload := &Upload{
-		id:              id.New(),
-		configurationID: configurationID,
+		id:      id.New(),
+		spaceID: spaceID,
 		sourceID:        sourceID,
 		createdAt:       time.Now().UTC().Truncate(time.Second),
 		updatedAt:       time.Now().UTC().Truncate(time.Second),
@@ -241,21 +242,21 @@ func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Uploa
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error
+type UploadWriter func(id id.UploadID, spaceID id.SpaceID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
-	return writer(upload.id, upload.configurationID, upload.sourceID, upload.createdAt, upload.updatedAt, upload.state, upload.errorMessage, upload.rootFSEntryID, upload.rootCID)
+	return writer(upload.id, upload.spaceID, upload.sourceID, upload.createdAt, upload.updatedAt, upload.state, upload.errorMessage, upload.rootFSEntryID, upload.rootCID)
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID *cid.Cid) error
+type UploadScanner func(id *id.UploadID, spaceID *id.SpaceID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID *cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {
 	var upload Upload
 
-	if err := scanner(&upload.id, &upload.configurationID, &upload.sourceID, &upload.createdAt, &upload.updatedAt, &upload.state, &upload.errorMessage, &upload.rootFSEntryID, &upload.rootCID); err != nil {
+	if err := scanner(&upload.id, &upload.spaceID, &upload.sourceID, &upload.createdAt, &upload.updatedAt, &upload.state, &upload.errorMessage, &upload.rootFSEntryID, &upload.rootCID); err != nil {
 		return nil, err
 	}
 

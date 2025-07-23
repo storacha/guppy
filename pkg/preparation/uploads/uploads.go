@@ -40,21 +40,21 @@ type API struct {
 	CloseUploadShards CloseUploadShardsFunc
 }
 
-// CreateUploads creates uploads for a given configuration and its associated sources.
-func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*model.Upload, error) {
-	log.Debugf("Creating uploads for configuration %s", configurationID)
-	sources, err := a.Repo.ListConfigurationSources(ctx, configurationID)
+// CreateUploads creates uploads for a given space and its associated sources.
+func (a API) CreateUploads(ctx context.Context, spaceID id.SpaceID) ([]*model.Upload, error) {
+	log.Debugf("Creating uploads for space %s", spaceID)
+	sources, err := a.Repo.ListSpaceSources(ctx, spaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Debugf("Found %d sources for configuration %s", len(sources), configurationID)
+	log.Debugf("Found %d sources for space %s", len(sources), spaceID)
 
-	uploads, err := a.Repo.CreateUploads(ctx, configurationID, sources)
+	uploads, err := a.Repo.CreateUploads(ctx, spaceID, sources)
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Created %d uploads for configuration %s", len(uploads), configurationID)
+	log.Debugf("Created %d uploads for space %s", len(uploads), spaceID)
 	return uploads, nil
 }
 

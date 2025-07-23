@@ -148,13 +148,15 @@ func TestExecuteUpload(t *testing.T) {
 		}),
 	)
 
-	configuration, err := api.CreateConfiguration(ctx, "Large Upload Configuration", configurationsmodel.WithShardSize(1<<16))
+	space, err := api.CreateSpace(t.Context(), "Large Upload Space", configurationsmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
 	require.NoError(t, err)
-	err = repo.AddSourceToConfiguration(ctx, configuration.ID(), source.ID())
+
+	err = repo.AddSourceToSpace(ctx, space.ID(), source.ID())
 	require.NoError(t, err)
-	uploads, err := api.CreateUploads(ctx, configuration.ID())
+
+	uploads, err := api.CreateUploads(ctx, space.ID())
 	require.NoError(t, err)
 	require.Len(t, uploads, 1, "expected exactly one upload to be created")
 	upload := uploads[0]

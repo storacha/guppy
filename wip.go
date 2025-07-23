@@ -41,9 +41,9 @@ func largeUpload(cCtx *cli.Context) error {
 
 	api := preparation.NewAPI(repo)
 
-	configuration, err := api.CreateConfiguration(cCtx.Context, "Large Upload Configuration")
+	space, err := api.CreateSpace(cCtx.Context, "Large Upload Space")
 	if err != nil {
-		return fmt.Errorf("command failed to create configuration: %w", err)
+		return fmt.Errorf("command failed to create space: %w", err)
 	}
 
 	source, err := api.CreateSource(cCtx.Context, "Large Upload Source", ".")
@@ -52,12 +52,12 @@ func largeUpload(cCtx *cli.Context) error {
 	}
 	fmt.Println("Created source:", source.ID())
 
-	err = repo.AddSourceToConfiguration(cCtx.Context, configuration.ID(), source.ID())
+	err = repo.AddSourceToSpace(cCtx.Context, space.ID(), source.ID())
 	if err != nil {
-		return fmt.Errorf("command failed to add source to configuration: %w", err)
+		return fmt.Errorf("command failed to add source to space: %w", err)
 	}
 
-	uploads, err := api.CreateUploads(cCtx.Context, configuration.ID())
+	uploads, err := api.CreateUploads(cCtx.Context, space.ID())
 	if err != nil {
 		return fmt.Errorf("command failed to create uploads: %w", err)
 	}
