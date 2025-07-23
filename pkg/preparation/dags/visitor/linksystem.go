@@ -68,29 +68,26 @@ func simpleLinkSystem() *linking.LinkSystem {
 
 // LinkSystem returns a LinkSystem that visits UnixFS nodes using UnixFSNodeVisitor when links are stored.
 func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
-	ls := simpleLinkSystem()
-
-	// use the visitor encoder chooser to handle encoding
-	ls.EncoderChooser = nodeEncoderChooser{
-		originalChooser: ls.EncoderChooser,
-		visitFns: map[uint64]VisitNodeFn{
-			cid.DagProtobuf: v.visitUnixFSNode,
-		},
-	}.EncoderChooser
-	return ls
+	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
+		cid.DagProtobuf: v.visitUnixFSNode,
+	})
 }
 
 // LinkSystem returns a LinkSystem that visits raw nodes or UnixFS nodes using UnixFSVisitor when links are stored.
 func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
+	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
+		cid.DagProtobuf: v.visitUnixFSNode,
+		cid.Raw:         v.visitRawNode,
+	})
+}
+
+func linkSystemWithVisitFns(visitFns map[uint64]VisitNodeFn) *linking.LinkSystem {
 	ls := simpleLinkSystem()
 
 	// use the visitor encoder chooser to handle encoding
 	ls.EncoderChooser = nodeEncoderChooser{
 		originalChooser: ls.EncoderChooser,
-		visitFns: map[uint64]VisitNodeFn{
-			cid.DagProtobuf: v.visitUnixFSNode,
-			cid.Raw:         v.visitRawNode,
-		},
+		visitFns:        visitFns,
 	}.EncoderChooser
 	return ls
 }
