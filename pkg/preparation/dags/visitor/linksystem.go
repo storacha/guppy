@@ -73,9 +73,8 @@ func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
 	// use the visitor encoder chooser to handle encoding
 	ls.EncoderChooser = nodeEncoderChooser{
 		originalChooser: ls.EncoderChooser,
-		visitUnixFSNode: v.visitUnixFSNode,
-		visitRawNode: func(node datamodel.Node, cid cid.Cid, data []byte) error {
-			return fmt.Errorf("raw nodes are not supported in UnixFSDirectoryNodeVisitor")
+		visitFns: map[uint64]VisitNodeFn{
+			cid.DagProtobuf: v.visitUnixFSNode,
 		},
 	}.EncoderChooser
 	return ls
@@ -88,8 +87,10 @@ func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 	// use the visitor encoder chooser to handle encoding
 	ls.EncoderChooser = nodeEncoderChooser{
 		originalChooser: ls.EncoderChooser,
-		visitUnixFSNode: v.visitUnixFSNode,
-		visitRawNode:    v.visitRawNode,
+		visitFns: map[uint64]VisitNodeFn{
+			cid.DagProtobuf: v.visitUnixFSNode,
+			cid.Raw:         v.visitRawNode,
+		},
 	}.EncoderChooser
 	return ls
 }
