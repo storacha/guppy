@@ -15,6 +15,8 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
+type VisitNodeFn func(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error
+
 // This file is certainly a bit of a hack-- the intent is to expose an ipld
 // LinkSystem that visits nodes upon storage. The LinkSystem doesn't easily do
 // this, because it wants to break up encoding, hashing, and storage into
@@ -55,25 +57,12 @@ func noopStorage(lc linking.LinkContext) (io.Writer, linking.BlockWriteCommitter
 	}, nil
 }
 
-func simpleLinkSystem() *linking.LinkSystem {
-	ls := cidlink.DefaultLinkSystem()
-
-	// uses identity hasher to avoid extra hash computation, since we will do that in the encode step
-	ls.HasherChooser = identityHasherChooser
-	// no op storage system
-	ls.StorageWriteOpener = noopStorage
-
-	return &ls
-}
-
-// LinkSystem returns a LinkSystem that visits UnixFS nodes using UnixFSNodeVisitor when links are stored.
 func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
 	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
 		cid.DagProtobuf: v.visitUnixFSNode,
 	})
 }
 
-// LinkSystem returns a LinkSystem that visits raw nodes or UnixFS nodes using UnixFSVisitor when links are stored.
 func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
 		cid.DagProtobuf: v.visitUnixFSNode,
@@ -81,13 +70,45 @@ func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 	})
 }
 
+// linkSystemWithVisitFns returns a [LinkSystem] which skips the storage step
+// entirely, and instead visits nodes using the provided visit functions during
+// the encode step. The visit functions will be called with the [datamodel.Node], the
+// [cid.Cid] of the node, and the raw data that was encoded with the encoder the
+// [cidlink.DefaultLinkSystem] would use.
 func linkSystemWithVisitFns(visitFns map[uint64]VisitNodeFn) *linking.LinkSystem {
-	ls := simpleLinkSystem()
+	ls := cidlink.DefaultLinkSystem()
+	originalChooser := ls.EncoderChooser
 
-	// use the visitor encoder chooser to handle encoding
-	ls.EncoderChooser = nodeEncoderChooser{
-		originalChooser: ls.EncoderChooser,
-		visitFns:        visitFns,
-	}.EncoderChooser
-	return ls
+	// uses identity hasher to avoid extra hash computation, since we will do that in the encode step
+	ls.HasherChooser = identityHasherChooser
+
+	// no op storage system
+	ls.StorageWriteOpener = noopStorage
+
+	ls.EncoderChooser = func(lp datamodel.LinkPrototype) (codec.Encoder, error) {
+		originalEncode, err := originalChooser(lp)
+		if err != nil {
+			return nil, err
+		}
+
+		codec := lp.(cidlink.LinkPrototype).Codec
+		visit, ok := visitFns[codec]
+		if !ok {
+			return nil, fmt.Errorf("no visit function for codec %d", codec)
+		}
+
+		return func(node datamodel.Node, w io.Writer) error {
+			cid, data, err := encode(originalEncode, codec, node, w)
+			if err != nil {
+				return fmt.Errorf("encoding node: %w", err)
+			}
+
+			if err := visit(node, cid, data); err != nil {
+				return fmt.Errorf("visiting node: %w", err)
+			}
+
+			return nil
+		}, nil
+	}
+	return &ls
 }
