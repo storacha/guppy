@@ -9,12 +9,12 @@ import (
 	"github.com/ipld/go-ipld-prime/datamodel"
 )
 
-type rawNodeVisitorEncoder struct {
+type rawEncoder struct {
 	visitRawNode   func(cid cid.Cid, size uint64, data []byte) error
 	originalEncode codec.Encoder
 }
 
-func (e rawNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
+func (e rawEncoder) Encode(node datamodel.Node, w io.Writer) error {
 	// Implement the encoding logic here
 	cid, data, err := encode(e.originalEncode, cid.Raw, node, w)
 	if err != nil {

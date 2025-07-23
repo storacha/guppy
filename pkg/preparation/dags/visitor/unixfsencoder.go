@@ -10,14 +10,14 @@ import (
 	"github.com/ipld/go-ipld-prime/datamodel"
 )
 
-type unixFSNodeVisitorEncoder struct {
+type unixFSEncoder struct {
 	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
 	originalEncode  codec.Encoder
 }
 
 // Encode encodes the node as a UnixFS node and visits it using the
 // UnixFSNodeVisitor. The node must be a PBNode, containing UnixFS data.
-func (e unixFSNodeVisitorEncoder) Encode(node datamodel.Node, w io.Writer) error {
+func (e unixFSEncoder) Encode(node datamodel.Node, w io.Writer) error {
 	cid, data, err := encode(e.originalEncode, cid.DagProtobuf, node, w)
 	if err != nil {
 		return fmt.Errorf("encoding node: %w", err)

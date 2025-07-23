@@ -10,13 +10,13 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 )
 
-type unixFSOrRawVisitorEncoderChooser struct {
+type nodeEncoderChooser struct {
 	originalChooser func(datamodel.LinkPrototype) (codec.Encoder, error)
 	visitUnixFSNode func(cid cid.Cid, size uint64, ufsData []byte, pbLinks []dagpb.PBLink, data []byte) error
 	visitRawNode    func(cid cid.Cid, size uint64, data []byte) error
 }
 
-func (ec unixFSOrRawVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
+func (ec nodeEncoderChooser) EncoderChooser(lp datamodel.LinkPrototype) (codec.Encoder, error) {
 	originalEncode, err := ec.originalChooser(lp)
 	if err != nil {
 		return nil, err
@@ -24,13 +24,13 @@ func (ec unixFSOrRawVisitorEncoderChooser) EncoderChooser(lp datamodel.LinkProto
 
 	switch lp.(cidlink.LinkPrototype).Codec {
 	case cid.DagProtobuf:
-		return unixFSNodeVisitorEncoder{
+		return unixFSEncoder{
 			originalEncode:  originalEncode,
 			visitUnixFSNode: ec.visitUnixFSNode,
 		}.Encode, nil
 
 	case cid.Raw:
-		return rawNodeVisitorEncoder{
+		return rawEncoder{
 			originalEncode: originalEncode,
 			visitRawNode:   ec.visitRawNode,
 		}.Encode, nil
