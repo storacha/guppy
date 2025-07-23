@@ -8,8 +8,8 @@ import (
 	"os"
 
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/storacha/guppy/pkg/preparation/configurations"
-	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	"github.com/storacha/guppy/pkg/preparation/spaces"
+	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
@@ -25,7 +25,7 @@ import (
 var log = logging.Logger("preparation")
 
 type Repo interface {
-	configurations.Repo
+	spaces.Repo
 	uploads.Repo
 	sources.Repo
 	scans.Repo
@@ -34,7 +34,7 @@ type Repo interface {
 }
 
 type API struct {
-	Configurations configurations.API
+	Spaces spaces.API
 	Uploads        uploads.API
 	Sources        sources.API
 	DAGs           dags.API
@@ -62,7 +62,7 @@ func NewAPI(repo Repo, options ...Option) API {
 	// first and initialize it last.
 	var uploadsAPI uploads.API
 
-	configurationsAPI := configurations.API{
+	spacesAPI := spaces.API{
 		Repo: repo,
 	}
 
@@ -125,7 +125,7 @@ func NewAPI(repo Repo, options ...Option) API {
 	}
 
 	return API{
-		Configurations: configurationsAPI,
+		Spaces: spacesAPI,
 		Uploads:        uploadsAPI,
 		Sources:        sourcesAPI,
 		DAGs:           dagsAPI,
@@ -140,16 +140,16 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 	}
 }
 
-func (a API) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
-	return a.Configurations.CreateConfiguration(ctx, name, options...)
+func (a API) CreateSpace(ctx context.Context, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
+	return a.Spaces.CreateSpace(ctx, name, options...)
 }
 
 func (a API) CreateSource(ctx context.Context, name string, path string, options ...sourcesmodel.SourceOption) (*sourcesmodel.Source, error) {
 	return a.Sources.CreateSource(ctx, name, path, options...)
 }
 
-func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*uploadsmodel.Upload, error) {
-	return a.Uploads.CreateUploads(ctx, configurationID)
+func (a API) CreateUploads(ctx context.Context, spaceID id.SpaceID) ([]*uploadsmodel.Upload, error) {
+	return a.Uploads.CreateUploads(ctx, spaceID)
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) error {

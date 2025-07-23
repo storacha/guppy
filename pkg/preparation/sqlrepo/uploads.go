@@ -22,7 +22,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
-			configuration_id,
+			space_id,
 			source_id,
 			created_at,
 			updated_at,
@@ -36,7 +36,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 	)
 	upload, err := model.ReadUploadFromDatabase(func(
 		id,
-		configurationID,
+		spaceID,
 		sourceID *id.SourceID,
 		createdAt,
 		updatedAt *time.Time,
@@ -48,7 +48,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		var nullErrorMessage sql.NullString
 		err := row.Scan(
 			id,
-			configurationID,
+			spaceID,
 			sourceID,
 			util.TimestampScanner(createdAt),
 			util.TimestampScanner(updatedAt),
@@ -86,19 +86,19 @@ func (r *repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID)
 	return sourceID, nil
 }
 
-// CreateUploads creates uploads for a given configuration and source IDs.
-func (r *repo) CreateUploads(ctx context.Context, configurationID id.ConfigurationID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
+// CreateUploads creates uploads for a given space and source IDs.
+func (r *repo) CreateUploads(ctx context.Context, spaceID id.SpaceID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
 	var uploads []*model.Upload
 	for _, sourceID := range sourceIDs {
-		upload, err := model.NewUpload(configurationID, sourceID)
+		upload, err := model.NewUpload(spaceID, sourceID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to instantiate upload for configuration %s and source %s: %w", configurationID, sourceID, err)
+			return nil, fmt.Errorf("failed to instantiate upload for space %s and source %s: %w", spaceID, sourceID, err)
 		}
 
 		insertQuery := `
 			INSERT INTO uploads (
 				id,
-				configuration_id,
+				space_id,
 				source_id,
 				created_at,
 				updated_at,
@@ -110,7 +110,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 
 		err = model.WriteUploadToDatabase(func(
 			id,
-			configurationID,
+			spaceID,
 			sourceID id.SourceID,
 			createdAt,
 			updatedAt time.Time,
@@ -122,7 +122,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 			_, err := r.db.ExecContext(ctx,
 				insertQuery,
 				id,
-				configurationID,
+				spaceID,
 				sourceID,
 				createdAt.Unix(),
 				updatedAt.Unix(),
@@ -134,7 +134,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 			return err
 		}, upload)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write upload to database for configuration %s and source %s: %w", configurationID, sourceID, err)
+			return nil, fmt.Errorf("failed to write upload to database for space %s and source %s: %w", spaceID, sourceID, err)
 		}
 		uploads = append(uploads, upload)
 	}
@@ -143,11 +143,11 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 
 // UpdateUpload implements uploads.Repo.
 func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
-	updateQuery := `UPDATE uploads SET configuration_id = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id, configurationID, sourceID id.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
+	updateQuery := `UPDATE uploads SET space_id = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
+	return model.WriteUploadToDatabase(func(id, spaceID, sourceID id.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), util.DbCid(&rootCID))
+			id, spaceID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), util.DbCid(&rootCID))
 		return err
 	}, upload)
 }
@@ -195,12 +195,12 @@ func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 	})
 }
 
-// ListConfigurationSources lists all sources associated with a given configuration ID.
-func (r *repo) ListConfigurationSources(ctx context.Context, configurationID id.ConfigurationID) ([]id.SourceID, error) {
+// ListSpaceSources lists all sources associated with a given space ID.
+func (r *repo) ListSpaceSources(ctx context.Context, spaceID id.SpaceID) ([]id.SourceID, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT cs.source_id
-		FROM configuration_sources cs
-		WHERE cs.configuration_id = ?`, configurationID,
+		FROM space_sources cs
+		WHERE cs.space_id = ?`, spaceID,
 	)
 	if err != nil {
 		return nil, err

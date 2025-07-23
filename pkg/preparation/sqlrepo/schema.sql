@@ -4,8 +4,8 @@ PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 
 -- DROP TABLE IF EXISTS sources CASCADE;
--- DROP TABLE IF EXISTS configurations CASCADE;
--- DROP TABLE IF EXISTS configuration_sources;
+-- DROP TABLE IF EXISTS spaces CASCADE;
+-- DROP TABLE IF EXISTS space_sources;
 -- DROP TABLE IF EXISTS uploads CASCADE;
 -- DROP TABLE IF EXISTS scans CASCADE;
 -- DROP TABLE IF EXISTS fs_entries CASCADE;
@@ -23,24 +23,24 @@ CREATE TABLE IF NOT EXISTS sources (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS configurations (
+CREATE TABLE IF NOT EXISTS spaces (
   id BLOB PRIMARY KEY,
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   shard_size INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS configuration_sources (
+CREATE TABLE IF NOT EXISTS space_sources (
   source_id BLOB NOT NULL,
-  configuration_id BLOB NOT NULL,
+  space_id BLOB NOT NULL,
   FOREIGN KEY (source_id) REFERENCES sources(id),
-  FOREIGN KEY (configuration_id) REFERENCES configurations(id),
-  PRIMARY KEY (source_id, configuration_id)
+  FOREIGN KEY (space_id) REFERENCES spaces(id),
+  PRIMARY KEY (source_id, space_id)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS uploads (
   id BLOB PRIMARY KEY,
-  configuration_id BLOB NOT NULL,
+  space_id BLOB NOT NULL,
   source_id BLOB NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   error_message TEXT,
   root_fs_entry_id BLOB,
   root_cid BLOB,
-  FOREIGN KEY (configuration_id) REFERENCES configurations(id),
+  FOREIGN KEY (space_id) REFERENCES spaces(id),
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id),
   FOREIGN KEY (root_cid) REFERENCES nodes(cid)
