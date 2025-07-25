@@ -129,3 +129,16 @@ func TestCreateDirectoryChildren(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []model.FSEntry{file, file2}, children)
 }
+
+func TestGetFileByID(t *testing.T) {
+	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	modTime := time.Now().UTC().Truncate(time.Second)
+	sourceId := id.New()
+
+	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	require.NoError(t, err)
+
+	foundFile, err := repo.GetFileByID(t.Context(), file.ID())
+	require.NoError(t, err)
+	require.Equal(t, file, foundFile)
+}

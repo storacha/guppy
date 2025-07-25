@@ -260,7 +260,7 @@ func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 		`SELECT id, path, last_modified, mode, size, checksum, source_id FROM fs_entries WHERE id = ?`, fileID,
 	)
 	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error {
-		return row.Scan(id, path, lastModified, mode, size, checksum, sourceID)
+		return row.Scan(id, path, util.TimestampScanner(lastModified), mode, size, checksum, sourceID)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
