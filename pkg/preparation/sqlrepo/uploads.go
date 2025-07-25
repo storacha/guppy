@@ -186,23 +186,23 @@ func (r *repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.
 	return dagmodel.NewFileDAGScan(fsEntryID, uploadID)
 }
 
-func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) error {
+func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error) {
 	dagScan, err := r.newDAGScan(fsEntryID, isDirectory, uploadID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid *cid.Cid) error {
+	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid *cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, created_at, updated_at, error_message, state, cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			kind,
 			fsEntryID,
 			uploadID,
-			createdAt,
-			updatedAt,
+			createdAt.Unix(),
+			updatedAt.Unix(),
 			errorMessage,
 			state,
-			cid.Bytes(),
+Null(cid),
 		)
 		return err
 	})

@@ -76,7 +76,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			e.start()
 		case model.UploadStateScanning:
 			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-				err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
+				_, err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
 				if err != nil {
 					return fmt.Errorf("creating DAG scan: %w", err)
 				}
