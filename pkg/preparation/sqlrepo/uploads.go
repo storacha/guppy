@@ -43,10 +43,9 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		state *model.UploadState,
 		errorMessage **string,
 		rootFSEntryID **id.FSEntryID,
-		rootCID **cid.Cid,
+		rootCID *cid.Cid,
 	) error {
 		var nullErrorMessage sql.NullString
-		var cidTarget cid.Cid
 		err := row.Scan(
 			id,
 			configurationID,
@@ -56,7 +55,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			state,
 			&nullErrorMessage,
 			rootFSEntryID,
-			util.CidScanner{Dst: &cidTarget},
+			util.DbCid(rootCID),
 		)
 		if err != nil {
 			return err
@@ -65,11 +64,6 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			*errorMessage = &nullErrorMessage.String
 		} else {
 			*errorMessage = nil
-		}
-		if cidTarget != cid.Undef {
-			*rootCID = &cidTarget
-		} else {
-			*rootCID = nil
 		}
 		return nil
 	})
@@ -123,7 +117,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 			state model.UploadState,
 			errorMessage *string,
 			rootFSEntryID *id.FSEntryID,
-			rootCID *cid.Cid,
+			rootCID cid.Cid,
 		) error {
 			_, err := r.db.ExecContext(ctx,
 				insertQuery,
@@ -135,7 +129,7 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 				state,
 				NullString(errorMessage),
 				Null(rootFSEntryID),
-				Null(rootCID),
+				util.DbCid(&rootCID),
 			)
 			return err
 		}, upload)
@@ -150,10 +144,10 @@ func (r *repo) CreateUploads(ctx context.Context, configurationID id.Configurati
 // UpdateUpload implements uploads.Repo.
 func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	updateQuery := `UPDATE uploads SET configuration_id = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id, configurationID, sourceID id.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error {
+	return model.WriteUploadToDatabase(func(id, configurationID, sourceID id.UploadID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), Null(rootCID))
+			id, configurationID, sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), util.DbCid(&rootCID))
 		return err
 	}, upload)
 }
@@ -192,7 +186,7 @@ func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 		return nil, err
 	}
 
-	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid *cid.Cid) error {
+	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, created_at, updated_at, error_message, state, cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			kind,
@@ -202,7 +196,7 @@ func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 			updatedAt.Unix(),
 			errorMessage,
 			state,
-Null(cid),
+			util.DbCid(&cid),
 		)
 		return err
 	})

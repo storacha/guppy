@@ -185,7 +185,7 @@ func (r *repo) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint
 	for rows.Next() {
 		var nodeCID cid.Cid
 		var size uint64
-		if err := rows.Scan(util.CidScanner{Dst: &nodeCID}, &size); err != nil {
+		if err := rows.Scan(util.DbCid(&nodeCID), &size); err != nil {
 			return 0, fmt.Errorf("failed to scan node for shard %s: %w", shardID, err)
 		}
 		totalSize += nodeEncodingLength(nodeCID, size)

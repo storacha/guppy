@@ -2,6 +2,7 @@ package util
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"time"
 
@@ -34,16 +35,28 @@ func TimestampScanner(t *time.Time) tsScanner {
 	return tsScanner{dst: t}
 }
 
-// CidScanner returns a sql.Scanner that scans a CID from a byte slice into the
-type CidScanner struct {
-	Dst *cid.Cid
+func DbCid(cid *cid.Cid) dbCid {
+	return dbCid{cid: cid}
 }
 
-var _ sql.Scanner = CidScanner{}
+// dbCid returns a sql.Scanner that scans a CID from a byte slice into the
+type dbCid struct {
+	cid *cid.Cid
+}
 
-func (cs CidScanner) Scan(value any) error {
+var _ driver.Valuer = dbCid{}
+var _ sql.Scanner = dbCid{}
+
+func (dc dbCid) Value() (driver.Value, error) {
+	if dc.cid == nil || dc.cid.Equals(cid.Undef) {
+		return nil, nil // Return nil for undefined CID
+	}
+	return dc.cid.Bytes(), nil
+}
+
+func (dc dbCid) Scan(value any) error {
 	if value == nil {
-		*cs.Dst = cid.Undef
+		*dc.cid = cid.Undef
 		return nil
 	}
 	switch v := value.(type) {
@@ -52,7 +65,7 @@ func (cs CidScanner) Scan(value any) error {
 		if err != nil {
 			return fmt.Errorf("failed to cast to cid: %w", err)
 		}
-		*cs.Dst = c
+		*dc.cid = c
 	default:
 		return fmt.Errorf("unsupported type for cid scanning: %T (%v)", v, v)
 	}

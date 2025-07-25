@@ -58,7 +58,7 @@ type Upload struct {
 	state           UploadState   // The current state of the upload
 	errorMessage    *string       // Optional error message if the upload fails
 	rootFSEntryID   *id.FSEntryID // The ID of the root file system entry associated with this upload, if any
-	rootCID         *cid.Cid      // The root CID of the upload, if applicable
+	rootCID         cid.Cid       // The root CID of the upload, if applicable
 }
 
 // ID returns the unique identifier of the upload.
@@ -162,7 +162,7 @@ func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 	}
 	u.state = UploadStateSharding
 	u.errorMessage = nil
-	u.rootCID = &rootCID
+	u.rootCID = rootCID
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -183,7 +183,7 @@ func (u *Upload) Restart() error {
 	}
 	u.state = UploadStatePending
 	u.rootFSEntryID = nil // Reset root file system entry ID
-	u.rootCID = nil       // Reset root CID if applicable
+	u.rootCID = cid.Undef // Reset root CID if applicable
 	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
@@ -212,7 +212,7 @@ func validateUpload(upload *Upload) error {
 	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateScanning) {
 		return fmt.Errorf("root file system entry ID is set but upload has not completed file system scan")
 	}
-	if upload.rootCID != nil && (upload.state == UploadStatePending || upload.state == UploadStateScanning || upload.state == UploadStateGeneratingDAG) {
+	if upload.rootCID != cid.Undef && (upload.state == UploadStatePending || upload.state == UploadStateScanning || upload.state == UploadStateGeneratingDAG) {
 		return fmt.Errorf("root CID is set but upload has not completed file system scan")
 	}
 	if upload.updatedAt.IsZero() {
@@ -239,7 +239,7 @@ func NewUpload(configurationID id.ConfigurationID, sourceID id.SourceID) (*Uploa
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error
+type UploadWriter func(id id.UploadID, configurationID id.ConfigurationID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, state UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
@@ -247,7 +247,7 @@ func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID **cid.Cid) error
+type UploadScanner func(id *id.UploadID, configurationID *id.ConfigurationID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, state *UploadState, errorMessage **string, rootFSEntryID **id.FSEntryID, rootCID *cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {

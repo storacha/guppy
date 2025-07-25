@@ -100,7 +100,7 @@ func nodesInShard(t *testing.T, db *sql.DB, shardID id.ShardID) []cid.Cid {
 	var foundNodeCids []cid.Cid
 	for rows.Next() {
 		var foundNodeCid cid.Cid
-		err = rows.Scan(util.CidScanner{Dst: &foundNodeCid})
+		err = rows.Scan(util.DbCid(&foundNodeCid))
 		require.NoError(t, err)
 		foundNodeCids = append(foundNodeCids, foundNodeCid)
 	}

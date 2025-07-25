@@ -56,10 +56,9 @@ type sqlScanner interface {
 }
 
 func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
-	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cidPointer **cid.Cid) error {
+	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cid *cid.Cid) error {
 		var nullErrorMessage sql.NullString
-		var cidTarget cid.Cid
-		err := sqlScanner.Scan(fsEntryID, uploadID, util.TimestampScanner(createdAt), util.TimestampScanner(updatedAt), state, &nullErrorMessage, util.CidScanner{Dst: &cidTarget}, kind)
+		err := sqlScanner.Scan(fsEntryID, uploadID, util.TimestampScanner(createdAt), util.TimestampScanner(updatedAt), state, &nullErrorMessage, util.DbCid(cid), kind)
 		if err != nil {
 			return fmt.Errorf("scanning dag scan: %w", err)
 		}
@@ -67,11 +66,6 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 			*errorMessage = &nullErrorMessage.String
 		} else {
 			*errorMessage = nil
-		}
-		if cidTarget != cid.Undef {
-			*cidPointer = &cidTarget
-		} else {
-			*cidPointer = nil
 		}
 		return nil
 	}
@@ -122,7 +116,7 @@ func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 		var path string
 		var size uint64
 		var cid cid.Cid
-		if err := rows.Scan(&path, &size, util.CidScanner{Dst: &cid}); err != nil {
+		if err := rows.Scan(&path, &size, util.DbCid(&cid)); err != nil {
 			return nil, err
 		}
 		link := model.LinkParams{
@@ -191,7 +185,7 @@ func (r *repo) findNodeByCid(ctx context.Context, c cid.Cid) (model.Node, error)
 
 func (r *repo) getNodeFromRow(row *sql.Row) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(util.CidScanner{Dst: cid}, size, ufsdata, path, sourceID, offset)
+		return row.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -290,7 +284,7 @@ func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.Director
 
 // UpdateDAGScan updates a DAG scan in the repository.
 func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
-	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cid *cid.Cid) error {
+	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cid cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, created_at = ?, updated_at = ?, error_message = ?, state = ?, cid = ? WHERE fs_entry_id = ?`,
 			kind,
@@ -300,7 +294,7 @@ func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			updatedAt.Unix(),
 			errorMessage,
 			state,
-			Null(cid),
+			util.DbCid(&cid),
 			fsEntryID,
 		)
 		return err

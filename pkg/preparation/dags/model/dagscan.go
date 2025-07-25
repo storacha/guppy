@@ -64,7 +64,9 @@ type dagScan struct {
 	updatedAt    time.Time
 	errorMessage *string
 	state        DAGScanState
-	cid          *cid.Cid // rootID is the ID of the root directory of the scan, if it has been completed
+	// cid is the root CID of the DAG, if the scan has been completed, and
+	// [cid.Undef] otherwise.
+	cid cid.Cid
 }
 
 // validation conditions -- should not be callable externally, all scans outside this module MUST be valid
@@ -78,7 +80,7 @@ func validateDAGScan(d *dagScan) (*dagScan, error) {
 	if d.errorMessage != nil && d.state != DAGScanStateFailed {
 		return nil, fmt.Errorf("error message is set but scan state is not 'failed': %s", d.state)
 	}
-	if d.cid != nil && d.state != DAGScanStateCompleted {
+	if d.cid != cid.Undef && d.state != DAGScanStateCompleted {
 		return nil, fmt.Errorf("CID is set but scan state is not 'completed': %s", d.state)
 	}
 	return d, nil
@@ -107,13 +109,10 @@ func (d *dagScan) State() DAGScanState {
 	return d.state
 }
 func (d *dagScan) HasCID() bool {
-	return d.cid != nil
+	return d.cid != cid.Undef
 }
 func (d *dagScan) CID() cid.Cid {
-	if d.cid == nil {
-		return cid.Undef // Return an undefined CID if not set
-	}
-	return *d.cid
+	return d.cid
 }
 
 func (d *dagScan) Fail(errorMessage string) error {
@@ -133,7 +132,7 @@ func (d *dagScan) Complete(cid cid.Cid) error {
 	d.state = DAGScanStateCompleted
 	d.errorMessage = nil
 	d.updatedAt = time.Now()
-	d.cid = &cid
+	d.cid = cid
 	return nil
 }
 
@@ -223,7 +222,7 @@ func NewDirectoryDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID) (*Directo
 }
 
 // DAGScanWriter is a function type for writing a DAGScan to the database.
-type DAGScanWriter func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state DAGScanState, cid *cid.Cid) error
+type DAGScanWriter func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state DAGScanState, cid cid.Cid) error
 
 // WriteDAGScanToDatabase writes a DAGScan to the database using the provided writer function.
 func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
@@ -255,7 +254,7 @@ func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
 }
 
 // DAGScanScanner is a function type for scanning a DAGScan from the database.
-type DAGScanScanner func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *DAGScanState, cid **cid.Cid) error
+type DAGScanScanner func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *DAGScanState, cid *cid.Cid) error
 
 // ReadDAGScanFromDatabase reads a DAGScan from the database using the provided scanner function.
 func ReadDAGScanFromDatabase(scanner DAGScanScanner) (DAGScan, error) {
