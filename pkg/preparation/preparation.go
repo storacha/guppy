@@ -120,20 +120,7 @@ func NewAPI(repo Repo, options ...Option) API {
 		},
 		UploadDAGScanWorker:   dagsAPI.UploadDAGScanWorker,
 		AddNodeToUploadShards: shardsAPI.AddNodeToUploadShards,
-		UploadShardWorker: func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error {
-			log.Debugf("Starting upload shard worker for upload ID: %s", uploadID)
-			for {
-				select {
-				case <-ctx.Done():
-					return ctx.Err() // Exit if the context is canceled
-				case _, ok := <-work:
-					if !ok {
-						return nil // Channel closed, exit the loop
-					}
-					log.Debugf("Would process shard here for %s", uploadID)
-				}
-			}
-		},
+		UploadShardWorker:     shardsAPI.UploadShardWorker,
 	}
 
 	return API{
