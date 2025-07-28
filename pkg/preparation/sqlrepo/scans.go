@@ -249,7 +249,7 @@ func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 	`
 
 	return scanmodel.WriteScanToDatabase(scan, func(id id.ScanID, uploadID id.UploadID, rootID *id.FSEntryID, createdAt, updatedAt time.Time, state scanmodel.ScanState, errorMessage *string) error {
-		_, err := r.db.ExecContext(ctx, query, id, uploadID, Null(rootID), createdAt, updatedAt, state, NullString(errorMessage))
+		_, err := r.db.ExecContext(ctx, query, id, uploadID, Null(rootID), createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage))
 		return err
 	})
 }
