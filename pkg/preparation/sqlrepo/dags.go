@@ -272,7 +272,7 @@ func (r *repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 
 // GetChildScans finds scans for child nodes of a given directory scan's file system entry.
 func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
-	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.parent_id = ?`
+	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, directoryScans.FsEntryID())
 	if err != nil {
 		return nil, err
