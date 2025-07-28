@@ -7,6 +7,7 @@ import (
 	"io/fs"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode/data/builder"
 	dagpb "github.com/ipld/go-codec-dagpb"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -17,6 +18,8 @@ import (
 
 const BlockSize = 1 << 20         // 1 MiB
 const DefaultLinksPerBlock = 1024 // Default number of links per block for UnixFS
+
+var log = logging.Logger("preparation/dags")
 
 func init() {
 	// Set the default links per block for UnixFS.
@@ -39,18 +42,22 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
 	}
+	log.Debugf("Reading from work channel %v\n", work)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if the context is canceled
 		case _, ok := <-work:
+			log.Debugf("received work for upload %s, ok: %v", uploadID, ok)
 			if !ok {
+				log.Debug("work channel closed, exiting upload DAG scan worker")
 				return nil // Channel closed, exit the loop
 			}
 			// Run all pending and awaiting children DAG scans for the given upload.
 			if err := a.RunDagScansForUpload(ctx, uploadID, nodeCB); err != nil {
 				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
 			}
+			log.Debugf("Completed processing work unit for upload %s", uploadID)
 		}
 	}
 }
@@ -81,6 +88,7 @@ func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nod
 		if err != nil {
 			return fmt.Errorf("getting dag scans for upload %s: %w", uploadID, err)
 		}
+		log.Debugf("Found %d pending or awaiting children dag scans for upload %s", len(dagScans), uploadID)
 		if len(dagScans) == 0 {
 			return nil // No pending or awaiting children scans found, exit the loop
 		}
@@ -88,11 +96,13 @@ func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nod
 		for _, dagScan := range dagScans {
 			switch dagScan.State() {
 			case model.DAGScanStatePending:
+				log.Debugf("Executing dag scan %s in state %s", dagScan.FsEntryID(), dagScan.State())
 				if err := a.ExecuteDAGScan(ctx, dagScan, nodeCB); err != nil {
 					return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 				}
 				executions++
 			case model.DAGScanStateAwaitingChildren:
+				log.Debugf("Handling awaiting children for dag scan %s in state %s", dagScan.FsEntryID(), dagScan.State())
 				if err := a.HandleAwaitingChildren(ctx, dagScan); err != nil {
 					return fmt.Errorf("handling awaiting children for dag scan %s: %w", dagScan.FsEntryID(), err)
 				}
@@ -117,30 +127,34 @@ func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nod
 func (a API) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) error {
 	err := dagScan.Start()
 	if err != nil {
-		return fmt.Errorf("starting scan: %w", err)
+		log.Debug("Failed to start dag scan:", err)
+		return fmt.Errorf("starting dag scan: %w", err)
 	}
 	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-		return fmt.Errorf("updating scan: %w", err)
+		log.Debugf("Failed to update dag scan %s: %v", dagScan.FsEntryID(), err)
+		return fmt.Errorf("updating dag scan: %w", err)
 	}
 	cid, err := a.executeDAGScan(ctx, dagScan, nodeCB)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			if err := dagScan.Cancel(); err != nil {
-				return fmt.Errorf("canceling scan: %w", err)
+				return fmt.Errorf("canceling dag scan: %w", err)
 			}
 		} else {
 			if err := dagScan.Fail(err.Error()); err != nil {
-				return fmt.Errorf("failing scan: %w", err)
+				return fmt.Errorf("failing dag scan: %w", err)
 			}
 		}
 	} else {
+		log.Debugf("Completing DAG scan for %s with CID:", dagScan.FsEntryID(), cid)
 		if err := dagScan.Complete(cid); err != nil {
-			return fmt.Errorf("completing scan: %w", err)
+			return fmt.Errorf("completing dag scan: %w", err)
 		}
 	}
 	// Update the scan in the repository after completion or failure.
+	log.Debugf("Updating dag scan %s after execution", dagScan.FsEntryID())
 	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-		return fmt.Errorf("updating scan after fail: %w", err)
+		return fmt.Errorf("updating dag scan after fail: %w", err)
 	}
 	return nil
 }
@@ -157,6 +171,7 @@ func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB f
 }
 
 func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {
+	log.Debugf("Executing file DAG scan for fsEntryID %s", dagScan.FsEntryID())
 	f, sourceID, path, err := a.FileAccessor(ctx, dagScan.FsEntryID())
 	if err != nil {
 		return cid.Undef, fmt.Errorf("accessing file for DAG scan: %w", err)
@@ -164,21 +179,30 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	defer f.Close()
 	reader := visitor.ReaderPositionFromReader(f)
 	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, sourceID, path, reader, nodeCB)
+	log.Debugf("Building UnixFS file with source ID %s and path %s", sourceID, path)
 	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
-	return l.(cidlink.Link).Cid, err
+	if err != nil {
+		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
+	}
+	log.Debugf("Built UnixFS file with CID: %s", l.(cidlink.Link).Cid)
+	return l.(cidlink.Link).Cid, nil
 }
 
 func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.DirectoryDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {
+	log.Debugf("Executing directory DAG scan for fsEntryID %s", dagScan.FsEntryID())
 	childLinks, err := a.Repo.DirectoryLinks(ctx, dagScan)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("getting directory links for DAG scan: %w", err)
 	}
+	log.Debugf("Found %d child links for directory scan %s", len(childLinks), dagScan.FsEntryID())
 	visitor := visitor.NewUnixFSDirectoryNodeVisitor(ctx, a.Repo, nodeCB)
 	pbLinks, err := toLinks(childLinks)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("converting links to PBLinks: %w", err)
 	}
+	log.Debugf("Building UnixFS directory with %d links", len(pbLinks))
 	l, _, err := builder.BuildUnixFSDirectory(pbLinks, visitor.LinkSystem())
+	log.Debugf("Built UnixFS directory with CID: %s", l.(cidlink.Link).Cid)
 	return l.(cidlink.Link).Cid, err
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-var log = logging.Logger("uploads")
+var log = logging.Logger("preparation/uploads")
 
 type API struct {
 	Repo                Repo
@@ -66,8 +66,10 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 		default:
 			// continue processing
 		}
+		log.Debugf("Processing upload %s in state %s", upload.ID(), upload.State())
 		switch upload.State() {
 		case model.UploadStatePending:
+			log.Debugf("Starting upload %s in state %s", upload.ID(), upload.State())
 			// TK: Persist state?
 			err := upload.Start()
 			if err != nil {
@@ -75,6 +77,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			}
 			e.start()
 		case model.UploadStateScanning:
+			log.Debugf("Running new scan for upload %s in state %s", upload.ID(), upload.State())
 			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
 				_, err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
 				if err != nil {
@@ -92,6 +95,8 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			}
 			// check if scan completed successfully
 			if fsEntryID != id.Nil {
+				log.Debugf("Scan completed successfully, root fs entry ID: %s", fsEntryID)
+				log.Debugf("Closing dag work channel %v", e.dagWork)
 				close(e.dagWork) // close the work channel to signal completion
 				if err := upload.ScanComplete(fsEntryID); err != nil {
 					return fmt.Errorf("completing scan: %w", err)
@@ -102,15 +107,18 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				}
 			}
 		case model.UploadStateGeneratingDAG:
+			log.Debugf("Waiting for DAG scan worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the DAG scan worker to finish
 			select {
 			case err := <-e.dagResult:
+				log.Debugf("DAG scan worker finished for upload %s with error: %v", upload.ID(), err)
 				if err != nil {
 					return fmt.Errorf("DAG scan worker error: %w", err)
 				}
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+			log.Debugf("Looking up CID for RootFSEntryID %s for upload %s", upload.RootFSEntryID(), upload.ID())
 			rootCid, err := a.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
 			if err != nil {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
@@ -125,6 +133,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				}
 			}
 		case model.UploadStateSharding:
+			log.Debugf("Waiting for shards worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the shards worker to finish
 			select {
 			case err := <-e.shardResult:
@@ -139,6 +148,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 				return fmt.Errorf("completing sharding: %w", err)
 			}
 		case model.UploadStateUploading:
+			log.Debugf("Waiting for upload worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the upload worker to finish
 			select {
 			case err := <-e.uploadResult:

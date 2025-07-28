@@ -181,6 +181,7 @@ func (r *repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.
 }
 
 func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error) {
+	log.Debugf("Creating DAG scan for fsEntryID: %s, isDirectory: %t, uploadID: %s", fsEntryID, isDirectory, uploadID)
 	dagScan, err := r.newDAGScan(fsEntryID, isDirectory, uploadID)
 	if err != nil {
 		return nil, err

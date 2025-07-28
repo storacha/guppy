@@ -5,8 +5,11 @@ import (
 	"io/fs"
 	"path"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 )
+
+var log = logging.Logger("preparation/scans/walker")
 
 // FSVisitor is an interface that defines methods for visiting files and directories
 // during a file system walk.
@@ -29,6 +32,7 @@ func WalkDir(fsys fs.FS, root string, visitor FSVisitor) (model.FSEntry, error) 
 
 // walkDir recursively descends the file system, calling the visitor for each file and directory.
 func walkDir(fsys fs.FS, name string, d fs.DirEntry, visitor FSVisitor) (model.FSEntry, error) {
+	log.Debugf("Walking %s", name)
 	if !d.IsDir() {
 		return visitor.VisitFile(name, d)
 	}

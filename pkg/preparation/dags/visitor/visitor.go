@@ -5,12 +5,15 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
+
+var log = logging.Logger("preparation/dags/visitor")
 
 // NodeCallback is a function type that is called for each node created during the scan.
 type NodeCallback func(node model.Node, data []byte) error
@@ -96,6 +99,7 @@ func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.Source
 
 // visitRawNode is called for each raw node found during the scan.
 func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
+	log.Debugf("Visiting raw node with CID: %s", cid)
 	size := uint64(len(data))
 
 	// this raw block has already been read, so we subtract its size to get the beginning offset

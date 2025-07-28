@@ -6,10 +6,13 @@ import (
 	"io/fs"
 	"time"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
+
+var log = logging.Logger("preparation/scans/visitor")
 
 // Repo defines the interface for a repository that manages file system entries during a scan
 type Repo interface {
@@ -62,6 +65,8 @@ func (v ScanVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, 
 // VisitDirectory is called for each directory found during the scan.
 // It creates or finds the directory in the repository, sets its children, and calls the callback on create if provided.
 func (v ScanVisitor) VisitDirectory(path string, dirEntry fs.DirEntry, children []model.FSEntry) (*model.Directory, error) {
+	log.Debugf("Visiting directory: %s", path)
+
 	info, err := dirEntry.Info()
 	if err != nil {
 		return nil, fmt.Errorf("reading directory info: %w", err)

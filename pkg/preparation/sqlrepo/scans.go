@@ -152,6 +152,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 // If the directory already exists, it returns the existing directory and false.
 // If the directory does not exist, it creates a new directory entry and returns it along with true.
 func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*scanmodel.Directory, bool, error) {
+	log.Debugf("Finding or creating directory: %s", path)
 	if !mode.IsDir() {
 		return nil, false, errors.New("cannot create a directory with file mode")
 	}
@@ -177,6 +178,7 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 		return nil, false, fmt.Errorf("failed to persist new directory entry: %w", err)
 	}
 
+	log.Debugf("Created new directory %s: %s", path, newdir.ID())
 	return newdir, true, nil
 }
 

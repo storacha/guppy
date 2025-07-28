@@ -3,10 +3,14 @@ package sqlrepo
 import (
 	"database/sql"
 	_ "embed"
+
+	logging "github.com/ipfs/go-log/v2"
 )
 
 //go:embed schema.sql
 var Schema string
+
+var log = logging.Logger("preparation/sqlrepo")
 
 func NullString(s *string) sql.NullString {
 	if s == nil {

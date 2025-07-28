@@ -293,7 +293,12 @@ func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.Director
 
 // UpdateDAGScan updates a DAG scan in the repository.
 func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
-	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cid cid.Cid) error {
+	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cidValue cid.Cid) error {
+		if cidValue == cid.Undef {
+			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: <cid.Undef>\n", fsEntryID)
+		} else {
+			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: %v\n", fsEntryID, cidValue)
+		}
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, created_at = ?, updated_at = ?, error_message = ?, state = ?, cid = ? WHERE fs_entry_id = ?`,
 			kind,
@@ -303,7 +308,7 @@ func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			updatedAt.Unix(),
 			errorMessage,
 			state,
-			util.DbCid(&cid),
+			util.DbCid(&cidValue),
 			fsEntryID,
 		)
 		return err
