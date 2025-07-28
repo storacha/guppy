@@ -223,7 +223,7 @@ func (a API) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGScan) 
 				completeScans = append(completeScans, childScan)
 			}
 			if childScan.State() == model.DAGScanStateFailed {
-				if err := dagScan.Fail("child scan failed"); err != nil {
+				if err := dagScan.Fail(fmt.Sprintf("child scan failed: %s", childScan.Error())); err != nil {
 					return fmt.Errorf("marking scan as failed: %w", err)
 				}
 				if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {

@@ -121,17 +121,21 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			log.Debugf("Looking up CID for RootFSEntryID %s for upload %s", upload.RootFSEntryID(), upload.ID())
 			rootCid, err := a.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
 			if err != nil {
+				var incompleteErr IncompleteDagScanError
+				if errors.As(err, &incompleteErr) {
+					log.Debugf("DAG scan for root fs entry %s is not completed, restarting upload %s: %s", incompleteErr.DagScan.FsEntryID(), upload.ID(), incompleteErr.DagScan.Error())
+					if err := e.restart(); err != nil {
+						return fmt.Errorf("restarting upload: %w", err)
+					}
+				}
+
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
 			if rootCid != cid.Undef {
 				if err := upload.DAGGenerationComplete(rootCid); err != nil {
 					return fmt.Errorf("completing DAG generation: %w", err)
 				}
-			} else {
-				if err := e.restart(); err != nil {
-					return fmt.Errorf("restarting upload: %w", err)
-				}
-			}
+			
 		case model.UploadStateSharding:
 			log.Debugf("Waiting for shards worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the shards worker to finish

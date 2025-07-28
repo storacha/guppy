@@ -161,14 +161,7 @@ func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.C
 		return cid.Undef, err
 	}
 	if ds.State() != dagmodel.DAGScanStateCompleted {
-		switch ds.State() {
-		case dagmodel.DAGScanStateFailed:
-			return cid.Undef, nil
-		case dagmodel.DAGScanStateCanceled:
-			return cid.Undef, nil
-		default:
-			return cid.Undef, fmt.Errorf("DAG scan for fs_entry_id %s is not completed, current state: %s", fsEntryID, ds.State())
-		}
+		return cid.Undef, uploads.IncompleteDagScanError{DagScan: ds}
 	}
 	return ds.CID(), nil
 }
