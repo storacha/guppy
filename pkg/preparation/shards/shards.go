@@ -28,11 +28,6 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
 
 func (a API) UploadShardWorker(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error {
-	// TK: Need to restart these?
-	// err := a.RestartScansForUpload(ctx, uploadID)
-	// if err != nil {
-	// 	return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
-	// }
 	for {
 		select {
 		case <-ctx.Done():

@@ -4,20 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	"github.com/storacha/guppy/pkg/preparation/scans/walker"
+	"github.com/storacha/guppy/pkg/preparation/shards"
+	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
-	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
-
-	"github.com/storacha/guppy/pkg/preparation/scans/walker"
-	"github.com/storacha/guppy/pkg/preparation/sources"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
+
+var log = logging.Logger("preparation")
 
 type Repo interface {
 	configurations.Repo
@@ -25,6 +30,7 @@ type Repo interface {
 	sources.Repo
 	scans.Repo
 	dags.Repo
+	shards.Repo
 }
 
 type API struct {
@@ -35,7 +41,23 @@ type API struct {
 	Scans          scans.API
 }
 
-func NewAPI(repo Repo) API {
+// Option is an option configuring the API.
+type Option func(cfg *config) error
+
+type config struct {
+	getLocalFSForPathFn func(path string) (fs.FS, error)
+}
+
+func NewAPI(repo Repo, options ...Option) API {
+	cfg := &config{
+		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
+	}
+	for _, opt := range options {
+		if err := opt(cfg); err != nil {
+			panic(fmt.Sprintf("failed to apply option: %v", err))
+		}
+	}
+
 	// The dependencies of the APIs involve a cycle, so we need to declare one
 	// first and initialize it last.
 	var uploadsAPI uploads.API
@@ -45,7 +67,8 @@ func NewAPI(repo Repo) API {
 	}
 
 	sourcesAPI := sources.API{
-		Repo: repo,
+		Repo:                repo,
+		GetLocalFSForPathFn: cfg.getLocalFSForPathFn,
 	}
 
 	scansAPI := scans.API{
@@ -63,6 +86,10 @@ func NewAPI(repo Repo) API {
 		FileAccessor: scansAPI.OpenFileByID,
 	}
 
+	shardsAPI := shards.API{
+		Repo: repo,
+	}
+
 	uploadsAPI = uploads.API{
 		Repo: repo,
 		RunNewScan: func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error) {
@@ -72,9 +99,9 @@ func NewAPI(repo Repo) API {
 			}
 
 			err = scansAPI.ExecuteScan(ctx, scan, func(entry scansmodel.FSEntry) error {
-				fmt.Println("Processing entry:", entry.Path())
-				// Process each file system entry here
-				return nil
+				log.Debugf("Processing entry: %s", entry.Path())
+				_, isDirectory := entry.(*scansmodel.Directory)
+				return fsEntryCb(entry.ID(), isDirectory)
 			})
 
 			if err != nil {
@@ -91,7 +118,22 @@ func NewAPI(repo Repo) API {
 
 			return scan.RootID(), nil
 		},
-		UploadDAGScanWorker: dagsAPI.UploadDAGScanWorker,
+		UploadDAGScanWorker:   dagsAPI.UploadDAGScanWorker,
+		AddNodeToUploadShards: shardsAPI.AddNodeToUploadShards,
+		UploadShardWorker: func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error {
+			log.Debugf("Starting upload shard worker for upload ID: %s", uploadID)
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err() // Exit if the context is canceled
+				case _, ok := <-work:
+					if !ok {
+						return nil // Channel closed, exit the loop
+					}
+					log.Debugf("Would process shard here for %s", uploadID)
+				}
+			}
+		},
 	}
 
 	return API{
@@ -100,6 +142,13 @@ func NewAPI(repo Repo) API {
 		Sources:        sourcesAPI,
 		DAGs:           dagsAPI,
 		Scans:          scansAPI,
+	}
+}
+
+func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error)) Option {
+	return func(cfg *config) error {
+		cfg.getLocalFSForPathFn = getLocalFSForPathFn
+		return nil
 	}
 }
 

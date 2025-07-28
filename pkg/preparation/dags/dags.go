@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
 const BlockSize = 1 << 20         // 1 MiB
@@ -61,6 +62,8 @@ func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uplo
 		}
 	}
 }
+
+var _ uploads.UploadDAGScanWorkerFn = API{}.UploadDAGScanWorker
 
 // RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
 func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) error {
