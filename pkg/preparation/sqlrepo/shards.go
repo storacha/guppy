@@ -19,52 +19,7 @@ const noRootsHeaderLen = 17
 
 var _ shards.Repo = (*repo)(nil)
 
-func (r *repo) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error {
-	config, err := r.GetConfigurationByUploadID(ctx, uploadID)
-	if err != nil {
-		return fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
-	}
-	openShards, err := r.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
-	if err != nil {
-		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
-	}
-
-	var shard *model.Shard
-
-	// Look for an open shard that has room for the node, and close any that don't
-	// have room. (There should only be at most one open shard, but there's no
-	// harm handling multiple if they exist.)
-	for _, s := range openShards {
-		hasRoom, err := r.roomInShard(ctx, s, nodeCID, config)
-		if err != nil {
-			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
-		}
-		if hasRoom {
-			shard = s
-			break
-		}
-		s.Close()
-		if err := r.UpdateShard(ctx, s); err != nil {
-			return fmt.Errorf("updating scan: %w", err)
-		}
-	}
-
-	// If no such shard exists, create a new one
-	if shard == nil {
-		shard, err = r.createShard(ctx, uploadID)
-		if err != nil {
-			return fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
-		}
-	}
-
-	err = r.addNodeToShard(ctx, shard.ID(), nodeCID)
-	if err != nil {
-		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
-	}
-	return nil
-}
-
-func (r *repo) createShard(ctx context.Context, uploadID id.UploadID) (*model.Shard, error) {
+func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Shard, error) {
 	shard, err := model.NewShard(uploadID)
 	if err != nil {
 		return nil, err
@@ -131,7 +86,7 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 	return shards, nil
 }
 
-func (r *repo) addNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid) error {
+func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO nodes_in_shards (
 			node_cid,
@@ -146,7 +101,7 @@ func (r *repo) addNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	return nil
 }
 
-func (r *repo) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
+func (r *repo) RoomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
 	node, err := r.findNodeByCid(ctx, nodeCID)
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)

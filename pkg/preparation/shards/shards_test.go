@@ -1,4 +1,4 @@
-package sqlrepo_test
+package shards_test
 
 import (
 	"database/sql"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -17,6 +18,7 @@ import (
 func TestAddNodeToUploadShards(t *testing.T) {
 	db := testutil.CreateTestDB(t)
 	repo := sqlrepo.New(db)
+	api := shards.API{Repo: repo}
 
 	configuration, err := repo.CreateConfiguration(t.Context(), "Test Config", configurationsmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
@@ -26,7 +28,7 @@ func TestAddNodeToUploadShards(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, uploads, 1)
 	upload := uploads[0]
-	nodeCid1 := randomCID(t)
+	nodeCid1 := testutil.RandomCID(t)
 
 	// with no shards, creates a new shard and adds the node to it
 
@@ -36,7 +38,7 @@ func TestAddNodeToUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, "some/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
+	err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
 	require.NoError(t, err)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
@@ -49,11 +51,11 @@ func TestAddNodeToUploadShards(t *testing.T) {
 
 	// with an open shard with room, adds the node to the shard
 
-	nodeCid2 := randomCID(t)
+	nodeCid2 := testutil.RandomCID(t)
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 1<<14, "some/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
+	err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
 	require.NoError(t, err)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
@@ -66,11 +68,11 @@ func TestAddNodeToUploadShards(t *testing.T) {
 
 	// with an open shard without room, closes the shard and creates another
 
-	nodeCid3 := randomCID(t)
+	nodeCid3 := testutil.RandomCID(t)
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 1<<15, "yet/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	err = repo.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
+	err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
 	require.NoError(t, err)
 
 	closedShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)

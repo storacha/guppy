@@ -40,7 +40,7 @@ func TestDAGScan(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, otherScans, 0)
 
-		dagCid := randomCID(t)
+		dagCid := testutil.RandomCID(t)
 		dagScan.Complete(dagCid)
 		err = repo.UpdateDAGScan(t.Context(), dagScan)
 		require.NoError(t, err)
@@ -62,8 +62,8 @@ func TestFindOrCreateRawNode(t *testing.T) {
 		repo := sqlrepo.New(testutil.CreateTestDB(t))
 		sourceId := id.New()
 
-		cid1 := randomCID(t)
-		cid2 := randomCID(t)
+		cid1 := testutil.RandomCID(t)
+		cid2 := testutil.RandomCID(t)
 
 		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1, 16, "some/path1", sourceId, 0)
 		require.NoError(t, err)

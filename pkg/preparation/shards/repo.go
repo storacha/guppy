@@ -4,12 +4,17 @@ import (
 	"context"
 
 	"github.com/ipfs/go-cid"
+	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // Repo defines the interface for interacting with DAG scans, nodes, and links in the repository.
 type Repo interface {
-	AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
+	CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Shard, error)
+	UpdateShard(ctx context.Context, shard *model.Shard) error
 	ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error)
+	GetConfigurationByUploadID(ctx context.Context, uploadID id.UploadID) (*configurationsmodel.Configuration, error)
+	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid) error
+	RoomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configurationsmodel.Configuration) (bool, error)
 }

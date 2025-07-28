@@ -22,7 +22,48 @@ type API struct {
 }
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error {
-	return a.Repo.AddNodeToUploadShards(ctx, uploadID, nodeCID)
+	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
+	}
+	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	if err != nil {
+		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+	}
+
+	var shard *model.Shard
+
+	// Look for an open shard that has room for the node, and close any that don't
+	// have room. (There should only be at most one open shard, but there's no
+	// harm handling multiple if they exist.)
+	for _, s := range openShards {
+		hasRoom, err := a.Repo.RoomInShard(ctx, s, nodeCID, config)
+		if err != nil {
+			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+		}
+		if hasRoom {
+			shard = s
+			break
+		}
+		s.Close()
+		if err := a.Repo.UpdateShard(ctx, s); err != nil {
+			return fmt.Errorf("updating scan: %w", err)
+		}
+	}
+
+	// If no such shard exists, create a new one
+	if shard == nil {
+		shard, err = a.Repo.CreateShard(ctx, uploadID)
+		if err != nil {
+			return fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+		}
+	}
+
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
+	if err != nil {
+		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
+	}
+	return nil
 }
 
 var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
@@ -37,7 +78,7 @@ func (a API) UploadShardWorker(ctx context.Context, work <-chan struct{}, upload
 				return nil // Channel closed, exit the loop
 			}
 			// space/blob/add all closed, not-yet-added shards for the given upload.
-			if err := a.AddShardsForUpload(ctx, uploadID); err != nil {
+			if err := a.addShardsForUpload(ctx, uploadID); err != nil {
 				return fmt.Errorf("adding shards for upload %s: %w", uploadID, err)
 			}
 		}
@@ -46,8 +87,8 @@ func (a API) UploadShardWorker(ctx context.Context, work <-chan struct{}, upload
 
 var _ uploads.UploadShardWorkerFn = API{}.UploadShardWorker
 
-// AddShardsForUpload `space/blob/add`s all shards ready to add.
-func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
+// addShardsForUpload `space/blob/add`s all shards ready to add.
+func (a API) addShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
 	for {
 		shards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateClosed)
 		if err != nil {
@@ -57,15 +98,16 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID) error
 			return nil // No closed shards found, exit the loop
 		}
 		for _, shard := range shards {
-			if err := a.AddShard(ctx, shard); err != nil {
+			if err := a.addShard(ctx, shard); err != nil {
 				return fmt.Errorf("adding shard %s: %w", shard.ID(), err)
 			}
 		}
 	}
 }
 
-// AddShard adds a shard to the space
-func (a API) AddShard(ctx context.Context, shard *model.Shard) error {
+// addShard adds a shard to the space. This probably won't live here when it's
+// actually implemented.
+func (a API) addShard(ctx context.Context, shard *model.Shard) error {
 	mh, locCom, err := a.Client.SpaceBlobAdd(ctx, shard.Bytes(), a.Space, a.ReceiptsURL)
 	if err != nil {
 		return fmt.Errorf("adding shard %s to space %s: %w", shard.ID(), a.Space, err)
