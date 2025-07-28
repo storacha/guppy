@@ -3,16 +3,26 @@ package preparation_test
 import (
 	"context"
 	"io/fs"
+	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/spf13/afero"
 	"github.com/storacha/guppy/pkg/preparation"
+	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func randomBytes(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
+	}
+	return b
+}
 
 func TestExecuteUpload(t *testing.T) {
 	// In case something goes wrong. This should never take this long.
@@ -21,10 +31,10 @@ func TestExecuteUpload(t *testing.T) {
 
 	memFS := afero.NewMemMapFs()
 	memFS.MkdirAll("dir1/dir2", 0755)
-	afero.WriteFile(memFS, "a", []byte("file a"), 0644)
-	afero.WriteFile(memFS, "dir1/b", []byte("file b"), 0644)
-	afero.WriteFile(memFS, "dir1/c", []byte("file c"), 0644)
-	afero.WriteFile(memFS, "dir1/dir2/d", []byte("file d"), 0644)
+	afero.WriteFile(memFS, "a", randomBytes(1<<16), 0644)
+	afero.WriteFile(memFS, "dir1/b", randomBytes(1<<16), 0644)
+	afero.WriteFile(memFS, "dir1/c", randomBytes(1<<16), 0644)
+	afero.WriteFile(memFS, "dir1/dir2/d", randomBytes(1<<16), 0644)
 
 	// Set the last modified time for the files; Afero's in-memory FS doesn't do
 	// that automatically on creation, we expect it to be present.
@@ -42,7 +52,7 @@ func TestExecuteUpload(t *testing.T) {
 		}),
 	)
 
-	configuration, err := api.CreateConfiguration(ctx, "Large Upload Configuration")
+	configuration, err := api.CreateConfiguration(ctx, "Large Upload Configuration", configurationsmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 
 	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
@@ -59,7 +69,11 @@ func TestExecuteUpload(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	shards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateOpen)
+	openShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateOpen)
 	require.NoError(t, err)
-	require.Len(t, shards, 1, "expected one shard for the upload")
+	require.Len(t, openShards, 0, "expected no open shards at end of upload")
+
+	closedShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateClosed)
+	require.NoError(t, err)
+	require.Len(t, closedShards, 5, "expected all shards to closed be for the upload")
 }

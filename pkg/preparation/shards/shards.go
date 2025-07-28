@@ -117,3 +117,21 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 }
 
 var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
+
+func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error {
+	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	if err != nil {
+		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+	}
+
+	for _, s := range openShards {
+		s.Close()
+		if err := a.Repo.UpdateShard(ctx, s); err != nil {
+			return fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
+		}
+	}
+
+	return nil
+}
+
+var _ uploads.CloseUploadShardsFn = API{}.CloseUploadShards
