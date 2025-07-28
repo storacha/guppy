@@ -81,3 +81,18 @@ func TestFindOrCreateRawNode(t *testing.T) {
 		require.NotEqual(t, rawNode.CID(), rawNode3.CID())
 	})
 }
+
+func TestDirectoryLinks(t *testing.T) {
+	t.Run("for a new DAG scan is empty", func(t *testing.T) {
+		repo := sqlrepo.New(testutil.CreateTestDB(t))
+		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New())
+		require.NoError(t, err)
+		dirScan, ok := dagScan.(*model.DirectoryDAGScan)
+		require.True(t, ok, "Expected dagScan to be a DirectoryDAGScan")
+
+		linkParamses, err := repo.DirectoryLinks(t.Context(), dirScan)
+		require.NoError(t, err)
+
+		require.Empty(t, linkParamses, "Expected no directory links for a new DAG scan")
+	})
+}

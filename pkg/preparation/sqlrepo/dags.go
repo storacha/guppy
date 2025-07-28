@@ -105,7 +105,16 @@ func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.Upload
 
 // DirectoryLinks retrieves link parameters for a given directory scan.
 func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
-	query := `SELECT fs_entries.path, nodes.size, nodes.cid FROM directory_children JOINS fs_entries ON directory_children.child_id = fs_entries.id JOINS dag_scans ON directory_children.child_id = dag_scans.fs_entry_id JOINS nodes ON dag_scans.cid = nodes.cid WHERE directory_children.parent_id = ?`
+	query := `
+		SELECT
+			fs_entries.path,
+			nodes.size,
+			nodes.cid
+		FROM directory_children
+		JOIN fs_entries ON directory_children.child_id = fs_entries.id
+		JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id
+		JOIN nodes ON dag_scans.cid = nodes.cid
+		WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, dirScan.FsEntryID())
 	if err != nil {
 		return nil, err
