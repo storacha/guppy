@@ -151,6 +151,6 @@ func (a API) CreateUploads(ctx context.Context, configurationID id.Configuration
 	return a.Uploads.CreateUploads(ctx, configurationID)
 }
 
-func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload, opts ...uploads.ExecutionOption) error {
-	return a.Uploads.ExecuteUpload(ctx, upload, opts...)
+func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) error {
+	return a.Uploads.ExecuteUpload(ctx, upload)
 }

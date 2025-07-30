@@ -59,8 +59,8 @@ func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Up
 }
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
-func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...ExecutionOption) error {
-	e := setupExecutor(ctx, upload, a, opts...)
+func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
+	e := setupExecutor(ctx, upload, a)
 	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
 	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
 		e.start()
@@ -108,8 +108,8 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 					return fmt.Errorf("completing scan: %w", err)
 				}
 			} else {
-				if err := e.restart(); err != nil {
-					return fmt.Errorf("restarting upload: %w", err)
+				if err := e.upload.Fail("scan failed"); err != nil {
+					return fmt.Errorf("failing upload: %w", err)
 				}
 			}
 		case model.UploadStateGeneratingDAG:
@@ -129,9 +129,9 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 			if err != nil {
 				var incompleteErr IncompleteDagScanError
 				if errors.As(err, &incompleteErr) {
-					log.Debugf("DAG scan for root fs entry %s is not completed, restarting upload %s: %s", incompleteErr.DagScan.FsEntryID(), upload.ID(), incompleteErr.DagScan.Error())
-					if err := e.restart(); err != nil {
-						return fmt.Errorf("restarting upload: %w", err)
+					log.Debugf("DAG scan for root fs entry %s is not completed, failing upload %s: %s", incompleteErr.DagScan.FsEntryID(), upload.ID(), incompleteErr.DagScan.Error())
+					if err := e.upload.Fail("dag scan failed"); err != nil {
+						return fmt.Errorf("failing upload: %w", err)
 					}
 				}
 
@@ -190,24 +190,21 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload, opts ...Ex
 	}
 }
 
-const defaultMaxRestarts = 10
-
 type executor struct {
-	remainingRestarts uint64
-	originalCtx       context.Context
-	ctx               context.Context
-	cancel            context.CancelFunc
-	dagWork           chan struct{}
-	shardWork         chan struct{}
-	wg                sync.WaitGroup
-	dagResult         chan error
-	shardResult       chan error
-	uploadResult      chan error
-	upload            *model.Upload
-	u                 API
+	originalCtx  context.Context
+	ctx          context.Context
+	cancel       context.CancelFunc
+	dagWork      chan struct{}
+	shardWork    chan struct{}
+	wg           sync.WaitGroup
+	dagResult    chan error
+	shardResult  chan error
+	uploadResult chan error
+	upload       *model.Upload
+	u            API
 }
 
-func setupExecutor(originalCtx context.Context, upload *model.Upload, u API, opts ...ExecutionOption) *executor {
+func setupExecutor(originalCtx context.Context, upload *model.Upload, u API) *executor {
 	ctx, cancel := context.WithCancel(originalCtx)
 	dagWork := make(chan struct{}, 1)
 	shardWork := make(chan struct{}, 1)
@@ -215,20 +212,16 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u API, opt
 	shardResult := make(chan error, 1)
 	uploadResult := make(chan error, 1)
 	executor := &executor{
-		remainingRestarts: defaultMaxRestarts,
-		originalCtx:       originalCtx,
-		ctx:               ctx,
-		cancel:            cancel,
-		dagWork:           dagWork,
-		shardWork:         shardWork,
-		dagResult:         dagResult,
-		shardResult:       shardResult,
-		uploadResult:      uploadResult,
-		upload:            upload,
-		u:                 u,
-	}
-	for _, opt := range opts {
-		opt(executor)
+		originalCtx:  originalCtx,
+		ctx:          ctx,
+		cancel:       cancel,
+		dagWork:      dagWork,
+		shardWork:    shardWork,
+		dagResult:    dagResult,
+		shardResult:  shardResult,
+		uploadResult: uploadResult,
+		upload:       upload,
+		u:            u,
 	}
 	return executor
 }
@@ -260,15 +253,15 @@ func (e *executor) runDAGScanWorker() {
 
 		e.dagResult <- Worker(e.ctx, e.dagWork, func() error {
 			err := e.u.RunDagScansForUpload(e.ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
-			log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
-			if err := e.u.AddNodeToUploadShards(e.ctx, e.upload.ID(), node.CID()); err != nil {
-				return fmt.Errorf("adding node to upload shard: %w", err)
-			}
-			// TK: Only signal if there's a new *closed* shard, ideally.
-			log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
-			e.shardWork <- struct{}{} // signal that there is work to be done for shards
-			return nil
-		})
+				log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
+				if err := e.u.AddNodeToUploadShards(e.ctx, e.upload.ID(), node.CID()); err != nil {
+					return fmt.Errorf("adding node to upload shard: %w", err)
+				}
+				// TK: Only signal if there's a new *closed* shard, ideally.
+				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
+				e.shardWork <- struct{}{} // signal that there is work to be done for shards
+				return nil
+			})
 
 			if err != nil {
 				return fmt.Errorf("running dag scans for upload %s: %w", e.upload.ID(), err)
@@ -305,35 +298,4 @@ func (e *executor) runUploadWorker() {
 func (e *executor) shutdown() {
 	e.cancel()
 	e.wg.Wait()
-}
-
-func (e *executor) reset() {
-	e.ctx, e.cancel = context.WithCancel(e.originalCtx)
-	e.dagWork = make(chan struct{}, 1)
-}
-
-func (e *executor) restart() error {
-	e.shutdown()
-	e.reset()
-	if e.remainingRestarts == 0 {
-		if err := e.upload.Fail("maximum number of restarts reached"); err != nil {
-			return fmt.Errorf("failing upload: %w", err)
-		}
-		return nil
-	}
-	e.remainingRestarts--
-	if err := e.upload.Restart(); err != nil {
-		return fmt.Errorf("restarting upload: %w", err)
-	}
-	return nil
-}
-
-// ExecutionOption is a function that modifies the executor's configuration.
-type ExecutionOption func(*executor)
-
-// WithMaxRestarts sets the maximum number of restarts for an upload execution.
-func WithMaxRestarts(max uint64) ExecutionOption {
-	return func(e *executor) {
-		e.remainingRestarts = max
-	}
 }
