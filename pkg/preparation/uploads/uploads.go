@@ -18,7 +18,6 @@ var log = logging.Logger("preparation/uploads")
 type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
-type UploadShardWorkerFn func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error
 
 type API struct {
 	Repo                     Repo
@@ -26,7 +25,6 @@ type API struct {
 	RunDagScansForUpload     RunDagScansForUploadFn
 	RestartDagScansForUpload RestartDagScansForUploadFn
 	AddNodeToUploadShards    AddNodeToUploadShardsFn
-	UploadShardWorker        UploadShardWorkerFn
 }
 
 // RunNewScanFn is a function that initiates a new scan for a given upload ID, returning the root file system entry ID.
@@ -287,7 +285,10 @@ func (e *executor) runShardsWorker() {
 	go func() {
 		defer e.wg.Done()
 		log.Debugf("Running upload shard worker for upload %s", e.upload.ID())
-		e.shardResult <- e.u.UploadShardWorker(e.ctx, e.shardWork, e.upload.ID())
+		e.shardResult <- Worker(e.ctx, e.shardWork, func() error {
+			log.Debugf("Would process shard here for %s", e.upload.ID())
+			return nil
+		}, nil)
 	}()
 }
 

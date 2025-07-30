@@ -117,20 +117,3 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 }
 
 var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
-
-func (a API) UploadShardWorker(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error {
-	log.Debugf("Starting upload shard worker for upload ID: %s", uploadID)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err() // Exit if the context is canceled
-		case _, ok := <-work:
-			if !ok {
-				return nil // Channel closed, exit the loop
-			}
-			log.Debugf("Would process shard here for %s", uploadID)
-		}
-	}
-}
-
-var _ uploads.UploadShardWorkerFn = API{}.UploadShardWorker
