@@ -201,7 +201,6 @@ func (u *Upload) Restart() error {
 }
 
 func validateUpload(upload *Upload) error {
-
 	if upload.id == id.Nil {
 		return types.ErrEmpty{Field: "upload ID"}
 	}
@@ -273,4 +272,24 @@ func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {
 	}
 
 	return &upload, nil
+}
+
+func (u *Upload) NeedsStart() bool {
+	return u.state == UploadStatePending
+}
+
+func (u *Upload) NeedsScan() bool {
+	return u.state == UploadStatePending || u.state == UploadStateStarted
+}
+
+func (u *Upload) NeedsDagScan() bool {
+	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned
+}
+
+func (u *Upload) NeedsSharding() bool {
+	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned || u.state == UploadStateDagged
+}
+
+func (u *Upload) NeedsUpload() bool {
+	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned || u.state == UploadStateDagged || u.state == UploadStateSharded
 }
