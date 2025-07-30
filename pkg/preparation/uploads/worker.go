@@ -5,25 +5,21 @@ import (
 	"fmt"
 )
 
-func Worker(ctx context.Context, in <-chan struct{}, out chan<- error, doWork func() error, finalize func() error) {
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case _, ok := <-in:
-				if !ok {
-					if err := finalize(); err != nil {
-						out <- fmt.Errorf("worker finalize encountered an error: %w", err)
-					}
-					return
+func Worker(ctx context.Context, in <-chan struct{}, doWork func() error, finalize func() error) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case _, ok := <-in:
+			if !ok {
+				if err := finalize(); err != nil {
+					return fmt.Errorf("worker finalize encountered an error: %w", err)
 				}
-				if err := doWork(); err != nil {
-					out <- fmt.Errorf("worker encountered an error: %w", err)
-					return
-				}
+				return nil
+			}
+			if err := doWork(); err != nil {
+				return fmt.Errorf("worker encountered an error: %w", err)
 			}
 		}
-	}()
+	}
 }
