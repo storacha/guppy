@@ -37,36 +37,8 @@ type API struct {
 // FileAccessorFn is a function type that retrieves a file for a given fsEntryID.
 type FileAccessorFn func(ctx context.Context, fsEntryID id.FSEntryID) (fs.File, id.SourceID, string, error)
 
-// UploadDAGScanWorker processes DAG scans for an upload until the context is canceled or the work channel is closed.
-func (a API) UploadDAGScanWorker(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
-	err := a.RestartScansForUpload(ctx, uploadID)
-	if err != nil {
-		return fmt.Errorf("restarting scans for upload %s: %w", uploadID, err)
-	}
-	log.Debugf("Reading from work channel %v\n", work)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err() // Exit if the context is canceled
-		case _, ok := <-work:
-			log.Debugf("received work for upload %s, ok: %v", uploadID, ok)
-			if !ok {
-				log.Debug("work channel closed, exiting upload DAG scan worker")
-				return nil // Channel closed, exit the loop
-			}
-			// Run all pending and awaiting children DAG scans for the given upload.
-			if err := a.RunDagScansForUpload(ctx, uploadID, nodeCB); err != nil {
-				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
-			}
-			log.Debugf("Completed processing work unit for upload %s", uploadID)
-		}
-	}
-}
-
-var _ uploads.UploadDAGScanWorkerFn = API{}.UploadDAGScanWorker
-
-// RestartScansForUpload restarts all canceled or running DAG scans for the given upload ID.
-func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) error {
+// RestartDagScansForUpload restarts all canceled or running DAG scans for the given upload ID.
+func (a API) RestartDagScansForUpload(ctx context.Context, uploadID id.UploadID) error {
 	// restart all canceled/running dag scans
 	restartableDagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCanceled, model.DAGScanStateRunning)
 	if err != nil {
@@ -83,6 +55,8 @@ func (a API) RestartScansForUpload(ctx context.Context, uploadID id.UploadID) er
 	}
 	return nil
 }
+
+var _ uploads.RestartDagScansForUploadFn = API{}.RestartDagScansForUpload
 
 // RunDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
@@ -125,6 +99,8 @@ func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nod
 		}
 	}
 }
+
+var _ uploads.RunDagScansForUploadFn = API{}.RunDagScansForUpload
 
 // ExecuteDAGScan executes a dag scan on the given fs entry, creating a unix fs dag for the given file or directory.
 func (a API) ExecuteDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) error {

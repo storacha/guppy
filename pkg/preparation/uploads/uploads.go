@@ -15,16 +15,18 @@ import (
 
 var log = logging.Logger("preparation/uploads")
 
-type UploadDAGScanWorkerFn func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
 type UploadShardWorkerFn func(ctx context.Context, work <-chan struct{}, uploadID id.UploadID) error
 
 type API struct {
-	Repo                  Repo
-	RunNewScan            RunNewScanFn
-	UploadDAGScanWorker   UploadDAGScanWorkerFn
-	AddNodeToUploadShards AddNodeToUploadShardsFn
-	UploadShardWorker     UploadShardWorkerFn
+	Repo                     Repo
+	RunNewScan               RunNewScanFn
+	RunDagScansForUpload     RunDagScansForUploadFn
+	RestartDagScansForUpload RestartDagScansForUploadFn
+	AddNodeToUploadShards    AddNodeToUploadShardsFn
+	UploadShardWorker        UploadShardWorkerFn
 }
 
 // RunNewScanFn is a function that initiates a new scan for a given upload ID, returning the root file system entry ID.
@@ -252,7 +254,14 @@ func (e *executor) runDAGScanWorker() {
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
-		e.dagResult <- e.u.UploadDAGScanWorker(e.ctx, e.dagWork, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
+		err := e.u.RestartDagScansForUpload(e.ctx, e.upload.ID())
+		if err != nil {
+			e.dagResult <- fmt.Errorf("restarting scans for upload %s: %w", e.upload.ID(), err)
+			return
+		}
+
+		e.dagResult <- Worker(e.ctx, e.dagWork, func() error {
+			err := e.u.RunDagScansForUpload(e.ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
 			log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
 			if err := e.u.AddNodeToUploadShards(e.ctx, e.upload.ID(), node.CID()); err != nil {
 				return fmt.Errorf("adding node to upload shard: %w", err)
@@ -262,6 +271,13 @@ func (e *executor) runDAGScanWorker() {
 			e.shardWork <- struct{}{} // signal that there is work to be done for shards
 			return nil
 		})
+
+			if err != nil {
+				return fmt.Errorf("running dag scans for upload %s: %w", e.upload.ID(), err)
+			}
+
+			return nil
+		}, nil)
 	}()
 }
 

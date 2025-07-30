@@ -118,9 +118,10 @@ func NewAPI(repo Repo, options ...Option) API {
 
 			return scan.RootID(), nil
 		},
-		UploadDAGScanWorker:   dagsAPI.UploadDAGScanWorker,
-		AddNodeToUploadShards: shardsAPI.AddNodeToUploadShards,
-		UploadShardWorker:     shardsAPI.UploadShardWorker,
+		RestartDagScansForUpload: dagsAPI.RestartDagScansForUpload,
+		RunDagScansForUpload:     dagsAPI.RunDagScansForUpload,
+		AddNodeToUploadShards:    shardsAPI.AddNodeToUploadShards,
+		UploadShardWorker:        shardsAPI.UploadShardWorker,
 	}
 
 	return API{
