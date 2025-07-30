@@ -47,10 +47,10 @@ CREATE TABLE IF NOT EXISTS uploads (
   state TEXT NOT NULL CHECK (
     state IN (
       'pending',
-      'scanning',
-      'generating_dag',
-      'sharding',
-      'uploading',
+      'started',
+      'scanned',
+      'dagged',
+      'sharded',
       'completed',
       'failed',
       'canceled'

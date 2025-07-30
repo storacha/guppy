@@ -62,7 +62,7 @@ func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Up
 func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 	e := setupExecutor(ctx, upload, a)
 	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
-	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
+	if e.upload.State() == model.UploadStateStarted || e.upload.State() == model.UploadStateScanned || e.upload.State() == model.UploadStateDagged {
 		e.start()
 	}
 	defer e.shutdown()
@@ -82,7 +82,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 				return fmt.Errorf("starting upload: %w", err)
 			}
 			e.start()
-		case model.UploadStateScanning:
+		case model.UploadStateStarted:
 			log.Debugf("Running new scan for upload %s in state %s", upload.ID(), upload.State())
 			fsEntryID, err := a.RunNewScan(ctx, upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
 				_, err := a.Repo.CreateDAGScan(ctx, id, isDirectory, upload.ID())
@@ -112,7 +112,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 					return fmt.Errorf("failing upload: %w", err)
 				}
 			}
-		case model.UploadStateGeneratingDAG:
+		case model.UploadStateScanned:
 			log.Debugf("Waiting for DAG scan worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the DAG scan worker to finish
 			select {
@@ -143,7 +143,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 				return fmt.Errorf("completing DAG generation: %w", err)
 			}
 
-		case model.UploadStateSharding:
+		case model.UploadStateDagged:
 			log.Debugf("Waiting for shards worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the shards worker to finish
 			select {
@@ -158,7 +158,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 			if err := upload.ShardingComplete(); err != nil {
 				return fmt.Errorf("completing sharding: %w", err)
 			}
-		case model.UploadStateUploading:
+		case model.UploadStateSharded:
 			log.Debugf("Waiting for upload worker to finish for upload %s in state %s", upload.ID(), upload.State())
 			// wait for the upload worker to finish
 			select {
@@ -229,13 +229,13 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u API) *ex
 func (e *executor) start() {
 	log.Debugf("Starting upload execution for upload %s in state %s", e.upload.ID(), e.upload.State())
 	// start the workers for all states not yet handled
-	if e.upload.State() == model.UploadStateScanning {
+	if e.upload.State() == model.UploadStateStarted {
 		e.runDAGScanWorker()
 	}
-	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG {
+	if e.upload.State() == model.UploadStateStarted || e.upload.State() == model.UploadStateScanned {
 		e.runShardsWorker()
 	}
-	if e.upload.State() == model.UploadStateScanning || e.upload.State() == model.UploadStateGeneratingDAG || e.upload.State() == model.UploadStateSharding {
+	if e.upload.State() == model.UploadStateStarted || e.upload.State() == model.UploadStateScanned || e.upload.State() == model.UploadStateDagged {
 		e.runUploadWorker()
 	}
 }

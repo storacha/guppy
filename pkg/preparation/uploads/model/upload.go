@@ -13,27 +13,38 @@ import (
 type UploadState string
 
 const (
-	// UploadStatePending indicates that the upload is pending and has not started yet.
+	// UploadStatePending indicates that the upload has been created, but never
+	// started.
 	UploadStatePending UploadState = "pending"
-	// UploadStateScanning indicates that the upload is currently scanning.
-	UploadStateScanning UploadState = "scanning"
-	// UploadStateGeneratingDAG indicates that the upload is currently generating a DAG.
-	UploadStateGeneratingDAG UploadState = "generating_dag"
-	// UploadStateSharding indicates that the upload is currently sharding data.
-	UploadStateSharding UploadState = "sharding"
-	// UploadStateUploading indicates that the upload is currently uploading data.
-	UploadStateUploading UploadState = "uploading"
-	// UploadStateCompleted indicates that the upload has completed successfully.
+
+	// UploadStateStarted indicates that the upload has been started, but nothing
+	// is complete yet.
+	UploadStateStarted UploadState = "started"
+
+	// UploadStateScanned indicates that the upload has completed the file system
+	// scan.
+	UploadStateScanned UploadState = "scanned"
+
+	// UploadStateDagged indicates that the upload has completed the DAG scan.
+	UploadStateDagged UploadState = "dagged"
+
+	// UploadStateSharded indicates that the upload has completed sharding.
+	UploadStateSharded UploadState = "sharded"
+
+	// UploadStateCompleted indicates that the entire upload has completed
+	// successfully.
 	UploadStateCompleted UploadState = "completed"
+
 	// UploadStateFailed indicates that the upload has failed.
 	UploadStateFailed UploadState = "failed"
+
 	// UploadStateCanceled indicates that the upload has been canceled.
 	UploadStateCanceled UploadState = "canceled"
 )
 
 func validUploadState(state UploadState) bool {
 	switch state {
-	case UploadStatePending, UploadStateScanning, UploadStateGeneratingDAG, UploadStateSharding, UploadStateUploading, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
+	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateSharded, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
 		return true
 	default:
 		return false
@@ -45,7 +56,7 @@ func TerminatedState(state UploadState) bool {
 }
 
 func RestartableState(state UploadState) bool {
-	return state == UploadStateScanning || state == UploadStateGeneratingDAG || state == UploadStateSharding || state == UploadStateUploading || state == UploadStateCanceled
+	return state == UploadStateStarted || state == UploadStateScanned || state == UploadStateDagged || state == UploadStateSharded || state == UploadStateCanceled
 }
 
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
@@ -116,7 +127,7 @@ func (u *Upload) Fail(errorMessage string) error {
 }
 
 func (u *Upload) Complete() error {
-	if u.state != UploadStateUploading {
+	if u.state != UploadStateSharded {
 		return fmt.Errorf("cannot complete upload in state %s", u.state)
 	}
 	u.state = UploadStateCompleted
@@ -139,17 +150,17 @@ func (u *Upload) Start() error {
 	if u.state != UploadStatePending {
 		return fmt.Errorf("cannot start upload in state %s", u.state)
 	}
-	u.state = UploadStateScanning
+	u.state = UploadStateStarted
 	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
 }
 
 func (u *Upload) ScanComplete(rootFSEntryID id.FSEntryID) error {
-	if u.state != UploadStateScanning {
+	if u.state != UploadStateStarted {
 		return fmt.Errorf("cannot complete scan in state %s", u.state)
 	}
-	u.state = UploadStateGeneratingDAG
+	u.state = UploadStateScanned
 	u.errorMessage = nil
 	u.rootFSEntryID = &rootFSEntryID
 	u.updatedAt = time.Now()
@@ -157,10 +168,10 @@ func (u *Upload) ScanComplete(rootFSEntryID id.FSEntryID) error {
 }
 
 func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
-	if u.state != UploadStateGeneratingDAG {
+	if u.state != UploadStateScanned {
 		return fmt.Errorf("cannot complete DAG generation in state %s", u.state)
 	}
-	u.state = UploadStateSharding
+	u.state = UploadStateDagged
 	u.errorMessage = nil
 	u.rootCID = rootCID
 	u.updatedAt = time.Now()
@@ -168,10 +179,10 @@ func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 }
 
 func (u *Upload) ShardingComplete() error {
-	if u.state != UploadStateSharding {
+	if u.state != UploadStateDagged {
 		return fmt.Errorf("cannot complete sharding in state %s", u.state)
 	}
-	u.state = UploadStateUploading
+	u.state = UploadStateSharded
 	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
@@ -209,10 +220,10 @@ func validateUpload(upload *Upload) error {
 	if upload.errorMessage != nil && upload.state != UploadStateFailed {
 		return fmt.Errorf("error message is set but upload state is not 'failed': %s", upload.state)
 	}
-	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateScanning) {
+	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateStarted) {
 		return fmt.Errorf("root file system entry ID is set but upload has not completed file system scan")
 	}
-	if upload.rootCID != cid.Undef && (upload.state == UploadStatePending || upload.state == UploadStateScanning || upload.state == UploadStateGeneratingDAG) {
+	if upload.rootCID != cid.Undef && (upload.state == UploadStatePending || upload.state == UploadStateStarted || upload.state == UploadStateScanned) {
 		return fmt.Errorf("root CID is set but upload has not completed file system scan")
 	}
 	if upload.updatedAt.IsZero() {
