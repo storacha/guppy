@@ -120,4 +120,26 @@ func TestWorker(t *testing.T) {
 		require.Equal(t, finalizerErr, result.Unwrap(), "worker should send back the error it encountered, wrapped")
 		require.Equal(t, 3, runs, "worker should have run all three times")
 	})
+
+	t.Run("ignores a nil finalizer", func(t *testing.T) {
+		signalChan := make(chan struct{}, 1)
+		resultChan := make(chan error, 1)
+		var ran bool
+
+		go func() {
+			defer close(resultChan)
+
+			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
+				ran = true
+				return nil
+			}, nil)
+		}()
+
+		require.False(t, ran, "worker should not run before signal")
+		signalChan <- struct{}{}
+		e(t, func(t *assert.CollectT) { require.True(t, ran, "worker should run after signal") })
+		close(signalChan)
+		result := <-resultChan
+		require.Nil(t, result, "result should be nil after successful runs and no finalizer")
+	})
 }

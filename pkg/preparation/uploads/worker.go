@@ -12,8 +12,10 @@ func Worker(ctx context.Context, in <-chan struct{}, doWork func() error, finali
 			return ctx.Err()
 		case _, ok := <-in:
 			if !ok {
-				if err := finalize(); err != nil {
-					return fmt.Errorf("worker finalize encountered an error: %w", err)
+				if finalize != nil {
+					if err := finalize(); err != nil {
+						return fmt.Errorf("worker finalize encountered an error: %w", err)
+					}
 				}
 				return nil
 			}
