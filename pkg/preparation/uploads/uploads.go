@@ -15,6 +15,7 @@ import (
 
 var log = logging.Logger("preparation/uploads")
 
+type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
 type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
@@ -26,9 +27,6 @@ type API struct {
 	RestartDagScansForUpload RestartDagScansForUploadFn
 	AddNodeToUploadShards    AddNodeToUploadShardsFn
 }
-
-// RunNewScanFn is a function that initiates a new scan for a given upload ID, returning the root file system entry ID.
-type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
 func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*model.Upload, error) {

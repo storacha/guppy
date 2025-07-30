@@ -153,7 +153,6 @@ func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 }
 
 func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
-
 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
 	ds, err := dagmodel.ReadDAGScanFromDatabase(r.dagScanScanner(row))
