@@ -58,8 +58,31 @@ func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Up
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
 func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
-	e := setupExecutor(upload, a)
-	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
+	return executor{
+		upload: upload,
+		api:    a,
+	}.execute(ctx)
+}
+
+type executor struct {
+	upload *model.Upload
+	api    API
+}
+
+// signalWorkAvailable signals on a channel that work is available. The channel
+// should be buffered (generally with a size of 1). If the channel is full, it
+// will not block, as no further signal is needed: two messages saying that work
+// is available are the same as one.
+func signalWorkAvailable(work chan<- struct{}) {
+	select {
+	case work <- struct{}{}:
+	default:
+		// channel is full, no need to signal
+	}
+}
+
+func (e executor) execute(ctx context.Context) error {
+	log.Debugf("Executing upload %s in state %s", e.upload.ID(), e.upload.State())
 
 	eg, ctx := errgroup.WithContext(ctx)
 	dagWork := make(chan struct{}, 1)
@@ -70,7 +93,7 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 		if err := e.upload.Start(); err != nil {
 			return fmt.Errorf("starting scan: %w", err)
 		}
-		if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
+		if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
 			return fmt.Errorf("updating upload: %w", err)
 		}
 	}
@@ -87,23 +110,23 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 		})
 	}
 
-	log.Debugf("Waiting for workers to finish for upload %s", upload.ID())
+	log.Debugf("Waiting for workers to finish for upload %s", e.upload.ID())
 	err := eg.Wait()
 
 	if errors.Is(err, context.Canceled) {
-		log.Debugf("Upload %s was canceled", upload.ID())
-		if err := upload.Cancel(); err != nil {
+		log.Debugf("Upload %s was canceled", e.upload.ID())
+		if err := e.upload.Cancel(); err != nil {
 			return fmt.Errorf("cancelling upload: %w", err)
 		}
-		if err := a.Repo.UpdateUpload(context.WithoutCancel(ctx), upload); err != nil {
+		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
 			return fmt.Errorf("updating upload after failure: %w", err)
 		}
 	} else if err != nil {
-		log.Errorf("Error executing upload %s: %v", upload.ID(), err)
-		if failErr := upload.Fail(err.Error()); failErr != nil {
+		log.Errorf("Error executing upload %s: %v", e.upload.ID(), err)
+		if failErr := e.upload.Fail(err.Error()); failErr != nil {
 			return fmt.Errorf("failing upload: %w", failErr)
 		}
-		if err := a.Repo.UpdateUpload(context.WithoutCancel(ctx), upload); err != nil {
+		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
 			return fmt.Errorf("updating upload after failure: %w", err)
 		}
 
@@ -112,39 +135,14 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 	return err
 }
 
-type executor struct {
-	upload *model.Upload
-	u      API
-}
-
-func setupExecutor(upload *model.Upload, u API) *executor {
-	executor := &executor{
-		upload: upload,
-		u:      u,
-	}
-	return executor
-}
-
-// signalWorkAvailable signals on a channel that work is available. The channel
-// should be buffered (generally with a size of 1). If the channel is full, it
-// will not block, as no further signal is needed: two messages saying that work
-// is available are the same as one.
-func signalWorkAvailable(work chan<- struct{}) {
-	select {
-	case work <- struct{}{}:
-	default:
-		// channel is full, no need to signal
-	}
-}
-
 func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) error {
 	log.Debugf("Running new scan for upload %s in state %s", e.upload.ID(), e.upload.State())
 
 	// Unlike later stages, this one doesn't need to watch a work channel with
 	// [Worker], because it never has to wait for work.
 
-	fsEntryID, err := e.u.RunNewScan(ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-		_, err := e.u.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID())
+	fsEntryID, err := e.api.RunNewScan(ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
+		_, err := e.api.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID())
 		if err != nil {
 			return fmt.Errorf("creating DAG scan: %w", err)
 		}
@@ -167,7 +165,7 @@ func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) e
 	if err := e.upload.ScanComplete(fsEntryID); err != nil {
 		return fmt.Errorf("completing scan: %w", err)
 	}
-	if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
+	if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
 		return fmt.Errorf("updating upload: %w", err)
 	}
 
@@ -177,7 +175,7 @@ func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) e
 // runShardsWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
 func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}, shardWork chan<- struct{}) error {
-	err := e.u.RestartDagScansForUpload(ctx, e.upload.ID())
+	err := e.api.RestartDagScansForUpload(ctx, e.upload.ID())
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", e.upload.ID(), err)
 	}
@@ -188,9 +186,9 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 
 		// doWork
 		func() error {
-			err := e.u.RunDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
+			err := e.api.RunDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
-				if err := e.u.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID()); err != nil {
+				if err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID()); err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
 				// TK: Only signal if there's a new *closed* shard, ideally.
@@ -208,7 +206,7 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 
 		// finalize
 		func() error {
-			rootCid, err := e.u.Repo.CIDForFSEntry(ctx, e.upload.RootFSEntryID())
+			rootCid, err := e.api.Repo.CIDForFSEntry(ctx, e.upload.RootFSEntryID())
 			if err != nil {
 				var incompleteErr IncompleteDagScanError
 				if errors.As(err, &incompleteErr) {
@@ -226,7 +224,7 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 			if err := e.upload.DAGGenerationComplete(rootCid); err != nil {
 				return fmt.Errorf("completing DAG generation: %w", err)
 			}
-			if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
+			if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
 				return fmt.Errorf("updating upload: %w", err)
 			}
 
