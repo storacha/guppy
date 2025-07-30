@@ -58,29 +58,37 @@ func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Up
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
 func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
-	e := setupExecutor(ctx, upload, a)
+	e := setupExecutor(upload, a)
 	log.Debugf("Executing upload %s in state %s", upload.ID(), upload.State())
+
+	eg, ctx := errgroup.WithContext(ctx)
+	dagWork := make(chan struct{}, 1)
+	shardWork := make(chan struct{}, 1)
 
 	// This one is just marking it as started, so it can be synchronous.
 	if e.upload.NeedsStart() {
 		if err := e.upload.Start(); err != nil {
 			return fmt.Errorf("starting scan: %w", err)
 		}
-		if err := e.u.Repo.UpdateUpload(e.ctx, e.upload); err != nil {
+		if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
 			return fmt.Errorf("updating upload: %w", err)
 		}
 	}
 
 	// start the workers for all states not yet handled
 	if e.upload.NeedsScan() {
-		e.eg.Go(e.runScanWorker)
+		eg.Go(func() error {
+			return e.runScanWorker(ctx, dagWork)
+		})
 	}
 	if e.upload.NeedsDagScan() {
-		e.eg.Go(e.runDAGScanWorker)
+		eg.Go(func() error {
+			return e.runDAGScanWorker(ctx, dagWork, shardWork)
+		})
 	}
 
 	log.Debugf("Waiting for workers to finish for upload %s", upload.ID())
-	err := e.eg.Wait()
+	err := eg.Wait()
 
 	if errors.Is(err, context.Canceled) {
 		log.Debugf("Upload %s was canceled", upload.ID())
@@ -105,30 +113,14 @@ func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
 }
 
 type executor struct {
-	originalCtx context.Context
-	ctx         context.Context
-	cancel      context.CancelFunc
-	dagWork     chan struct{}
-	shardWork   chan struct{}
-	eg          *errgroup.Group
-	upload      *model.Upload
-	u           API
+	upload *model.Upload
+	u      API
 }
 
-func setupExecutor(originalCtx context.Context, upload *model.Upload, u API) *executor {
-	ctx, cancel := context.WithCancel(originalCtx)
-	eg, ctx := errgroup.WithContext(ctx)
-	dagWork := make(chan struct{}, 1)
-	shardWork := make(chan struct{}, 1)
+func setupExecutor(upload *model.Upload, u API) *executor {
 	executor := &executor{
-		originalCtx: originalCtx,
-		ctx:         ctx,
-		cancel:      cancel,
-		dagWork:     dagWork,
-		shardWork:   shardWork,
-		eg:          eg,
-		upload:      upload,
-		u:           u,
+		upload: upload,
+		u:      u,
 	}
 	return executor
 }
@@ -137,7 +129,7 @@ func setupExecutor(originalCtx context.Context, upload *model.Upload, u API) *ex
 // should be buffered (generally with a size of 1). If the channel is full, it
 // will not block, as no further signal is needed: two messages saying that work
 // is available are the same as one.
-func signalWorkAvailable(work chan struct{}) {
+func signalWorkAvailable(work chan<- struct{}) {
 	select {
 	case work <- struct{}{}:
 	default:
@@ -145,18 +137,18 @@ func signalWorkAvailable(work chan struct{}) {
 	}
 }
 
-func (e *executor) runScanWorker() error {
+func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) error {
 	log.Debugf("Running new scan for upload %s in state %s", e.upload.ID(), e.upload.State())
 
 	// Unlike later stages, this one doesn't need to watch a work channel with
 	// [Worker], because it never has to wait for work.
 
-	fsEntryID, err := e.u.RunNewScan(e.ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-		_, err := e.u.Repo.CreateDAGScan(e.ctx, id, isDirectory, e.upload.ID())
+	fsEntryID, err := e.u.RunNewScan(ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
+		_, err := e.u.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID())
 		if err != nil {
 			return fmt.Errorf("creating DAG scan: %w", err)
 		}
-		signalWorkAvailable(e.dagWork)
+		signalWorkAvailable(dagWork)
 		return nil
 	})
 
@@ -170,12 +162,12 @@ func (e *executor) runScanWorker() error {
 	}
 
 	log.Debugf("Scan completed successfully, root fs entry ID: %s", fsEntryID)
-	close(e.dagWork) // close the work channel to signal completion
+	close(dagWork) // close the work channel to signal completion
 
 	if err := e.upload.ScanComplete(fsEntryID); err != nil {
 		return fmt.Errorf("completing scan: %w", err)
 	}
-	if err := e.u.Repo.UpdateUpload(e.ctx, e.upload); err != nil {
+	if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
 		return fmt.Errorf("updating upload: %w", err)
 	}
 
@@ -184,26 +176,26 @@ func (e *executor) runScanWorker() error {
 
 // runShardsWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
-func (e *executor) runDAGScanWorker() error {
-	err := e.u.RestartDagScansForUpload(e.ctx, e.upload.ID())
+func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}, shardWork chan<- struct{}) error {
+	err := e.u.RestartDagScansForUpload(ctx, e.upload.ID())
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", e.upload.ID(), err)
 	}
 
 	return Worker(
-		e.ctx,
-		e.dagWork,
+		ctx,
+		dagWork,
 
 		// doWork
 		func() error {
-			err := e.u.RunDagScansForUpload(e.ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
+			err := e.u.RunDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
-				if err := e.u.AddNodeToUploadShards(e.ctx, e.upload.ID(), node.CID()); err != nil {
+				if err := e.u.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID()); err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
 				// TK: Only signal if there's a new *closed* shard, ideally.
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
-				signalWorkAvailable(e.shardWork)
+				signalWorkAvailable(shardWork)
 				return nil
 			})
 
@@ -216,7 +208,7 @@ func (e *executor) runDAGScanWorker() error {
 
 		// finalize
 		func() error {
-			rootCid, err := e.u.Repo.CIDForFSEntry(e.ctx, e.upload.RootFSEntryID())
+			rootCid, err := e.u.Repo.CIDForFSEntry(ctx, e.upload.RootFSEntryID())
 			if err != nil {
 				var incompleteErr IncompleteDagScanError
 				if errors.As(err, &incompleteErr) {
@@ -229,12 +221,12 @@ func (e *executor) runDAGScanWorker() error {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
 
-			close(e.shardWork) // close the work channel to signal completion
+			close(shardWork) // close the work channel to signal completion
 
 			if err := e.upload.DAGGenerationComplete(rootCid); err != nil {
 				return fmt.Errorf("completing DAG generation: %w", err)
 			}
-			if err := e.u.Repo.UpdateUpload(e.ctx, e.upload); err != nil {
+			if err := e.u.Repo.UpdateUpload(ctx, e.upload); err != nil {
 				return fmt.Errorf("updating upload: %w", err)
 			}
 
