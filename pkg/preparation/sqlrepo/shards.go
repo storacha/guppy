@@ -7,7 +7,7 @@ import (
 	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
-	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -101,29 +101,27 @@ func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	return nil
 }
 
-func (r *repo) RoomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
-	node, err := r.findNodeByCid(ctx, nodeCID)
-	if err != nil {
-		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
-	}
-	if node == nil {
-		return false, fmt.Errorf("node %s not found", nodeCID)
-	}
-	nodeSize := nodeEncodingLength(nodeCID, node.Size())
-
-	currentSize, err := r.currentSizeOfShard(ctx, shard.ID())
-	if err != nil {
-		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
-	}
-
-	if currentSize+nodeSize > config.ShardSize() {
-		return false, nil // No room in the shard
-	}
-
-	return true, nil
+func (r *repo) FindNodeByCid(ctx context.Context, c cid.Cid) (dagsmodel.Node, error) {
+	findQuery := `
+		SELECT
+			cid,
+			size,
+			ufsdata,
+			path,
+			source_id,
+			offset
+		FROM nodes
+		WHERE cid = ?
+	`
+	row := r.db.QueryRowContext(
+		ctx,
+		findQuery,
+		c.Bytes(),
+	)
+	return r.getNodeFromRow(row)
 }
 
-func (r *repo) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
+func (r *repo) CurrentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT nodes.cid, nodes.size
 		FROM nodes_in_shards

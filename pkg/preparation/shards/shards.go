@@ -7,8 +7,11 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
+	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
@@ -40,7 +43,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := a.Repo.RoomInShard(ctx, s, nodeCID, config)
+		hasRoom, err := a.roomInShard(ctx, s, nodeCID, config)
 		if err != nil {
 			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -67,6 +70,34 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
 	return nil
+}
+
+func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
+	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
+	if err != nil {
+		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+	}
+	if node == nil {
+		return false, fmt.Errorf("node %s not found", nodeCID)
+	}
+	nodeSize := nodeEncodingLength(nodeCID, node.Size())
+
+	currentSize, err := a.Repo.CurrentSizeOfShard(ctx, shard.ID())
+	if err != nil {
+		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
+	}
+
+	if currentSize+nodeSize > config.ShardSize() {
+		return false, nil // No room in the shard
+	}
+
+	return true, nil
+}
+
+func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
+	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
+	vilen := uint64(varint.UvarintSize(uint64(pllen)))
+	return pllen + vilen
 }
 
 var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
