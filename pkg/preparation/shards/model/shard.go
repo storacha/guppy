@@ -34,7 +34,7 @@ func validShardState(state ShardState) bool {
 type Shard struct {
 	id       id.ShardID
 	uploadID id.UploadID
-	cid      *cid.Cid
+	cid      cid.Cid
 	state    ShardState
 }
 
@@ -43,7 +43,7 @@ func NewShard(uploadID id.UploadID) (*Shard, error) {
 	s := &Shard{
 		id:       id.New(),
 		uploadID: uploadID,
-		cid:      nil,
+		cid:      cid.Undef,
 		state:    ShardStateOpen,
 	}
 	if _, err := validateShard(s); err != nil {
@@ -74,7 +74,7 @@ func (s *Shard) Close() error {
 type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,
-	cid **cid.Cid,
+	cid *cid.Cid,
 	state *ShardState,
 ) error
 
@@ -93,7 +93,7 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 }
 
 // ShardWriter is a function type for writing a Shard to the database.
-type ShardWriter func(id id.ShardID, uploadID id.UploadID, cid *cid.Cid, state ShardState) error
+type ShardWriter func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state ShardState) error
 
 // WriteShardToDatabase writes a Shard to the database using the provided writer function.
 func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {

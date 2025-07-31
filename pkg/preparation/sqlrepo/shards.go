@@ -25,7 +25,7 @@ func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Sh
 		return nil, err
 	}
 
-	err = model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid *cid.Cid, state model.ShardState) error {
+	err = model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO shards (
 				id,
@@ -35,7 +35,7 @@ func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Sh
 			) VALUES (?, ?, ?, ?)`,
 			id,
 			uploadID,
-			Null(cid),
+			util.DbCid(&cid),
 			state,
 		)
 		return err
@@ -70,10 +70,10 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 		shard, err := model.ReadShardFromDatabase(func(
 			id *id.ShardID,
 			uploadID *id.UploadID,
-			cid **cid.Cid,
+			cid *cid.Cid,
 			state *model.ShardState,
 		) error {
-			return rows.Scan(id, uploadID, cid, state)
+			return rows.Scan(id, uploadID, util.DbCid(cid), state)
 		})
 		if err != nil {
 			return nil, err
@@ -157,7 +157,7 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 
 // UpdateShard updates a DAG scan in the repository.
 func (r *repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
-	return model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid *cid.Cid, state model.ShardState) error {
+	return model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE shards
 			SET id = ?,
@@ -167,7 +167,7 @@ func (r *repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			WHERE id = ?`,
 			id,
 			uploadID,
-			Null(cid),
+			util.DbCid(&cid),
 			state,
 			id,
 		)
