@@ -5,17 +5,12 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
-	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-varint"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
-
-// Byte length of a CBOR encoded CAR header with zero roots.
-const noRootsHeaderLen = 17
 
 var _ shards.Repo = (*repo)(nil)
 
@@ -121,7 +116,7 @@ func (r *repo) FindNodeByCid(ctx context.Context, c cid.Cid) (dagsmodel.Node, er
 	return r.getNodeFromRow(row)
 }
 
-func (r *repo) CurrentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
+func (r *repo) ForEachNodeCIDAndSize(ctx context.Context, shardID id.ShardID, yield func(cid.Cid, uint64)) error {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT nodes.cid, nodes.size
 		FROM nodes_in_shards
@@ -130,27 +125,20 @@ func (r *repo) CurrentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint
 		shardID,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get sizes of blocks in shard %s: %w", shardID, err)
+		return fmt.Errorf("failed to get sizes of blocks in shard %s: %w", shardID, err)
 	}
 	defer rows.Close()
 
-	var totalSize uint64 = noRootsHeaderLen
 	for rows.Next() {
 		var nodeCID cid.Cid
 		var size uint64
 		if err := rows.Scan(util.DbCid(&nodeCID), &size); err != nil {
-			return 0, fmt.Errorf("failed to scan node for shard %s: %w", shardID, err)
+			return fmt.Errorf("failed to scan node for shard %s: %w", shardID, err)
 		}
-		totalSize += nodeEncodingLength(nodeCID, size)
+		yield(nodeCID, size)
 	}
 
-	return totalSize, nil
-}
-
-func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
-	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
-	vilen := uint64(varint.UvarintSize(uint64(pllen)))
-	return pllen + vilen
+	return nil
 }
 
 // UpdateShard updates a DAG scan in the repository.

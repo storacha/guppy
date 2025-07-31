@@ -17,6 +17,9 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
+// Byte length of a CBOR encoded CAR header with zero roots.
+const noRootsHeaderLen = 17
+
 var log = logging.Logger("preparation/shards")
 
 // API provides methods to interact with the Shards in the repository.
@@ -82,7 +85,7 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 	}
 	nodeSize := nodeEncodingLength(nodeCID, node.Size())
 
-	currentSize, err := a.Repo.CurrentSizeOfShard(ctx, shard.ID())
+	currentSize, err := a.currentSizeOfShard(ctx, shard.ID())
 	if err != nil {
 		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
 	}
@@ -92,6 +95,19 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 	}
 
 	return true, nil
+}
+
+func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
+	var totalSize uint64 = noRootsHeaderLen
+
+	err := a.Repo.ForEachNodeCIDAndSize(ctx, shardID, func(cid cid.Cid, size uint64) {
+		totalSize += nodeEncodingLength(cid, size)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+	}
+
+	return totalSize, nil
 }
 
 func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
