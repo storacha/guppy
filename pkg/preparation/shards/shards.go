@@ -118,7 +118,7 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 	return pllen + vilen
 }
 
-var _ uploads.AddNodeToUploadShardsFn = API{}.AddNodeToUploadShards
+var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error {
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
@@ -136,4 +136,4 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error 
 	return nil
 }
 
-var _ uploads.CloseUploadShardsFn = API{}.CloseUploadShards
+var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
