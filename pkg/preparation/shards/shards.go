@@ -30,17 +30,18 @@ type API struct {
 	ReceiptsURL *url.URL
 }
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error {
+func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
 	if err != nil {
-		return fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
+		return false, fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
 	}
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
 	var shard *model.Shard
+	var created bool
 
 	// Look for an open shard that has room for the node, and close any that don't
 	// have room. (There should only be at most one open shard, but there's no
@@ -48,7 +49,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	for _, s := range openShards {
 		hasRoom, err := a.roomInShard(ctx, s, nodeCID, config)
 		if err != nil {
-			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
 		if hasRoom {
 			shard = s
@@ -56,7 +57,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		}
 		s.Close()
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return fmt.Errorf("updating scan: %w", err)
+			return false, fmt.Errorf("updating scan: %w", err)
 		}
 	}
 
@@ -64,15 +65,16 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	if shard == nil {
 		shard, err = a.Repo.CreateShard(ctx, uploadID)
 		if err != nil {
-			return fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+			return false, fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
 		}
+		created = true
 	}
 
 	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
 	if err != nil {
-		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
+		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
-	return nil
+	return created, nil
 }
 
 func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {

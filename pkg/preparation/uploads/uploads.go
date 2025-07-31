@@ -18,7 +18,7 @@ var log = logging.Logger("preparation/uploads")
 type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
 type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
-type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
+type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
 type CloseUploadShardsFn func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
@@ -26,8 +26,11 @@ type API struct {
 	RunNewScan               RunNewScanFn
 	RunDagScansForUpload     RunDagScansForUploadFn
 	RestartDagScansForUpload RestartDagScansForUploadFn
-	AddNodeToUploadShards    AddNodeToUploadShardsFn
-	CloseUploadShards        CloseUploadShardsFn
+	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
+	// shard if necessary. It returns true if a new shard was created, false if the node
+	// was added to an existing shard.
+	AddNodeToUploadShards AddNodeToUploadShardsFn
+	CloseUploadShards     CloseUploadShardsFn
 }
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
@@ -189,13 +192,16 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 		// doWork
 		func() error {
 			err := e.api.RunDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
-				log.Debugf("Processing node %s for upload %s", node.CID(), e.upload.ID())
-				if err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID()); err != nil {
+				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
+				shardCreated, err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID())
+				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
-				// TK: Only signal if there's a new *closed* shard, ideally.
-				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
-				signalWorkAvailable(shardWork)
+
+				if shardCreated {
+					signalWorkAvailable(shardWork)
+				}
+
 				return nil
 			})
 
