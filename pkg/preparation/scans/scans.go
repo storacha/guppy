@@ -17,19 +17,19 @@ import (
 // API is a dependency container for executing scans on a repository.
 type API struct {
 	Repo               Repo
-	UploadSourceLookup UploadSourceLookupFn
-	SourceAccessor     SourceAccessorFn
-	WalkerFn           WalkerFn
+	UploadSourceLookup UploadSourceLookupFunc
+	SourceAccessor     SourceAccessorFunc
+	WalkerFn           WalkerFunc
 }
 
-// WalkerFn is a function type that defines how to walk the file system.
-type WalkerFn func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
+// WalkerFunc is a function type that defines how to walk the file system.
+type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
 
-// SourceAccessorFn is a function type that retrieves the file system for a given source ID.
-type SourceAccessorFn func(ctx context.Context, sourceID id.SourceID) (fs.FS, error)
+// SourceAccessorFunc is a function type that retrieves the file system for a given source ID.
+type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, error)
 
-// UploadSourceLookupFn is a function type that retrieves the source ID for a given upload ID.
-type UploadSourceLookupFn func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
+// UploadSourceLookupFunc is a function type that retrieves the source ID for a given upload ID.
+type UploadSourceLookupFunc func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
 
 // ExecuteScan executes a scan on the given source, creating files and directories in the repository.
 func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {

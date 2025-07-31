@@ -15,22 +15,22 @@ import (
 
 var log = logging.Logger("preparation/uploads")
 
-type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
-type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
-type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
-type CloseUploadShardsFn func(ctx context.Context, uploadID id.UploadID) error
+type RunNewScanFunc func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error)
+type RunDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
+type RestartDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
 	Repo                     Repo
-	RunNewScan               RunNewScanFn
-	RunDagScansForUpload     RunDagScansForUploadFn
-	RestartDagScansForUpload RestartDagScansForUploadFn
+	RunNewScan               RunNewScanFunc
+	RunDagScansForUpload     RunDagScansForUploadFunc
+	RestartDagScansForUpload RestartDagScansForUploadFunc
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if a new shard was created, false if the node
 	// was added to an existing shard.
-	AddNodeToUploadShards AddNodeToUploadShardsFn
-	CloseUploadShards     CloseUploadShardsFn
+	AddNodeToUploadShards AddNodeToUploadShardsFunc
+	CloseUploadShards     CloseUploadShardsFunc
 }
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
