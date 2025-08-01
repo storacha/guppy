@@ -15,7 +15,7 @@ import (
 	"github.com/multiformats/go-multihash"
 )
 
-type VisitNodeFn func(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error
+type VisitNodeFunc func(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error
 
 // This file is certainly a bit of a hack-- the intent is to expose an ipld
 // LinkSystem that visits nodes upon storage. The LinkSystem doesn't easily do
@@ -58,13 +58,13 @@ func noopStorage(lc linking.LinkContext) (io.Writer, linking.BlockWriteCommitter
 }
 
 func (v UnixFSDirectoryNodeVisitor) LinkSystem() *linking.LinkSystem {
-	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
+	return linkSystemWithVisitFns(map[uint64]VisitNodeFunc{
 		cid.DagProtobuf: v.visitUnixFSNode,
 	})
 }
 
 func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
-	return linkSystemWithVisitFns(map[uint64]VisitNodeFn{
+	return linkSystemWithVisitFns(map[uint64]VisitNodeFunc{
 		cid.DagProtobuf: v.visitUnixFSNode,
 		cid.Raw:         v.visitRawNode,
 	})
@@ -75,7 +75,7 @@ func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 // the encode step. The visit functions will be called with the [datamodel.Node], the
 // [cid.Cid] of the node, and the raw data that was encoded with the encoder the
 // [cidlink.DefaultLinkSystem] would use.
-func linkSystemWithVisitFns(visitFns map[uint64]VisitNodeFn) *linking.LinkSystem {
+func linkSystemWithVisitFns(visitFns map[uint64]VisitNodeFunc) *linking.LinkSystem {
 	ls := cidlink.DefaultLinkSystem()
 	originalChooser := ls.EncoderChooser
 
