@@ -19,6 +19,7 @@ type RunNewScanFn func(ctx context.Context, uploadID id.UploadID, fsEntryCb func
 type RunDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type RestartDagScansForUploadFn func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFn func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) error
+type CloseUploadShardsFn func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
 	Repo                     Repo
@@ -26,6 +27,7 @@ type API struct {
 	RunDagScansForUpload     RunDagScansForUploadFn
 	RestartDagScansForUpload RestartDagScansForUploadFn
 	AddNodeToUploadShards    AddNodeToUploadShardsFn
+	CloseUploadShards        CloseUploadShardsFn
 }
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
@@ -217,6 +219,11 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 				}
 
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
+			}
+
+			// We're out of nodes, so we can close any open shards for this upload.
+			if err := e.api.CloseUploadShards(ctx, e.upload.ID()); err != nil {
+				return fmt.Errorf("closing upload shards for upload %s: %w", e.upload.ID(), err)
 			}
 
 			close(shardWork) // close the work channel to signal completion

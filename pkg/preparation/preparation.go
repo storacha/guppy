@@ -121,6 +121,7 @@ func NewAPI(repo Repo, options ...Option) API {
 		RestartDagScansForUpload: dagsAPI.RestartDagScansForUpload,
 		RunDagScansForUpload:     dagsAPI.RunDagScansForUpload,
 		AddNodeToUploadShards:    shardsAPI.AddNodeToUploadShards,
+		CloseUploadShards:        shardsAPI.CloseUploadShards,
 	}
 
 	return API{

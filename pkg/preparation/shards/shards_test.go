@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAddNodeToUploadShards(t *testing.T) {
+func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	db := testutil.CreateTestDB(t)
 	repo := sqlrepo.New(db)
 	api := shards.API{Repo: repo}
@@ -91,6 +91,26 @@ func TestAddNodeToUploadShards(t *testing.T) {
 
 	foundNodeCids = nodesInShard(t, db, secondShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid3}, foundNodeCids)
+
+	// finally, close the last shard with CloseUploadShards()
+
+	err = api.CloseUploadShards(t.Context(), upload.ID())
+	require.NoError(t, err)
+
+	closedShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+	require.NoError(t, err)
+	require.Len(t, closedShards, 2)
+	require.Equal(t, firstShard.ID(), closedShards[0].ID())
+
+	closedShardIDs := make([]id.ShardID, 0, len(closedShards))
+	for _, closedShard := range closedShards {
+		closedShardIDs = append(closedShardIDs, closedShard.ID())
+	}
+	require.ElementsMatch(t, closedShardIDs, []id.ShardID{firstShard.ID(), secondShard.ID()})
+
+	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	require.NoError(t, err)
+	require.Len(t, openShards, 0)
 }
 
 // (Until the repo has a way to query for this itself...)
