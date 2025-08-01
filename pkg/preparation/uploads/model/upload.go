@@ -25,11 +25,9 @@ const (
 	// scan.
 	UploadStateScanned UploadState = "scanned"
 
-	// UploadStateDagged indicates that the upload has completed the DAG scan.
+	// UploadStateDagged indicates that the upload has completed the DAG scan and
+	// sharding.
 	UploadStateDagged UploadState = "dagged"
-
-	// UploadStateSharded indicates that the upload has completed sharding.
-	UploadStateSharded UploadState = "sharded"
 
 	// UploadStateCompleted indicates that the entire upload has completed
 	// successfully.
@@ -44,7 +42,7 @@ const (
 
 func validUploadState(state UploadState) bool {
 	switch state {
-	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateSharded, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
+	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
 		return true
 	default:
 		return false
@@ -56,7 +54,7 @@ func TerminatedState(state UploadState) bool {
 }
 
 func RestartableState(state UploadState) bool {
-	return state == UploadStateStarted || state == UploadStateScanned || state == UploadStateDagged || state == UploadStateSharded || state == UploadStateCanceled
+	return state == UploadStateStarted || state == UploadStateScanned || state == UploadStateDagged || state == UploadStateCanceled
 }
 
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
@@ -127,7 +125,7 @@ func (u *Upload) Fail(errorMessage string) error {
 }
 
 func (u *Upload) Complete() error {
-	if u.state != UploadStateSharded {
+	if u.state != UploadStateDagged {
 		return fmt.Errorf("cannot complete upload in state %s", u.state)
 	}
 	u.state = UploadStateCompleted
@@ -174,16 +172,6 @@ func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 	u.state = UploadStateDagged
 	u.errorMessage = nil
 	u.rootCID = rootCID
-	u.updatedAt = time.Now()
-	return nil
-}
-
-func (u *Upload) ShardingComplete() error {
-	if u.state != UploadStateDagged {
-		return fmt.Errorf("cannot complete sharding in state %s", u.state)
-	}
-	u.state = UploadStateSharded
-	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -286,10 +274,6 @@ func (u *Upload) NeedsDagScan() bool {
 	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned
 }
 
-func (u *Upload) NeedsSharding() bool {
-	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned || u.state == UploadStateDagged
-}
-
 func (u *Upload) NeedsUpload() bool {
-	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned || u.state == UploadStateDagged || u.state == UploadStateSharded
+	return u.state == UploadStatePending || u.state == UploadStateStarted || u.state == UploadStateScanned || u.state == UploadStateDagged
 }
