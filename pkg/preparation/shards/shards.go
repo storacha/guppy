@@ -30,6 +30,9 @@ type API struct {
 	ReceiptsURL *url.URL
 }
 
+var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
+var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
+
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
 	if err != nil {
@@ -118,8 +121,6 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 	return pllen + vilen
 }
 
-var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
-
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error {
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
@@ -135,5 +136,3 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error 
 
 	return nil
 }
-
-var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
