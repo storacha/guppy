@@ -8,7 +8,6 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/multiformats/go-multihash"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
@@ -23,15 +22,14 @@ import (
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/invocation/ran"
 	"github.com/storacha/go-ucanto/core/ipld"
-	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	fdm "github.com/storacha/go-ucanto/core/result/failure/datamodel"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
-	ucanhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 // SpaceBlobAdd adds a blob to the service. The issuer needs proof of
@@ -223,15 +221,16 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	var anyAcceptRcpt receipt.AnyReceipt
 	var site ucan.Link
 	var rcptBlocks iter.Seq2[ipld.Block, error]
+	rcptClient := receiptclient.New(receiptsURL)
 	if acceptRcpt == nil && legacyAcceptRcpt == nil {
-		anyAcceptRcpt, err = pollAccept(ctx, acceptTask.Link(), c.Connection(), receiptsURL)
+		anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 		if err != nil {
 			return nil, nil, fmt.Errorf("polling accept: %w", err)
 		}
 	} else if acceptRcpt != nil {
 		acceptOk, failErr := result.Unwrap(result.MapError(acceptRcpt.Out(), failure.FromFailureModel))
 		if failErr != nil {
-			anyAcceptRcpt, err = pollAccept(ctx, acceptTask.Link(), c.Connection(), receiptsURL)
+			anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
@@ -242,7 +241,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	} else if legacyAcceptRcpt != nil {
 		acceptOk, failErr := result.Unwrap(result.MapError(legacyAcceptRcpt.Out(), failure.FromFailureModel))
 		if failErr != nil {
-			anyAcceptRcpt, err = pollAccept(ctx, acceptTask.Link(), c.Connection(), receiptsURL)
+			anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
@@ -475,56 +474,4 @@ func (c *Client) sendPutReceipt(ctx context.Context, putTask invocation.Invocati
 	}
 
 	return nil
-}
-
-func pollAccept(ctx context.Context, acceptTaskLink ucan.Link, conn uclient.Connection, receiptsURL *url.URL) (receipt.AnyReceipt, error) {
-	receiptURL := receiptsURL.JoinPath(acceptTaskLink.String())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, receiptURL.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating get request: %w", err)
-	}
-
-	// TODO: custom HTTP client with timeout
-	client := &http.Client{}
-
-	var msg message.AgentMessage
-	for retry := 0; retry < 5 && msg == nil; retry++ {
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("polling receipts endpoint: %w", err)
-		}
-		defer resp.Body.Close()
-
-		respBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("reading response body: %w", err)
-		}
-
-		switch resp.StatusCode {
-		case http.StatusOK:
-			msg, err = conn.Codec().Decode(ucanhttp.NewHTTPResponse(resp.StatusCode, bytes.NewReader(respBytes), resp.Header))
-			if err != nil {
-				return nil, fmt.Errorf("decoding message: %w", err)
-			}
-
-		case http.StatusNotFound:
-			time.Sleep(1 * time.Second)
-
-		default:
-			return nil, fmt.Errorf("polling receipts endpoint: %s", resp.Status)
-		}
-	}
-
-	if msg == nil {
-		return nil, fmt.Errorf("accept receipt not found: %s", acceptTaskLink)
-	}
-
-	rcptlnk, ok := msg.Get(acceptTaskLink)
-	if !ok {
-		return nil, fmt.Errorf("accept receipt not found: %s", acceptTaskLink)
-	}
-
-	reader := receipt.NewAnyReceiptReader(captypes.Converters...)
-
-	return reader.Read(rcptlnk, msg.Blocks())
 }
