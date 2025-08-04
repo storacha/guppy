@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/ipld/go-ipld-prime/schema"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
@@ -25,16 +26,19 @@ import (
 )
 
 type Client struct {
-	connection uclient.Connection
-	data       agentdata.AgentData
-	saveFn     func(agentdata.AgentData) error
+	connection  uclient.Connection
+	receiptsURL *url.URL
+	data        agentdata.AgentData
+	saveFn      func(agentdata.AgentData) error
 }
 
 // NewClient creates a new client. If [connection] is `nil`, the default
-// connection will be used.
-func NewClient(connection uclient.Connection, options ...Option) (*Client, error) {
+// connection will be used. If [receiptsURL] is `nil`, the default receipts URL
+// will be used.
+func NewClient(connection uclient.Connection, receiptsURL *url.URL, options ...Option) (*Client, error) {
 	c := Client{
-		connection: connection,
+		connection:  connection,
+		receiptsURL: receiptsURL,
 	}
 
 	for _, opt := range options {

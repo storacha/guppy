@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"log"
 	"net/url"
 
@@ -11,6 +12,7 @@ import (
 )
 
 var DefaultConnection uclient.Connection
+var DefaultReceiptsURL *url.URL
 
 func init() {
 	// service URL & DID
@@ -34,4 +36,5 @@ func init() {
 	}
 
 	DefaultConnection = conn
+	DefaultReceiptsURL, err = url.Parse(fmt.Sprintf("%s/receipts", serviceURL.String()))
 }

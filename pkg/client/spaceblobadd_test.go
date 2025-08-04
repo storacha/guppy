@@ -79,7 +79,7 @@ func TestSpaceBlobAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := uhelpers.Must(client.NewClient(conn))
+	c := uhelpers.Must(client.NewClient(conn, receiptsURL))
 
 	// delegate * to the space
 	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
@@ -92,7 +92,7 @@ func TestSpaceBlobAdd(t *testing.T) {
 
 	testBlob := bytes.NewReader([]byte("test"))
 
-	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), receiptsURL)
+	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID())
 	require.NoError(t, err)
 }
 

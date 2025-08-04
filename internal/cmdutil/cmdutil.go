@@ -87,6 +87,7 @@ func MustGetClient(proofs ...delegation.Delegation) *client.Client {
 
 	c, err := client.NewClient(
 		MustGetConnection(),
+		MustGetReceiptsURL(),
 		clientOptions...,
 	)
 	if err != nil {
