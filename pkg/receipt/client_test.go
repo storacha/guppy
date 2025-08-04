@@ -1,4 +1,4 @@
-package receipt
+package receipt_test
 
 import (
 	"context"
