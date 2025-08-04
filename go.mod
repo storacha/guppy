@@ -11,7 +11,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.0.7
 	github.com/spf13/afero v1.6.0
-	github.com/storacha/go-libstoracha v0.1.2-0.20250802023442-5a6c12792e06
+	github.com/storacha/go-libstoracha v0.1.2-0.20250804185958-9decd26b9f5b
 	github.com/storacha/go-ucanto v0.4.2-0.20250619152010-a37ab7e132b3
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.25.7

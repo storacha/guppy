@@ -19,6 +19,7 @@ import (
 	"github.com/storacha/go-ucanto/core/result/ok"
 	"github.com/storacha/go-ucanto/transport/car/response"
 	"github.com/storacha/go-ucanto/ucan"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,7 +56,7 @@ func TestFetch(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		result, err := client.Fetch(t.Context(), inv.Link())
 		require.NoError(t, err)
 		require.Equal(t, inv.Link(), result.Ran().Link())
@@ -70,9 +71,9 @@ func TestFetch(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		_, err = client.Fetch(t.Context(), testutil.RandomCID(t))
-		require.ErrorIs(t, err, ErrNotFound)
+		require.ErrorIs(t, err, receiptclient.ErrNotFound)
 	})
 
 	t.Run("error", func(t *testing.T) {
@@ -84,7 +85,7 @@ func TestFetch(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		_, err = client.Fetch(t.Context(), testutil.RandomCID(t))
 		require.Error(t, err)
 		require.ErrorContains(t, err, "500")
@@ -124,7 +125,7 @@ func TestPoll(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		result, err := client.Poll(t.Context(), inv.Link())
 		require.NoError(t, err)
 		require.Equal(t, inv.Link(), result.Ran().Link())
@@ -150,11 +151,11 @@ func TestPoll(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		result, err := client.Poll(
 			t.Context(),
 			inv.Link(),
-			WithInterval(time.Millisecond),
+			receiptclient.WithInterval(time.Millisecond),
 		)
 		require.NoError(t, err)
 		require.Equal(t, inv.Link(), result.Ran().Link())
@@ -171,12 +172,12 @@ func TestPoll(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		_, err = client.Poll(
 			t.Context(),
 			inv.Link(),
-			WithInterval(time.Millisecond),
-			WithRetries(3),
+			receiptclient.WithInterval(time.Millisecond),
+			receiptclient.WithRetries(3),
 		)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "receipt was not found after 4 attempts")
@@ -194,7 +195,7 @@ func TestPoll(t *testing.T) {
 		endpoint, err := url.Parse(server.URL)
 		require.NoError(t, err)
 
-		client := New(endpoint)
+		client := receiptclient.New(endpoint)
 		ctx, cancel := context.WithCancel(t.Context())
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -204,8 +205,8 @@ func TestPoll(t *testing.T) {
 		_, err = client.Poll(
 			ctx,
 			inv.Link(),
-			WithInterval(time.Millisecond),
-			WithRetries(-1), // retry forever!
+			receiptclient.WithInterval(time.Millisecond),
+			receiptclient.WithRetries(-1), // retry forever!
 		)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "context canceled")
