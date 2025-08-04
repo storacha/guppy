@@ -110,7 +110,7 @@ func WithInterval(interval time.Duration) PollOption {
 	}
 }
 
-// WithRetries configures the maximum number of times that Poll will attenpt to
+// WithRetries configures the maximum number of times that Poll will attempt to
 // fetch a receipt. The default is [PollRetries] requests. Set it to -1 to poll
 // until a non-404 response is encountered.
 func WithRetries(n int) PollOption {
