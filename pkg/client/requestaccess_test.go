@@ -13,6 +13,7 @@ import (
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ func TestRequestAccess(t *testing.T) {
 		invokedInvocations := []invocation.Invocation{}
 		invokedCapabilities := []ucan.Capability[access.AuthorizeCaveats]{}
 
-		connection := newTestServerConnection(
+		connection := testutil.NewTestServerConnection(
 			server.WithServiceMethod(
 				access.Authorize.Can(),
 				server.Provide(

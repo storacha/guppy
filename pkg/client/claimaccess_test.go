@@ -17,6 +17,7 @@ import (
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,7 +43,7 @@ func TestClaimAccess(t *testing.T) {
 		var storedDels access.DelegationsModel
 		var c *client.Client
 
-		connection := newTestServerConnection(
+		connection := testutil.NewTestServerConnection(
 			server.WithServiceMethod(
 				access.Claim.Can(),
 				server.Provide(
@@ -80,7 +81,7 @@ func TestClaimAccess(t *testing.T) {
 	})
 
 	t.Run("returns any handler error", func(t *testing.T) {
-		connection := newTestServerConnection(
+		connection := testutil.NewTestServerConnection(
 			server.WithServiceMethod(
 				access.Claim.Can(),
 				server.Provide(
@@ -107,7 +108,7 @@ func TestClaimAccess(t *testing.T) {
 	t.Run("returns a useful error on any other UCAN failure", func(t *testing.T) {
 		// In this case, we test the server not implementing the `access/claim`
 		// capability.
-		connection := newTestServerConnection()
+		connection := testutil.NewTestServerConnection()
 
 		c := uhelpers.Must(client.NewClient(connection, nil))
 		claimedDels, err := c.ClaimAccess(testContext(t))
