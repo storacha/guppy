@@ -20,6 +20,7 @@ import (
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,7 +53,7 @@ func TestPollClaim(t *testing.T) {
 	claimedChan := make(chan struct{})
 	defer close(claimedChan)
 
-	connection := newTestServerConnection(
+	connection := testutil.NewTestServerConnection(
 		server.WithServiceMethod(
 			access.Claim.Can(),
 			server.Provide(
