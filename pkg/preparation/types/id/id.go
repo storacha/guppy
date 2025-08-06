@@ -38,8 +38,6 @@ func (id ID) String() string {
 // SourceID is an alias for ID and uniquely identifies a source.
 type SourceID = ID
 
-// SpaceID is an alias for ID and uniquely identifies a space.
-type SpaceID = ID
 
 // UploadID is an alias for ID and uniquely identifies an upload.
 type UploadID = ID

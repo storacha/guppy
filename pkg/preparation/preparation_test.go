@@ -58,10 +58,10 @@ func TestExecuteUpload(t *testing.T) {
 	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
 	require.NoError(t, err)
 
-	err = repo.AddSourceToSpace(ctx, space.ID(), source.ID())
+	err = repo.AddSourceToSpace(ctx, space.DID(), source.ID())
 	require.NoError(t, err)
 
-	uploads, err := api.CreateUploads(ctx, space.ID())
+	uploads, err := api.CreateUploads(ctx, space.DID())
 	require.NoError(t, err)
 
 	for _, upload := range uploads {

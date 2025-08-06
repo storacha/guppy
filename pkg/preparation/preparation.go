@@ -8,8 +8,7 @@ import (
 	"os"
 
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/storacha/guppy/pkg/preparation/spaces"
-	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
@@ -17,6 +16,8 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
+	"github.com/storacha/guppy/pkg/preparation/spaces"
+	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -34,11 +35,11 @@ type Repo interface {
 }
 
 type API struct {
-	Spaces spaces.API
-	Uploads        uploads.API
-	Sources        sources.API
-	DAGs           dags.API
-	Scans          scans.API
+	Spaces  spaces.API
+	Uploads uploads.API
+	Sources sources.API
+	DAGs    dags.API
+	Scans   scans.API
 }
 
 // Option is an option configuring the API.
@@ -125,11 +126,11 @@ func NewAPI(repo Repo, options ...Option) API {
 	}
 
 	return API{
-		Spaces: spacesAPI,
-		Uploads:        uploadsAPI,
-		Sources:        sourcesAPI,
-		DAGs:           dagsAPI,
-		Scans:          scansAPI,
+		Spaces:  spacesAPI,
+		Uploads: uploadsAPI,
+		Sources: sourcesAPI,
+		DAGs:    dagsAPI,
+		Scans:   scansAPI,
 	}
 }
 
@@ -140,16 +141,16 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 	}
 }
 
-func (a API) CreateSpace(ctx context.Context, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
-	return a.Spaces.CreateSpace(ctx, name, options...)
+func (a API) FindOrCreateSpace(ctx context.Context, spaceDID did.DID, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
+	return a.Spaces.FindOrCreateSpace(ctx, spaceDID, name, options...)
 }
 
 func (a API) CreateSource(ctx context.Context, name string, path string, options ...sourcesmodel.SourceOption) (*sourcesmodel.Source, error) {
 	return a.Sources.CreateSource(ctx, name, path, options...)
 }
 
-func (a API) CreateUploads(ctx context.Context, spaceID id.SpaceID) ([]*uploadsmodel.Upload, error) {
-	return a.Uploads.CreateUploads(ctx, spaceID)
+func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmodel.Upload, error) {
+	return a.Uploads.CreateUploads(ctx, spaceDID)
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) error {

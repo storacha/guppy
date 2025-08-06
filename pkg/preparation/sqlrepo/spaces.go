@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/spaces"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -24,12 +25,12 @@ func (r *repo) CreateSpace(ctx context.Context, name string, options ...spacesmo
 
 	_, err = r.db.ExecContext(ctx,
 		`INSERT INTO spaces (
-			id,
+			did,
 			name,
 			created_at,
 			shard_size
 		) VALUES (?, ?, ?, ?)`,
-		space.ID(),
+		space.DID(),
 		space.Name(),
 		space.CreatedAt().Unix(),
 		space.ShardSize(),
@@ -40,15 +41,15 @@ func (r *repo) CreateSpace(ctx context.Context, name string, options ...spacesmo
 	return space, nil
 }
 
-// GetSpaceByID retrieves a space by its unique ID from the repository.
-func (r *repo) GetSpaceByID(ctx context.Context, spaceID id.SpaceID) (*spacesmodel.Space, error) {
+// GetSpaceByDID retrieves a space by its unique DID from the repository.
+func (r *repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
-			id,
+			did,
 			name,
 			created_at,
 			shard_size
-		FROM spaces WHERE id = ?`, spaceID,
+		FROM spaces WHERE did = ?`, spaceDID,
 	)
 	return r.getSpaceFromRow(row)
 }
@@ -72,7 +73,7 @@ func (r *repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*s
 func (r *repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
-			id,
+			did,
 			name,
 			created_at,
 			shard_size
@@ -83,13 +84,13 @@ func (r *repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Sp
 
 func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 	space, err := spacesmodel.ReadSpaceFromDatabase(func(
-		id *id.SpaceID,
+		did *did.DID,
 		name *string,
 		createdAt *time.Time,
 		shardSize *uint64,
 	) error {
 		return row.Scan(
-			id,
+			did,
 			name,
 			util.TimestampScanner(createdAt),
 			shardSize,
@@ -102,18 +103,18 @@ func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 }
 
 // DeleteSpace deletes a space from the repository.
-func (r *repo) DeleteSpace(ctx context.Context, spaceID id.SpaceID) error {
+func (r *repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM spaces WHERE id = ?`,
-		spaceID,
+		`DELETE FROM spaces WHERE did = ?`,
+		spaceDID,
 	)
 	if err != nil {
 		return err
 	}
 	// Also delete associated space sources
 	_, err = r.db.Exec(
-		`DELETE FROM space_sources WHERE space_id = ?`,
-		spaceID,
+		`DELETE FROM space_sources WHERE space_did = ?`,
+		spaceDID,
 	)
 	return err
 }
@@ -121,7 +122,7 @@ func (r *repo) DeleteSpace(ctx context.Context, spaceID id.SpaceID) error {
 // ListSpaces lists all spaces in the repository.
 func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, created_at, shard_size FROM spaces`,
+		`SELECT did, name, created_at, shard_size FROM spaces`,
 	)
 	if err != nil {
 		return nil, err
@@ -130,8 +131,8 @@ func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 
 	var spaces []*spacesmodel.Space
 	for rows.Next() {
-		space, err := spacesmodel.ReadSpaceFromDatabase(func(id *id.SpaceID, name *string, createdAt *time.Time, shardSize *uint64) error {
-			return rows.Scan(id, name, createdAt, shardSize)
+		space, err := spacesmodel.ReadSpaceFromDatabase(func(did *did.DID, name *string, createdAt *time.Time, shardSize *uint64) error {
+			return rows.Scan(did, name, createdAt, shardSize)
 		})
 		if err != nil {
 			return nil, err
@@ -145,10 +146,10 @@ func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 }
 
 // AddSourceToSpace adds a source to a space in the repository.
-func (r *repo) AddSourceToSpace(ctx context.Context, spaceID id.SpaceID, sourceID id.SourceID) error {
+func (r *repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO space_sources (space_id, source_id) VALUES (?, ?)`,
-		spaceID, sourceID,
+		`INSERT INTO space_sources (space_did, source_id) VALUES (?, ?)`,
+		spaceDID, sourceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add source to space: %w", err)
@@ -157,10 +158,10 @@ func (r *repo) AddSourceToSpace(ctx context.Context, spaceID id.SpaceID, sourceI
 }
 
 // RemoveSourceFromSpace removes a source from a space in the repository.
-func (r *repo) RemoveSourceFromSpace(ctx context.Context, spaceID id.SpaceID, sourceID id.SourceID) error {
+func (r *repo) RemoveSourceFromSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM space_sources WHERE space_id = ? AND source_id = ?`,
-		spaceID, sourceID,
+		`DELETE FROM space_sources WHERE space_did = ? AND source_id = ?`,
+		spaceDID, sourceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to remove source from space: %w", err)

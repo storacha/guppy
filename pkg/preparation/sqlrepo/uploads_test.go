@@ -20,7 +20,7 @@ func TestCreateUploads(t *testing.T) {
 	require.NoError(t, err)
 	sourceIDs := []id.SourceID{source1.ID(), source2.ID()}
 
-	uploads, err := repo.CreateUploads(t.Context(), space.ID(), sourceIDs)
+	uploads, err := repo.CreateUploads(t.Context(), space.DID(), sourceIDs)
 	require.NoError(t, err)
 
 	for i, upload := range uploads {
@@ -28,7 +28,7 @@ func TestCreateUploads(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, upload, readUpload)
 
-		require.Equal(t, space.ID(), upload.SpaceID())
+		require.Equal(t, space.DID(), upload.SpaceDID())
 		require.Equal(t, sourceIDs[i], upload.SourceID())
 		require.NotEmpty(t, upload.CreatedAt())
 		require.Equal(t, model.UploadStatePending, upload.State())
