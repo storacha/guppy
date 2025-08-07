@@ -33,6 +33,7 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
+	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	carresp "github.com/storacha/go-ucanto/transport/car/response"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
@@ -263,17 +264,115 @@ func executeAccept(
 	return acceptRcpt, err
 }
 
-func TestSpaceBlobAdd(t *testing.T) {
-	space, err := ed25519signer.Generate()
-	require.NoError(t, err)
-
+// spaceBlobAddHandler returns a mock [server.HandlerFunc] to handles
+// [spaceblobcap.Add] invocations in a test. It calls the given function with
+// each receipt that is issued along the way.
+func spaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.HandlerFunc[spaceblobcap.AddCaveats, spaceblobcap.AddOk, failure.IPLDBuilderFailure], error) {
 	storageProvider, err := ed25519signer.Generate()
-	require.NoError(t, err)
+	if err != nil {
+		return nil, fmt.Errorf("generating storage provider identity: %w", err)
+	}
 
 	// TK: why?
 	// random signer rather than the proper derived one
 	//blobProvider, err := ed25519signer.FromSeed([]byte(blobDigest)[len(blobDigest)-32:])
 	blobProvider, err := ed25519signer.Generate()
+	if err != nil {
+		return nil, fmt.Errorf("generating blob provider identity: %w", err)
+	}
+
+	handler := func(
+		ctx context.Context,
+		cap ucan.Capability[spaceblobcap.AddCaveats],
+		inv invocation.Invocation,
+		context server.InvocationContext,
+	) (result.Result[spaceblobcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+		spaceDID, err := did.Parse(cap.With())
+		if err != nil {
+			return nil, nil, fmt.Errorf("parsing space DID: %w", err)
+		}
+		blobDigest := cap.Nb().Blob.Digest
+		blobSize := cap.Nb().Blob.Size
+
+		allocateInv, err := invokeAllocate(
+			context.ID(),
+			storageProvider,
+			spaceDID,
+			blobDigest,
+			blobSize,
+			inv)
+		// TK: allocateInv.Attach(inv.Root())
+		// require.NoError(t, err)
+
+		allocateRcpt, err := executeAllocate(allocateInv, storageProvider, blobSize)
+		// require.NoError(t, err)
+		rcptIssued(allocateRcpt)
+
+		httpPutInv, err := invokePut(
+			blobProvider,
+			blobDigest,
+			blobSize,
+			allocateRcpt.Root().Link(),
+		)
+		// require.NoError(t, err)
+		// TK: httpPutInv.Attach(allocateRcpt.Root())
+
+		acceptInv, err := invokeAccept(
+			context.ID(),
+			storageProvider,
+			spaceDID,
+			blobDigest,
+			blobSize,
+			httpPutInv.Root().Link(),
+		)
+		// require.NoError(t, err)
+
+		acceptRcpt, err := executeAccept(
+			acceptInv,
+			storageProvider,
+			spaceDID,
+			blobDigest,
+		)
+		// require.NoError(t, err)
+
+		rcptIssued(acceptRcpt)
+
+		concludeInv, err := ucancap.Conclude.Invoke(
+			context.ID(),
+			storageProvider,
+			cap.With(),
+			ucancap.ConcludeCaveats{
+				Receipt: allocateRcpt.Root().Link(),
+			},
+		)
+		concludeInv.Attach(allocateRcpt.Root())
+
+		forks := []fx.Effect{
+			fx.FromInvocation(allocateInv),
+			fx.FromInvocation(concludeInv),
+			fx.FromInvocation(httpPutInv),
+			fx.FromInvocation(acceptInv),
+		}
+		fxs := fx.NewEffects(fx.WithFork(forks...))
+
+		ok := spaceblobcap.AddOk{
+			Site: captypes.Promise{
+				UcanAwait: captypes.Await{
+					Selector: ".out.ok.site",
+					// TK:
+					// Link:     acceptInv.Root().Link(),
+					Link: helpers.RandomCID(),
+				},
+			},
+		}
+		return result.Ok[spaceblobcap.AddOk, failure.IPLDBuilderFailure](ok), fxs, nil
+	}
+
+	return handler, nil
+}
+
+func TestSpaceBlobAdd(t *testing.T) {
+	space, err := ed25519signer.Generate()
 	require.NoError(t, err)
 
 	receiptsTrans := receiptsTransport{
@@ -289,92 +388,11 @@ func TestSpaceBlobAdd(t *testing.T) {
 			spaceblobcap.Add.Can(),
 			server.Provide(
 				spaceblobcap.Add,
-				func(
-					ctx context.Context,
-					cap ucan.Capability[spaceblobcap.AddCaveats],
-					inv invocation.Invocation,
-					context server.InvocationContext,
-				) (result.Result[spaceblobcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-					spaceDID, err := did.Parse(cap.With())
-					if err != nil {
-						return nil, nil, fmt.Errorf("parsing space DID: %w", err)
-					}
-					blobDigest := cap.Nb().Blob.Digest
-					blobSize := cap.Nb().Blob.Size
-
-					allocateInv, err := invokeAllocate(
-						context.ID(),
-						storageProvider,
-						spaceDID,
-						blobDigest,
-						blobSize,
-						inv)
-					// TK: allocateInv.Attach(inv.Root())
-					require.NoError(t, err)
-
-					allocateRcpt, err := executeAllocate(allocateInv, storageProvider, blobSize)
-					require.NoError(t, err)
-					receiptsTrans.receipts[allocateInv.Root().Link().String()] = allocateRcpt
-
-					httpPutInv, err := invokePut(
-						blobProvider,
-						blobDigest,
-						blobSize,
-						allocateRcpt.Root().Link(),
-					)
-					require.NoError(t, err)
-					// TK: httpPutInv.Attach(allocateRcpt.Root())
-
-					acceptInv, err := invokeAccept(
-						context.ID(),
-						storageProvider,
-						spaceDID,
-						blobDigest,
-						blobSize,
-						httpPutInv.Root().Link(),
-					)
-					require.NoError(t, err)
-
-					acceptRcpt, err := executeAccept(
-						acceptInv,
-						storageProvider,
-						spaceDID,
-						blobDigest,
-					)
-					require.NoError(t, err)
-
-					receiptsTrans.receipts[acceptInv.Root().Link().String()] = acceptRcpt
-
-					concludeInv, err := ucancap.Conclude.Invoke(
-						context.ID(),
-						storageProvider,
-						cap.With(),
-						ucancap.ConcludeCaveats{
-							Receipt: allocateRcpt.Root().Link(),
-						},
-					)
-					concludeInv.Attach(allocateRcpt.Root())
-
-					forks := []fx.Effect{
-						fx.FromInvocation(allocateInv),
-						fx.FromInvocation(concludeInv),
-						fx.FromInvocation(httpPutInv),
-						fx.FromInvocation(acceptInv),
-					}
-					fxs := fx.NewEffects(fx.WithFork(forks...))
-
-					ok := spaceblobcap.AddOk{
-						Site: captypes.Promise{
-							UcanAwait: captypes.Await{
-								Selector: ".out.ok.site",
-								// TK:
-								// Link:     acceptInv.Root().Link(),
-								Link: helpers.RandomCID(),
-							},
-						},
-					}
-					return result.Ok[spaceblobcap.AddOk, failure.IPLDBuilderFailure](ok), fxs, nil
-				},
+				uhelpers.Must(spaceBlobAddHandler(
+					func(rcpt receipt.AnyReceipt) {
+						receiptsTrans.receipts[rcpt.Ran().Root().Link().String()] = rcpt
+					},
+				)),
 			),
 		),
 		server.WithServiceMethod(
