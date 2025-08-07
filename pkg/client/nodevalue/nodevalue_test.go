@@ -7,7 +7,7 @@ import (
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/node/bindnode"
 	"github.com/ipld/go-ipld-prime/schema"
-	"github.com/storacha/go-ucanto/testing/helpers"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/client/nodevalue"
 	"github.com/stretchr/testify/require"
 )
@@ -18,47 +18,47 @@ func TestNodeValue(t *testing.T) {
 	schema.SpawnDefaultBasicTypes(ts)
 
 	t.Run("returns nil for absent node", func(t *testing.T) {
-		require.Nil(t, helpers.Must(nodevalue.NodeValue(datamodel.Absent)))
+		require.Nil(t, testutil.Must(nodevalue.NodeValue(datamodel.Absent))(t))
 	})
 
 	t.Run("returns nil for null node", func(t *testing.T) {
-		require.Nil(t, helpers.Must(nodevalue.NodeValue(datamodel.Null)))
+		require.Nil(t, testutil.Must(nodevalue.NodeValue(datamodel.Null))(t))
 	})
 
 	t.Run("returns the value of a bool node", func(t *testing.T) {
 		value := true
 		node := bindnode.Wrap(&value, ts.TypeByName("Bool"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of an int node", func(t *testing.T) {
 		value := int64(42)
 		node := bindnode.Wrap(&value, ts.TypeByName("Int"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of a float node", func(t *testing.T) {
 		value := float64(3.14)
 		node := bindnode.Wrap(&value, ts.TypeByName("Float"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of a string node", func(t *testing.T) {
 		value := "hello world"
 		node := bindnode.Wrap(&value, ts.TypeByName("String"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of a bytes node", func(t *testing.T) {
 		value := []byte{0xde, 0xad, 0xbe, 0xef}
 		node := bindnode.Wrap(&value, ts.TypeByName("Bytes"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of a link node", func(t *testing.T) {
-		value := helpers.RandomCID()
+		value := testutil.RandomCID(t)
 		node := bindnode.Wrap(&value, ts.TypeByName("Link"))
-		require.Equal(t, value, helpers.Must(nodevalue.NodeValue(node)))
+		require.Equal(t, value, testutil.Must(nodevalue.NodeValue(node))(t))
 	})
 
 	t.Run("returns the value of a list node", func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestNodeValue(t *testing.T) {
 		require.Equal(
 			t,
 			[]any{boolValue, intValue, floatValue, stringValue},
-			helpers.Must(nodevalue.NodeValue(node)),
+			testutil.Must(nodevalue.NodeValue(node))(t),
 		)
 	})
 
@@ -115,7 +115,7 @@ func TestNodeValue(t *testing.T) {
 				"float":  floatValue,
 				"string": stringValue,
 			},
-			helpers.Must(nodevalue.NodeValue(node)),
+			testutil.Must(nodevalue.NodeValue(node))(t),
 		)
 	})
 }

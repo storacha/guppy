@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
-	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +43,7 @@ func TestExecuteUpload(t *testing.T) {
 		err := memFS.Chtimes(path, time.Now(), time.Now())
 		require.NoError(t, err)
 	}
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 
 	api := preparation.NewAPI(
 		repo,
@@ -52,16 +53,18 @@ func TestExecuteUpload(t *testing.T) {
 		}),
 	)
 
-	configuration, err := api.CreateConfiguration(ctx, "Large Upload Configuration", configurationsmodel.WithShardSize(1<<16))
+	did := testutil.RandomDID(t)
+
+	space, err := api.FindOrCreateSpace(t.Context(), did, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 
 	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
 	require.NoError(t, err)
 
-	err = repo.AddSourceToConfiguration(ctx, configuration.ID(), source.ID())
+	err = repo.AddSourceToSpace(ctx, space.DID(), source.ID())
 	require.NoError(t, err)
 
-	uploads, err := api.CreateUploads(ctx, configuration.ID())
+	uploads, err := api.CreateUploads(ctx, space.DID())
 	require.NoError(t, err)
 
 	for _, upload := range uploads {
