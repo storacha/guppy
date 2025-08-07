@@ -3,16 +3,18 @@ package sqlrepo_test
 import (
 	"testing"
 
+	"github.com/storacha/go-libstoracha/testutil"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreateSpace(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+func TestFindOrCreateSpace(t *testing.T) {
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 
-	space, err := repo.CreateSpace(t.Context(), "space name")
+	did := testutil.RandomDID(t)
+	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
 	require.NoError(t, err)
 
 	readSpaceByDID, err := repo.GetSpaceByDID(t.Context(), space.DID())
@@ -27,9 +29,10 @@ func TestCreateSpace(t *testing.T) {
 }
 
 func TestAddSourceToSpace(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 
-	space, err := repo.CreateSpace(t.Context(), "space name")
+	did := testutil.RandomDID(t)
+	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
 	require.NoError(t, err)
 
 	source1, err := repo.CreateSource(t.Context(), "source1 name", "source/path")

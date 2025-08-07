@@ -16,9 +16,16 @@ import (
 
 var _ spaces.Repo = (*repo)(nil)
 
-// CreateSpace creates a new space in the repository with the given name and options.
-func (r *repo) CreateSpace(ctx context.Context, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
-	space, err := spacesmodel.NewSpace(name, options...)
+// FindOrCreateSpace finds an existing space or creates a new one in the repository with the given name and options.
+func (r *repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
+	space, err := r.GetSpaceByDID(ctx, did)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get space by DID: %w", err)
+	}
+	if space != nil {
+		return space, nil
+	}
+	space, err = spacesmodel.NewSpace(did, name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create space model: %w", err)
 	}
@@ -30,7 +37,7 @@ func (r *repo) CreateSpace(ctx context.Context, name string, options ...spacesmo
 			created_at,
 			shard_size
 		) VALUES (?, ?, ?, ?)`,
-		space.DID(),
+		space.DID().Bytes(),
 		space.Name(),
 		space.CreatedAt().Unix(),
 		space.ShardSize(),
@@ -49,7 +56,7 @@ func (r *repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmode
 			name,
 			created_at,
 			shard_size
-		FROM spaces WHERE did = ?`, spaceDID,
+		FROM spaces WHERE did = ?`, util.DbDID(&spaceDID),
 	)
 	return r.getSpaceFromRow(row)
 }
@@ -58,12 +65,12 @@ func (r *repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmode
 func (r *repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
-			s.id,
+			s.did,
 			s.name,
 			s.created_at,
 			s.shard_size
 		FROM spaces s
-		INNER JOIN uploads u ON u.space_id = s.id
+		INNER JOIN uploads u ON u.space_did = s.did
 		WHERE u.id = ?`, uploadID,
 	)
 	return r.getSpaceFromRow(row)
@@ -90,7 +97,7 @@ func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 		shardSize *uint64,
 	) error {
 		return row.Scan(
-			did,
+			util.DbDID(did),
 			name,
 			util.TimestampScanner(createdAt),
 			shardSize,
@@ -106,7 +113,7 @@ func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 func (r *repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM spaces WHERE did = ?`,
-		spaceDID,
+		util.DbDID(&spaceDID),
 	)
 	if err != nil {
 		return err
@@ -114,7 +121,7 @@ func (r *repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
 	// Also delete associated space sources
 	_, err = r.db.Exec(
 		`DELETE FROM space_sources WHERE space_did = ?`,
-		spaceDID,
+		util.DbDID(&spaceDID),
 	)
 	return err
 }
@@ -132,7 +139,7 @@ func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 	var spaces []*spacesmodel.Space
 	for rows.Next() {
 		space, err := spacesmodel.ReadSpaceFromDatabase(func(did *did.DID, name *string, createdAt *time.Time, shardSize *uint64) error {
-			return rows.Scan(did, name, createdAt, shardSize)
+			return rows.Scan(util.DbDID(did), name, createdAt, shardSize)
 		})
 		if err != nil {
 			return nil, err
@@ -149,7 +156,7 @@ func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 func (r *repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO space_sources (space_did, source_id) VALUES (?, ?)`,
-		spaceDID, sourceID,
+		util.DbDID(&spaceDID), sourceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add source to space: %w", err)
@@ -161,7 +168,7 @@ func (r *repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID 
 func (r *repo) RemoveSourceFromSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM space_sources WHERE space_did = ? AND source_id = ?`,
-		spaceDID, sourceID,
+		util.DbDID(&spaceDID), sourceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to remove source from space: %w", err)

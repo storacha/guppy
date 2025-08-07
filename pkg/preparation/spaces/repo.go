@@ -13,8 +13,8 @@ type Repo interface {
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*model.Space, error)
 	// GetSpaceByName retrieves a space by its name.
 	GetSpaceByName(ctx context.Context, name string) (*model.Space, error)
-	// CreateSpace creates a new space with the given name and options.
-	CreateSpace(ctx context.Context, name string, options ...model.SpaceOption) (*model.Space, error)
+	// FindOrCreateSpace finds an existing space by DID or creates a new one.
+	FindOrCreateSpace(ctx context.Context, did did.DID, name string, options ...model.SpaceOption) (*model.Space, error)
 	// DeleteSpace deletes the space by its unique DID.
 	DeleteSpace(ctx context.Context, spaceDID did.DID) error
 	// ListSpaces lists all spaces in the repository.

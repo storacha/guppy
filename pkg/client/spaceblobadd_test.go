@@ -23,6 +23,7 @@ import (
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	"github.com/storacha/go-libstoracha/testutil"
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
@@ -249,7 +250,7 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 
 			// random signer rather than the proper derived one
 			//blobProvider, err := ed25519signer.FromSeed([]byte(blobDigest)[len(blobDigest)-32:])
-			blobProvider, err := ed25519signer.Generate()
+			blobProvider := testutil.RandomSigner(t)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -15,8 +15,8 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -68,7 +68,7 @@ func pbNode(t *testing.T) datamodel.Node {
 }
 
 func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 	sourceID := id.New()
 	reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 
@@ -101,7 +101,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 }
 
 func TestUnixFSDirectoryNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 
 	v := visitor.NewUnixFSDirectoryNodeVisitor(
 		t.Context(),

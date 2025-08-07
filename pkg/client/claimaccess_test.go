@@ -8,24 +8,24 @@ import (
 
 	"github.com/storacha/go-libstoracha/capabilities/access"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/server"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func buildDelegationsModel(dels ...delegation.Delegation) access.DelegationsModel {
+func buildDelegationsModel(t *testing.T, dels ...delegation.Delegation) access.DelegationsModel {
 	keys := make([]string, 0, len(dels))
 	values := make(map[string][]byte, len(dels))
 
 	for _, del := range dels {
 		keys = append(keys, del.Link().String())
-		values[del.Link().String()] = uhelpers.Must(io.ReadAll(del.Archive()))
+		values[del.Link().String()] = testutil.Must(io.ReadAll(del.Archive()))(t)
 	}
 
 	return access.DelegationsModel{
@@ -59,16 +59,16 @@ func TestClaimAccess(t *testing.T) {
 			),
 		)
 
-		c = uhelpers.Must(client.NewClient(connection))
+		c = testutil.Must(client.NewClient(connection))(t)
 
 		// Some arbitrary delegation which has been stored to be claimed.
-		del := uhelpers.Must(uploadcap.Get.Delegate(
+		del := testutil.Must(uploadcap.Get.Delegate(
 			c.Issuer(),
 			c.Issuer(),
 			c.Issuer().DID().String(),
-			uploadcap.GetCaveats{Root: uhelpers.RandomCID()},
-		))
-		storedDels = buildDelegationsModel(del)
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+		storedDels = buildDelegationsModel(t, del)
 
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
@@ -95,7 +95,7 @@ func TestClaimAccess(t *testing.T) {
 			),
 		)
 
-		c := uhelpers.Must(client.NewClient(connection))
+		c := testutil.Must(client.NewClient(connection))(t)
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
 		require.ErrorContains(t, err, "`access/claim` failed: Something went wrong!")
@@ -107,7 +107,7 @@ func TestClaimAccess(t *testing.T) {
 		// capability.
 		connection := newTestServerConnection()
 
-		c := uhelpers.Must(client.NewClient(connection))
+		c := testutil.Must(client.NewClient(connection))(t)
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
 		require.ErrorContains(t, err, "`access/claim` failed with unexpected error:")

@@ -3,16 +3,18 @@ package sqlrepo_test
 import (
 	"testing"
 
+	"github.com/storacha/go-libstoracha/testutil"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreateUploads(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
-	space, err := repo.CreateSpace(t.Context(), "space name")
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	did := testutil.RandomDID(t)
+	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
 	require.NoError(t, err)
 	source1, err := repo.CreateSource(t.Context(), "source1 name", "source1/path")
 	require.NoError(t, err)
