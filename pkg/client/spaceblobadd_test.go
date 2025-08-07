@@ -42,6 +42,7 @@ import (
 	carresp "github.com/storacha/go-ucanto/transport/car/response"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"github.com/stretchr/testify/require"
 
 	"github.com/storacha/guppy/pkg/client"
@@ -81,7 +82,7 @@ func TestSpaceBlobAdd(t *testing.T) {
 
 	c := uhelpers.Must(client.NewClient(
 		client.WithConnection(conn),
-		client.WithReceiptsURL(receiptsURL),
+		client.WithReceiptsClient(receiptclient.New(receiptsURL)),
 		client.WithPrincipal(serviceSigner),
 	))
 

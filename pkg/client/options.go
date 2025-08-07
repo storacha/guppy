@@ -1,11 +1,10 @@
 package client
 
 import (
-	"net/url"
-
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/guppy/pkg/agentdata"
+	"github.com/storacha/guppy/pkg/receipt"
 )
 
 // Option is an option configuring a Client.
@@ -20,11 +19,10 @@ func WithConnection(conn uclient.Connection) Option {
 	}
 }
 
-// WithReceiptsURL configures the URL for the client to fetch receipts from. If
-// one is not provided, the default receipts URL will be used.
-func WithReceiptsURL(receiptsURL *url.URL) Option {
+// WithReceiptsClient configures the client to use for fetching receipts.
+func WithReceiptsClient(receiptsClient *receipt.Client) Option {
 	return func(c *Client) error {
-		c.receiptsURL = receiptsURL
+		c.receiptsClient = receiptsClient
 		return nil
 	}
 }

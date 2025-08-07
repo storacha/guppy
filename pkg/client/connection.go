@@ -9,10 +9,11 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/transport/car"
 	"github.com/storacha/go-ucanto/transport/http"
+	"github.com/storacha/guppy/pkg/receipt"
 )
 
 var DefaultConnection uclient.Connection
-var DefaultReceiptsURL *url.URL
+var DefaultReceiptsClient *receipt.Client
 
 func init() {
 	// service URL & DID
@@ -36,5 +37,6 @@ func init() {
 	}
 
 	DefaultConnection = conn
-	DefaultReceiptsURL, err = url.Parse(fmt.Sprintf("%s/receipts", serviceURL.String()))
+	defaultReceiptsURL, err := url.Parse(fmt.Sprintf("%s/receipts", serviceURL.String()))
+	DefaultReceiptsClient = receipt.New(defaultReceiptsURL)
 }
