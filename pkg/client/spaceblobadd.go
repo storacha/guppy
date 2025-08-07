@@ -219,16 +219,15 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	var anyAcceptRcpt receipt.AnyReceipt
 	var site ucan.Link
 	var rcptBlocks iter.Seq2[ipld.Block, error]
-	rcptClient := receiptclient.New(c.receiptsURL)
 	if acceptRcpt == nil && legacyAcceptRcpt == nil {
-		anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
+		anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 		if err != nil {
 			return nil, nil, fmt.Errorf("polling accept: %w", err)
 		}
 	} else if acceptRcpt != nil {
 		acceptOk, failErr := result.Unwrap(result.MapError(acceptRcpt.Out(), failure.FromFailureModel))
 		if failErr != nil {
-			anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
+			anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
@@ -239,7 +238,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	} else if legacyAcceptRcpt != nil {
 		acceptOk, failErr := result.Unwrap(result.MapError(legacyAcceptRcpt.Out(), failure.FromFailureModel))
 		if failErr != nil {
-			anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
+			anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
 				return nil, nil, fmt.Errorf("polling accept: %w", err)
 			}
