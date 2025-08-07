@@ -6,15 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/fluent/qp"
-	"github.com/ipld/go-ipld-prime/node/basicnode"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/multiformats/go-multihash"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
@@ -22,8 +20,6 @@ import (
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
-	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
-	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/invocation/ran"
@@ -35,117 +31,112 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
-	"github.com/storacha/go-ucanto/principal/signer"
 	"github.com/storacha/go-ucanto/server"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
-	"github.com/storacha/go-ucanto/transport/car"
+	"github.com/storacha/go-ucanto/testing/helpers"
 	carresp "github.com/storacha/go-ucanto/transport/car/response"
-	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/client/testutil"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"github.com/stretchr/testify/require"
-
-	"github.com/storacha/guppy/pkg/client"
 )
 
-func TestSpaceBlobAdd(t *testing.T) {
-	space, err := ed25519signer.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	serviceKey, err := ed25519signer.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	servicePrincipal, err := did.Parse("did:web:storacha.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	serviceSigner, err := signer.Wrap(serviceKey, servicePrincipal)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	testSrv, ucanURL, receiptsURL := newTestServer(t, serviceSigner)
-	defer testSrv.Close()
-
-	channel := uhttp.NewHTTPChannel(ucanURL)
-	codec := car.NewCAROutboundCodec()
-
-	conn, err := uclient.NewConnection(servicePrincipal, channel, uclient.WithOutboundCodec(codec))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c := uhelpers.Must(client.NewClient(
-		client.WithConnection(conn),
-		client.WithReceiptsClient(receiptclient.New(receiptsURL)),
-		client.WithPrincipal(serviceSigner),
-	))
-
-	// delegate * to the space
-	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-	proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c.AddProofs(proof)
-
-	testBlob := bytes.NewReader([]byte("test"))
-
-	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID())
-	require.NoError(t, err)
+// receiptsTransport is an [http.RoundTripper] (an [http.Client] transport) that
+// serves known receipts directly rather than using the network.
+type receiptsTransport struct {
+	receipts map[string]receipt.AnyReceipt
 }
 
-type testServer struct {
-	httpSrv       *httptest.Server
-	ucanSrv       server.ServerView
-	acceptedBlobs map[string]acceptedBlobData
-}
+var _ http.RoundTripper = (*receiptsTransport)(nil)
 
-type acceptedBlobData struct {
-	AcceptTask      invocation.Invocation
-	StorageProvider principal.Signer
-	Digest          multihash.Multihash
-	Space           did.DID
-	Location        *url.URL
-}
-
-func newTestServer(t *testing.T, serviceSigner principal.Signer) (*testServer, *url.URL, *url.URL) {
-	acceptedBlobs := make(map[string]acceptedBlobData)
-	mux := http.NewServeMux()
-	httpSrv := httptest.NewServer(mux)
-
-	ucanURL, err := url.Parse(httpSrv.URL + "/ucan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	putBlobURL, err := url.Parse(httpSrv.URL + "/blob")
-	if err != nil {
-		t.Fatal(err)
-	}
-	receiptsURL, err := url.Parse(httpSrv.URL + "/receipt")
-	if err != nil {
-		t.Fatal(err)
+func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	path := req.URL.Path
+	invCid := path[10:]
+	rcpt, ok := r.receipts[invCid]
+	if !ok {
+		return nil, fmt.Errorf("no receipt for invocation %s", invCid)
 	}
 
-	ucanSrv := setupTestUCANServer(t, serviceSigner, putBlobURL, acceptedBlobs)
+	msg, err := message.Build(nil, []receipt.AnyReceipt{rcpt})
+	if err != nil {
+		return nil, fmt.Errorf("building message: %w", err)
+	}
 
-	setupHTTPHandlers(t, mux, ucanSrv, ucanURL, putBlobURL, receiptsURL, acceptedBlobs)
+	resp, err := carresp.Encode(msg)
+	if err != nil {
+		return nil, fmt.Errorf("encoding message %w", err)
+	}
 
-	return &testServer{
-		httpSrv:       httpSrv,
-		ucanSrv:       ucanSrv,
-		acceptedBlobs: acceptedBlobs,
-	}, ucanURL, receiptsURL
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(resp.Body()),
+		Header:     resp.Headers(),
+	}, nil
 }
 
-func (ts *testServer) Close() {
-	ts.httpSrv.Close()
+// blobPutTransport is an [http.RoundTripper] (an [http.Client] transport) that
+// accepts blob PUTs and remembers what was received.
+type blobPutTransport struct {
+	receivedBlobs [][]byte
+}
+
+var _ http.RoundTripper = (*blobPutTransport)(nil)
+
+func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	blob, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading blob from request: %w", err)
+	}
+	r.receivedBlobs = append(r.receivedBlobs, blob)
+
+	return &http.Response{
+		StatusCode: 200,
+	}, nil
+}
+
+func invokeAllocate(
+	service ucan.Signer,
+	storageProvider ucan.Principal,
+	spaceDID did.DID,
+	blobDigest multihash.Multihash,
+	blobSize uint64,
+	addInv invocation.Invocation,
+) (invocation.IssuedInvocation, error) {
+	return blobcap.Allocate.Invoke(
+		service,
+		storageProvider,
+		spaceDID.String(),
+		blobcap.AllocateCaveats{
+			Space: spaceDID,
+			Blob: captypes.Blob{
+				Digest: blobDigest,
+				Size:   blobSize,
+			},
+			Cause: addInv.Link(),
+		},
+	)
+}
+
+func executeAllocate(
+	allocateInv invocation.IssuedInvocation,
+	storageProvider ucan.Signer,
+	blobSize uint64,
+) (receipt.AnyReceipt, error) {
+	putBlobURL, err := url.Parse("https://storage.example/store/" + allocateInv.Root().Link().String())
+	if err != nil {
+		return nil, fmt.Errorf("parsing put blob URL: %w", err)
+	}
+
+	allocateResult := result.Ok[blobcap.AllocateOk, failure.IPLDBuilderFailure](blobcap.AllocateOk{
+		Size: blobSize,
+		Address: &blobcap.Address{
+			URL:     *putBlobURL,
+			Headers: http.Header{"some-header": []string{"some-value"}},
+			Expires: uint64(time.Now().Add(1 * time.Minute).Unix()),
+		},
+	})
+
+	return receipt.Issue(storageProvider, allocateResult, ran.FromInvocation(allocateInv))
 }
 
 type httpPutFact struct {
@@ -169,281 +160,268 @@ func (hpf httpPutFact) ToIPLD() (map[string]datamodel.Node, error) {
 	}, nil
 }
 
-func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlobURL *url.URL, acceptedBlobs map[string]acceptedBlobData) server.ServerView {
-	// space/blob/add handler
-	mockSPKey, err := ed25519signer.Generate()
-	if err != nil {
-		t.Fatal(err)
+func invokePut(
+	blobProvider principal.Signer,
+	blobDigest multihash.Multihash,
+	blobSize uint64,
+	allocateRcptLink ucan.Link,
+) (invocation.IssuedInvocation, error) {
+	fct := httpPutFact{
+		id:  blobProvider.DID().String(),
+		key: blobProvider.Encode(),
 	}
 
-	mockSPDID, err := did.Parse("did:web:sp.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mockSPPrincipal, err := signer.Wrap(mockSPKey, mockSPDID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	spaceBlobAddMethod := server.Provide(
-		spaceblobcap.Add,
-		func(ctx context.Context,
-			cap ucan.Capability[spaceblobcap.AddCaveats], inv invocation.Invocation, context server.InvocationContext) (result.Result[spaceblobcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-			// add task for blob/allocate
-			blobDigest := cap.Nb().Blob.Digest
-			blobSize := cap.Nb().Blob.Size
-
-			spaceDID, err := did.Parse(cap.With())
-			if err != nil {
-				t.Fatal(err)
-			}
-			allocateCaveats := blobcap.AllocateCaveats{
-				Space: spaceDID,
-				Blob: captypes.Blob{
-					Digest: blobDigest,
-					Size:   blobSize,
+	facts := []ucan.FactBuilder{fct}
+	return httpcap.Put.Invoke(
+		blobProvider,
+		blobProvider,
+		blobProvider.DID().String(),
+		httpcap.PutCaveats{
+			URL: captypes.Promise{
+				UcanAwait: captypes.Await{
+					Selector: ".out.ok.address.url",
+					Link:     allocateRcptLink,
 				},
-				Cause: inv.Link(),
-			}
-			allocateInv, err := blobcap.Allocate.Invoke(serverPrincipal, mockSPPrincipal, cap.With(), allocateCaveats)
-			if err != nil {
-				t.Fatal(err)
-			}
-			allocateInv.Attach(inv.Root())
-
-			// add task for ucan/conclude (with the receipt of blob/allocate)
-			allocateResult := result.Ok[blobcap.AllocateOk, failure.IPLDBuilderFailure](blobcap.AllocateOk{
-				Size: blobSize,
-				Address: &blobcap.Address{
-					URL:     *putBlobURL,
-					Headers: http.Header{"some-header": []string{"some-value"}},
-					Expires: uint64(time.Now().Add(1 * time.Minute).Unix()),
+			},
+			Headers: captypes.Promise{
+				UcanAwait: captypes.Await{
+					Selector: ".out.ok.address.headers",
+					Link:     allocateRcptLink,
 				},
-			})
-			allocateRcpt, err := receipt.Issue(mockSPPrincipal, allocateResult, ran.FromInvocation(allocateInv))
-			if err != nil {
-				t.Fatal(err)
-			}
-			concludeCaveats := ucancap.ConcludeCaveats{
-				Receipt: allocateRcpt.Root().Link(),
-			}
-			concludeInv, err := ucancap.Conclude.Invoke(serverPrincipal, mockSPPrincipal, cap.With(), concludeCaveats)
-			if err != nil {
-				t.Fatal(err)
-			}
-			concludeInv.Attach(allocateRcpt.Root())
-
-			// add task for http/put
-			httpPutCaveats := httpcap.PutCaveats{
-				URL: captypes.Promise{
-					UcanAwait: captypes.Await{
-						Selector: ".out.ok.address.url",
-						Link:     allocateRcpt.Root().Link()},
-				},
-				Headers: captypes.Promise{
-					UcanAwait: captypes.Await{
-						Selector: ".out.ok.address.headers",
-						Link:     allocateRcpt.Root().Link()},
-				},
-				Body: httpcap.Body{
-					Digest: blobDigest,
-					Size:   blobSize,
-				},
-			}
-
-			// random signer rather than the proper derived one
-			//blobProvider, err := ed25519signer.FromSeed([]byte(blobDigest)[len(blobDigest)-32:])
-			blobProvider, err := ed25519signer.Generate()
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			fct := httpPutFact{
-				id:  blobProvider.DID().String(),
-				key: blobProvider.Encode(),
-			}
-
-			facts := []ucan.FactBuilder{fct}
-			httpPutInv, err := httpcap.Put.Invoke(blobProvider, blobProvider, blobProvider.DID().String(), httpPutCaveats, delegation.WithFacts(facts))
-			if err != nil {
-				t.Fatal(err)
-			}
-			httpPutInv.Attach(allocateRcpt.Root())
-
-			// add task for blob/accept
-			acceptCaveats := blobcap.AcceptCaveats{
-				Space: spaceDID,
-				Blob: captypes.Blob{
-					Digest: blobDigest,
-					Size:   blobSize,
-				},
-				Put: blobcap.Promise{
-					UcanAwait: blobcap.Await{
-						Selector: ".out.ok",
-						Link:     httpPutInv.Root().Link(),
-					},
-				},
-			}
-			acceptInv, err := blobcap.Accept.Invoke(serverPrincipal, mockSPPrincipal, mockSPPrincipal.DID().String(), acceptCaveats)
-			if err != nil {
-				t.Fatal(err)
-			}
-			acceptInv.Attach(httpPutInv.Root())
-
-			acceptedBlobs[acceptInv.Link().String()] = acceptedBlobData{
-				AcceptTask:      acceptInv,
-				StorageProvider: mockSPPrincipal,
-				Digest:          blobDigest,
-				Space:           spaceDID,
-				Location:        putBlobURL,
-			}
-
-			forks := []fx.Effect{
-				fx.FromInvocation(allocateInv),
-				fx.FromInvocation(concludeInv),
-				fx.FromInvocation(httpPutInv),
-				fx.FromInvocation(acceptInv),
-			}
-			fxs := fx.NewEffects(fx.WithFork(forks...))
-
-			ok := spaceblobcap.AddOk{
-				Site: captypes.Promise{
-					UcanAwait: captypes.Await{
-						Selector: ".out.ok.site",
-						Link:     acceptInv.Root().Link(),
-					},
-				},
-			}
-
-			return result.Ok[spaceblobcap.AddOk, failure.IPLDBuilderFailure](ok), fxs, nil
+			},
+			Body: httpcap.Body{
+				Digest: blobDigest,
+				Size:   blobSize,
+			},
 		},
+		delegation.WithFacts(facts),
 	)
-
-	// ucan/conclude handler
-	ucanConcludeMethod := server.Provide(
-		ucancap.Conclude,
-		func(ctx context.Context, capability ucan.Capability[ucancap.ConcludeCaveats], invocation invocation.Invocation, context server.InvocationContext) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-			return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
-		},
-	)
-
-	// upload/add handler
-	uploadAddMethod := server.Provide(
-		uploadcap.Add,
-		func(ctx context.Context, capability ucan.Capability[uploadcap.AddCaveats], invocation invocation.Invocation, context server.InvocationContext) (result.Result[uploadcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-			return result.Ok[uploadcap.AddOk, failure.IPLDBuilderFailure](uploadcap.AddOk{}), nil, nil
-		},
-	)
-
-	srv, err := server.NewServer(
-		serverPrincipal,
-		server.WithInboundCodec(car.NewCARInboundCodec()),
-		server.WithServiceMethod(spaceblobcap.AddAbility, spaceBlobAddMethod),
-		server.WithServiceMethod(ucancap.ConcludeAbility, ucanConcludeMethod),
-		server.WithServiceMethod(uploadcap.AddAbility, uploadAddMethod),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return srv
 }
 
-func setupHTTPHandlers(t *testing.T, mux *http.ServeMux, ucanSrv server.ServerView, ucanURL, putBlobURL, receiptsURL *url.URL, acceptedBlobs map[string]acceptedBlobData) {
-	// ucan handler
-	ucanPath := fmt.Sprintf("POST %s", ucanURL.Path)
-	mux.HandleFunc(ucanPath, func(w http.ResponseWriter, r *http.Request) {
-		res, _ := ucanSrv.Request(testContext(t), uhttp.NewHTTPRequest(r.Body, r.Header))
-
-		for key, vals := range res.Headers() {
-			for _, v := range vals {
-				w.Header().Add(key, v)
-			}
-		}
-
-		if res.Status() != 0 {
-			w.WriteHeader(res.Status())
-		}
-
-		_, err := io.Copy(w, res.Body())
-		if err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	// put blob handler
-	putBlobPath := fmt.Sprintf("PUT %s", putBlobURL.Path)
-	mux.HandleFunc(putBlobPath, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	// receipts handler
-	receiptsPath := fmt.Sprintf("GET %s/{cid}", receiptsURL.Path)
-	mux.HandleFunc(receiptsPath, func(w http.ResponseWriter, r *http.Request) {
-		cidStr := r.PathValue("cid")
-		if cidStr == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		_, err := cid.Parse(cidStr)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		acceptedBlobData, ok := acceptedBlobs[cidStr]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		locationClaim, err := assertcap.Location.Delegate(
-			acceptedBlobData.StorageProvider,
-			acceptedBlobData.Space.DID(),
-			acceptedBlobData.Space.DID().String(),
-			assertcap.LocationCaveats{
-				Space:    acceptedBlobData.Space.DID(),
-				Content:  captypes.FromHash(acceptedBlobData.Digest),
-				Location: []url.URL{*acceptedBlobData.Location},
+func invokeAccept(
+	service ucan.Signer,
+	storageProvider ucan.Principal,
+	spaceDID did.DID,
+	blobDigest multihash.Multihash,
+	blobSize uint64,
+	httpPutInvLink ucan.Link,
+) (invocation.IssuedInvocation, error) {
+	return blobcap.Accept.Invoke(
+		service,
+		storageProvider,
+		storageProvider.DID().String(),
+		blobcap.AcceptCaveats{
+			Space: spaceDID,
+			Blob: captypes.Blob{
+				Digest: blobDigest,
+				Size:   blobSize,
 			},
-			delegation.WithNoExpiration(),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
+			Put: blobcap.Promise{
+				UcanAwait: blobcap.Await{
+					Selector: ".out.ok",
+					Link:     httpPutInvLink,
+				},
+			},
+		},
+	)
+}
 
-		acceptOk := result.Ok[blobcap.AcceptOk, failure.IPLDBuilderFailure](blobcap.AcceptOk{
-			Site: locationClaim.Link(),
-		})
+func executeAccept(
+	acceptInv invocation.IssuedInvocation,
+	storageProvider ucan.Signer,
+	spaceDID did.DID,
+	blobDigest multihash.Multihash,
+) (receipt.AnyReceipt, error) {
+	locationClaim, err := assertcap.Location.Delegate(
+		storageProvider,
+		spaceDID,
+		spaceDID.String(),
+		assertcap.LocationCaveats{
+			Space:    spaceDID,
+			Content:  captypes.FromHash(blobDigest),
+			Location: []url.URL{*helpers.Must(url.Parse("https://storage.example/fetch/" + blobDigest.HexString()))},
+		},
+		delegation.WithNoExpiration(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating location claim delegation: %w", err)
+	}
 
-		forks := []fx.Effect{fx.FromInvocation(locationClaim)}
-
-		acceptRcpt, err := receipt.Issue(acceptedBlobData.StorageProvider, acceptOk, ran.FromInvocation(acceptedBlobData.AcceptTask), receipt.WithFork(forks...))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		msg, err := message.Build(nil, []receipt.AnyReceipt{acceptRcpt})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		resp, err := carresp.Encode(msg)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		for hdrK, hdrV := range resp.Headers() {
-			w.Header().Add(hdrK, hdrV[0])
-		}
-
-		_, err = io.Copy(w, resp.Body())
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		w.WriteHeader(resp.Status())
+	acceptOk := result.Ok[blobcap.AcceptOk, failure.IPLDBuilderFailure](blobcap.AcceptOk{
+		Site: locationClaim.Link(),
 	})
+
+	acceptRcpt, err := receipt.Issue(
+		storageProvider,
+		acceptOk,
+		ran.FromInvocation(acceptInv),
+		receipt.WithFork(fx.FromInvocation(locationClaim)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("issuing receipt: %w", err)
+	}
+	return acceptRcpt, err
+}
+
+func TestSpaceBlobAdd(t *testing.T) {
+	space, err := ed25519signer.Generate()
+	require.NoError(t, err)
+
+	storageProvider, err := ed25519signer.Generate()
+	require.NoError(t, err)
+
+	// TK: why?
+	// random signer rather than the proper derived one
+	//blobProvider, err := ed25519signer.FromSeed([]byte(blobDigest)[len(blobDigest)-32:])
+	blobProvider, err := ed25519signer.Generate()
+	require.NoError(t, err)
+
+	receiptsTrans := receiptsTransport{
+		receipts: make(map[string]receipt.AnyReceipt),
+	}
+
+	blobPutTransport := blobPutTransport{}
+
+	var c *client.Client
+
+	connection := testutil.NewTestServerConnection(
+		server.WithServiceMethod(
+			spaceblobcap.Add.Can(),
+			server.Provide(
+				spaceblobcap.Add,
+				func(
+					ctx context.Context,
+					cap ucan.Capability[spaceblobcap.AddCaveats],
+					inv invocation.Invocation,
+					context server.InvocationContext,
+				) (result.Result[spaceblobcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+					spaceDID, err := did.Parse(cap.With())
+					if err != nil {
+						return nil, nil, fmt.Errorf("parsing space DID: %w", err)
+					}
+					blobDigest := cap.Nb().Blob.Digest
+					blobSize := cap.Nb().Blob.Size
+
+					allocateInv, err := invokeAllocate(
+						context.ID(),
+						storageProvider,
+						spaceDID,
+						blobDigest,
+						blobSize,
+						inv)
+					// TK: allocateInv.Attach(inv.Root())
+					require.NoError(t, err)
+
+					allocateRcpt, err := executeAllocate(allocateInv, storageProvider, blobSize)
+					require.NoError(t, err)
+					receiptsTrans.receipts[allocateInv.Root().Link().String()] = allocateRcpt
+
+					httpPutInv, err := invokePut(
+						blobProvider,
+						blobDigest,
+						blobSize,
+						allocateRcpt.Root().Link(),
+					)
+					require.NoError(t, err)
+					// TK: httpPutInv.Attach(allocateRcpt.Root())
+
+					acceptInv, err := invokeAccept(
+						context.ID(),
+						storageProvider,
+						spaceDID,
+						blobDigest,
+						blobSize,
+						httpPutInv.Root().Link(),
+					)
+					require.NoError(t, err)
+
+					acceptRcpt, err := executeAccept(
+						acceptInv,
+						storageProvider,
+						spaceDID,
+						blobDigest,
+					)
+					require.NoError(t, err)
+
+					receiptsTrans.receipts[acceptInv.Root().Link().String()] = acceptRcpt
+
+					concludeInv, err := ucancap.Conclude.Invoke(
+						context.ID(),
+						storageProvider,
+						cap.With(),
+						ucancap.ConcludeCaveats{
+							Receipt: allocateRcpt.Root().Link(),
+						},
+					)
+					concludeInv.Attach(allocateRcpt.Root())
+
+					forks := []fx.Effect{
+						fx.FromInvocation(allocateInv),
+						fx.FromInvocation(concludeInv),
+						fx.FromInvocation(httpPutInv),
+						fx.FromInvocation(acceptInv),
+					}
+					fxs := fx.NewEffects(fx.WithFork(forks...))
+
+					ok := spaceblobcap.AddOk{
+						Site: captypes.Promise{
+							UcanAwait: captypes.Await{
+								Selector: ".out.ok.site",
+								// TK:
+								// Link:     acceptInv.Root().Link(),
+								Link: helpers.RandomCID(),
+							},
+						},
+					}
+					return result.Ok[spaceblobcap.AddOk, failure.IPLDBuilderFailure](ok), fxs, nil
+				},
+			),
+		),
+		server.WithServiceMethod(
+			ucancap.Conclude.Can(),
+			server.Provide(
+				ucancap.Conclude,
+				func(
+					ctx context.Context,
+					cap ucan.Capability[ucancap.ConcludeCaveats],
+					inv invocation.Invocation,
+					context server.InvocationContext,
+				) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+					return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
+				},
+			),
+		),
+	)
+
+	c, err = client.NewClient(
+		client.WithConnection(connection),
+		client.WithReceiptsClient(
+			receiptclient.New(
+				helpers.Must(url.Parse("https://receipts.example/receipts")),
+				receiptclient.WithHTTPClient(
+					&http.Client{
+						Transport: &receiptsTrans,
+					},
+				),
+			),
+		),
+	)
+
+	require.NoError(t, err)
+
+	// delegate * to the space
+	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+	proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+	require.NoError(t, err)
+
+	c.AddProofs(proof)
+
+	testBlob := bytes.NewReader([]byte("test"))
+
+	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(&http.Client{
+		Transport: &blobPutTransport,
+	}))
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, [][]byte{[]byte("test")}, blobPutTransport.receivedBlobs)
 }
