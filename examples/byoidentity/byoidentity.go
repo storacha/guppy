@@ -25,7 +25,7 @@ func main() {
 	space, _ := did.Parse("did:key:z6MkwDuRThQcyWjqNsK54yKAmzfsiH6BTkASyiucThMtHt1y")
 
 	// nil uses the default connection to the Storacha network
-	c, _ := client.NewClient(nil, nil, client.WithPrincipal(signer))
+	c, _ := client.NewClient(client.WithPrincipal(signer))
 
 	c.AddProofs(proof)
 

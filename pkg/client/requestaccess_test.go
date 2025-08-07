@@ -46,7 +46,7 @@ func TestRequestAccess(t *testing.T) {
 			),
 		)
 
-		c := uhelpers.Must(client.NewClient(connection, nil))
+		c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 
 		authOk, err := c.RequestAccess(testContext(t), "did:mailto:example.com:alice")
 

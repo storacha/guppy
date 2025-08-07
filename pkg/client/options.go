@@ -1,6 +1,8 @@
 package client
 
 import (
+	"net/url"
+
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/guppy/pkg/agentdata"
@@ -14,6 +16,15 @@ type Option func(c *Client) error
 func WithConnection(conn uclient.Connection) Option {
 	return func(c *Client) error {
 		c.connection = conn
+		return nil
+	}
+}
+
+// WithReceiptsURL configures the URL for the client to fetch receipts from. If
+// one is not provided, the default receipts URL will be used.
+func WithReceiptsURL(receiptsURL *url.URL) Option {
+	return func(c *Client) error {
+		c.receiptsURL = receiptsURL
 		return nil
 	}
 }

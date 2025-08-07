@@ -75,7 +75,7 @@ func TestPollClaim(t *testing.T) {
 		),
 	)
 
-	c = uhelpers.Must(client.NewClient(connection, nil))
+	c = uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 
 	requestLink := uhelpers.RandomCID()
 
