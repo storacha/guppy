@@ -32,6 +32,21 @@ import (
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
+// SpaceBlobAddOption configures options for SpaceBlobAdd.
+type SpaceBlobAddOption func(*spaceBlobAddConfig)
+
+// spaceBlobAddConfig holds configuration for SpaceBlobAdd.
+type spaceBlobAddConfig struct {
+	putClient *http.Client
+}
+
+// WithPutClient configures the HTTP client to use for uploading blobs.
+func WithPutClient(client *http.Client) SpaceBlobAddOption {
+	return func(cfg *spaceBlobAddConfig) {
+		cfg.putClient = client
+	}
+}
+
 // SpaceBlobAdd adds a blob to the service. The issuer needs proof of
 // `space/blob/add` delegated capability.
 //
@@ -47,7 +62,16 @@ import (
 //
 // Returns the multihash of the added blob and the location commitment that contains details about where the
 // blob can be located, or an error if something went wrong.
-func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID) (multihash.Multihash, delegation.Delegation, error) {
+func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+	// Configure options
+	cfg := &spaceBlobAddConfig{
+		putClient: http.DefaultClient,
+	}
+	for _, opt := range options {
+		opt(cfg)
+	}
+	putClient := cfg.putClient
+
 	contentBytes, err := io.ReadAll(content)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading content: %w", err)
@@ -112,12 +136,20 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 	}
 
-	if allocateTask == nil || len(concludeFxs) == 0 || putTask == nil || acceptTask == nil {
-		return nil, nil, fmt.Errorf("mandatory tasks not received in space/blob/add receipt")
+	switch {
+	case allocateTask == nil:
+		return nil, nil, fmt.Errorf("mandatory blob/allocate task not received in space/blob/add receipt")
+	case putTask == nil:
+		return nil, nil, fmt.Errorf("mandatory http/put task not received in space/blob/add receipt")
+	case acceptTask == nil:
+		return nil, nil, fmt.Errorf("mandatory blob/accept task not received in space/blob/add receipt")
+	case len(concludeFxs) == 0:
+		return nil, nil, fmt.Errorf("mandatory ucan/conclude tasks not received in space/blob/add receipt")
 	}
 
 	var allocateRcpt receipt.Receipt[blobcap.AllocateOk, fdm.FailureModel]
 	var legacyAllocateRcpt receipt.Receipt[w3sblobcap.AllocateOk, fdm.FailureModel]
+	// TK: Why not use receipt.Rebind here?
 	var putRcpt receipt.AnyReceipt
 	var acceptRcpt receipt.Receipt[blobcap.AcceptOk, fdm.FailureModel]
 	var legacyAcceptRcpt receipt.Receipt[w3sblobcap.AcceptOk, fdm.FailureModel]
@@ -165,13 +197,10 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 	}
 
-	if allocateRcpt == nil && legacyAllocateRcpt == nil {
-		return nil, nil, fmt.Errorf("mandatory receipts not received in space/blob/add receipt")
-	}
-
 	var url *url.URL
 	var headers http.Header
-	if allocateRcpt != nil {
+	switch {
+	case allocateRcpt != nil:
 		allocateOk, err := result.Unwrap(result.MapError(allocateRcpt.Out(), failure.FromFailureModel))
 		if err != nil {
 			return nil, nil, fmt.Errorf("blob allocation failed: %w", err)
@@ -182,7 +211,8 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			url = &address.URL
 			headers = address.Headers
 		}
-	} else {
+
+	case legacyAllocateRcpt != nil:
 		allocateOk, err := result.Unwrap(result.MapError(legacyAllocateRcpt.Out(), failure.FromFailureModel))
 		if err != nil {
 			return nil, nil, fmt.Errorf("blob allocation failed: %w", err)
@@ -193,10 +223,13 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			url = &address.URL
 			headers = address.Headers
 		}
+
+	default:
+		return nil, nil, fmt.Errorf("mandatory receipts not received in space/blob/add receipt")
 	}
 
 	if url != nil && headers != nil {
-		if err := putBlob(ctx, url, headers, contentBytes); err != nil {
+		if err := putBlob(ctx, putClient, url, headers, contentBytes); err != nil {
 			return nil, nil, fmt.Errorf("putting blob: %w", err)
 		}
 	}
@@ -306,7 +339,7 @@ func getConcludeReceipt(concludeFx invocation.Invocation) (receipt.AnyReceipt, e
 	return rcpt, nil
 }
 
-func putBlob(ctx context.Context, url *url.URL, headers http.Header, body []byte) error {
+func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating upload request: %w", err)
@@ -316,9 +349,6 @@ func putBlob(ctx context.Context, url *url.URL, headers http.Header, body []byte
 		req.Header.Set(k, v[0])
 	}
 
-	// TODO: custom HTTP client with timeout
-	// TODO: retries
-	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("uploading blob: %w", err)
