@@ -21,9 +21,9 @@ func main() {
 	// the account to log in as, which has access to the space
 	account, _ := did.Parse("mailto:example.com:ucansam")
 
-	// nil uses the default connection to the Storacha network
+	// Without `client.WithConnection`, uses default connection to the Storacha network
 	// Without `client.WithPrincipal`, the client will generate a new signer.
-	c, _ := client.NewClient(nil, nil)
+	c, _ := client.NewClient()
 
 	// Kick off the login flow
 	authOk, _ := c.RequestAccess(ctx, account.String())

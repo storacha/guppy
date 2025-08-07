@@ -62,7 +62,7 @@ func TestClaimAccess(t *testing.T) {
 			),
 		)
 
-		c = uhelpers.Must(client.NewClient(connection, nil))
+		c = uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 
 		// Some arbitrary delegation which has been stored to be claimed.
 		del := uhelpers.Must(uploadcap.Get.Delegate(
@@ -98,7 +98,7 @@ func TestClaimAccess(t *testing.T) {
 			),
 		)
 
-		c := uhelpers.Must(client.NewClient(connection, nil))
+		c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
 		require.ErrorContains(t, err, "`access/claim` failed: Something went wrong!")
@@ -110,7 +110,7 @@ func TestClaimAccess(t *testing.T) {
 		// capability.
 		connection := testutil.NewTestServerConnection()
 
-		c := uhelpers.Must(client.NewClient(connection, nil))
+		c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
 		require.ErrorContains(t, err, "`access/claim` failed with unexpected error:")

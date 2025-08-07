@@ -32,23 +32,17 @@ type Client struct {
 	saveFn      func(agentdata.AgentData) error
 }
 
-// NewClient creates a new client. If [connection] is `nil`, the default
-// connection will be used. If [receiptsURL] is `nil`, the default receipts URL
-// will be used.
-func NewClient(connection uclient.Connection, receiptsURL *url.URL, options ...Option) (*Client, error) {
+// NewClient creates a new client.
+func NewClient(options ...Option) (*Client, error) {
 	c := Client{
-		connection:  connection,
-		receiptsURL: receiptsURL,
+		connection:  DefaultConnection,
+		receiptsURL: DefaultReceiptsURL,
 	}
 
 	for _, opt := range options {
 		if err := opt(&c); err != nil {
 			return nil, err
 		}
-	}
-
-	if c.connection == nil {
-		c.connection = DefaultConnection
 	}
 
 	if c.data.Principal == nil {
