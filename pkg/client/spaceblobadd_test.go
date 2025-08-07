@@ -79,7 +79,11 @@ func TestSpaceBlobAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := uhelpers.Must(client.NewClient(conn, receiptsURL))
+	c := uhelpers.Must(client.NewClient(
+		client.WithConnection(conn),
+		client.WithReceiptsURL(receiptsURL),
+		client.WithPrincipal(serviceSigner),
+	))
 
 	// delegate * to the space
 	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
