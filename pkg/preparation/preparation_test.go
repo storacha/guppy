@@ -2,14 +2,23 @@ package preparation_test
 
 import (
 	"context"
+	"io"
 	"io/fs"
 	"math/rand"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
+	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/testing/helpers"
+	"github.com/storacha/guppy/pkg/client"
+	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
@@ -22,6 +31,19 @@ func randomBytes(n int) []byte {
 		b[i] = byte(rand.Intn(256))
 	}
 	return b
+}
+
+// spaceBlobAddClient is a [shards.SpaceBlobAdder] that wraps a [client.Client]
+// to use a custom putClient.
+type spaceBlobAddClient struct {
+	*client.Client
+	putClient *http.Client
+}
+
+var _ shards.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
+
+func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
 }
 
 func TestExecuteUpload(t *testing.T) {
@@ -44,8 +66,21 @@ func TestExecuteUpload(t *testing.T) {
 	}
 	repo := sqlrepo.New(testutil.CreateTestDB(t))
 
+	putClient := ctestutil.NewPutClient()
+
+	c := &spaceBlobAddClient{
+		Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+		putClient: putClient,
+	}
+
+	// Use the client's issuer as the space DID to avoid any concerns about
+	// authorization.
+	spaceDID := c.Issuer().DID()
+
 	api := preparation.NewAPI(
 		repo,
+		c,
+		spaceDID,
 		preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 			require.Equal(t, ".", path, "test expects root to be '.'")
 			return afero.NewIOFS(memFS), nil
@@ -54,20 +89,17 @@ func TestExecuteUpload(t *testing.T) {
 
 	configuration, err := api.CreateConfiguration(ctx, "Large Upload Configuration", configurationsmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
-
 	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
 	require.NoError(t, err)
-
 	err = repo.AddSourceToConfiguration(ctx, configuration.ID(), source.ID())
 	require.NoError(t, err)
-
 	uploads, err := api.CreateUploads(ctx, configuration.ID())
 	require.NoError(t, err)
+	require.Len(t, uploads, 1, "expected exactly one upload to be created")
+	upload := uploads[0]
 
-	for _, upload := range uploads {
-		err = api.ExecuteUpload(ctx, upload)
-		require.NoError(t, err)
-	}
+	err = api.ExecuteUpload(ctx, upload)
+	require.NoError(t, err)
 
 	openShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateOpen)
 	require.NoError(t, err)
@@ -75,5 +107,12 @@ func TestExecuteUpload(t *testing.T) {
 
 	closedShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateClosed)
 	require.NoError(t, err)
-	require.Len(t, closedShards, 5, "expected all shards to closed be for the upload")
+	require.Len(t, closedShards, 0, "expected no closed shards at end of upload")
+
+	addedShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateAdded)
+	require.NoError(t, err)
+	require.Len(t, addedShards, 5, "expected all shards to added be for the upload")
+
+	putBlobs := ctestutil.ReceivedBlobs(putClient)
+	require.Len(t, putBlobs, 5, "expected exactly 5 blobs to be added")
 }
