@@ -3,12 +3,14 @@ package shards
 import (
 	"context"
 	"fmt"
-	"net/url"
+	"io"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
+	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
@@ -22,16 +24,25 @@ const noRootsHeaderLen = 17
 
 var log = logging.Logger("preparation/shards")
 
+// SpaceBlobAdder is an interface for adding shards to a space blob. It's
+// typically implemented by [client.Client].
+type SpaceBlobAdder interface {
+	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
+}
+
+var _ SpaceBlobAdder = (*client.Client)(nil)
+
 // API provides methods to interact with the Shards in the repository.
 type API struct {
 	Repo        Repo
-	Client      client.Client
+	Client      SpaceBlobAdder
 	Space       did.DID
-	ReceiptsURL *url.URL
+	CarForShard func(shard *model.Shard) (io.Reader, error)
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
+var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
@@ -138,4 +149,29 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	}
 
 	return closed, nil
+}
+
+func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
+	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateClosed)
+	if err != nil {
+		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
+	}
+
+	for _, shard := range closedShards {
+		reader, err := a.CarForShard(shard)
+		if err != nil {
+			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
+		}
+
+		_, _, err = a.Client.SpaceBlobAdd(ctx, reader, a.Space)
+		if err != nil {
+			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), a.Space, err)
+		}
+		shard.Added()
+		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
+			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.ID(), err)
+		}
+	}
+
+	return nil
 }
