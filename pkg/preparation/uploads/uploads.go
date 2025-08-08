@@ -19,18 +19,23 @@ type RunNewScanFunc func(ctx context.Context, uploadID id.UploadID, fsEntryCb fu
 type RunDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type RestartDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
-type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) error
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 
 type API struct {
 	Repo                     Repo
 	RunNewScan               RunNewScanFunc
 	RunDagScansForUpload     RunDagScansForUploadFunc
 	RestartDagScansForUpload RestartDagScansForUploadFunc
+
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
-	// shard if necessary. It returns true if a new shard was created, false if the node
-	// was added to an existing shard.
+	// shard if necessary. It returns true if an existing open shard was closed,
+	// false otherwise.
 	AddNodeToUploadShards AddNodeToUploadShardsFunc
-	CloseUploadShards     CloseUploadShardsFunc
+
+	// CloseUploadShards closes any remaining open shard for the upload. It
+	// returns true if an existing open shard was in fact closed, false if there
+	// was no open shard to close.
+	CloseUploadShards CloseUploadShardsFunc
 }
 
 // CreateUploads creates uploads for a given configuration and its associated sources.
@@ -193,12 +198,12 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 		func() error {
 			err := e.api.RunDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
-				shardCreated, err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID())
+				shardClosed, err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID())
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
 
-				if shardCreated {
+				if shardClosed {
 					signalWorkAvailable(shardWork)
 				}
 
@@ -228,8 +233,13 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 			}
 
 			// We're out of nodes, so we can close any open shards for this upload.
-			if err := e.api.CloseUploadShards(ctx, e.upload.ID()); err != nil {
+			shardClosed, err := e.api.CloseUploadShards(ctx, e.upload.ID())
+			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", e.upload.ID(), err)
+			}
+
+			if shardClosed {
+				signalWorkAvailable(shardWork)
 			}
 
 			close(shardWork) // close the work channel to signal completion
