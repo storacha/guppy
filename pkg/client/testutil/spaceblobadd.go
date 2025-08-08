@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/invocation/ran"
+	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/core/result"
@@ -29,7 +31,11 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
+	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
+	carresp "github.com/storacha/go-ucanto/transport/car/response"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 func invokeAllocate(
@@ -306,4 +312,87 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 	}
 
 	return handler, nil
+}
+
+// receiptsTransport is an [http.RoundTripper] (an [http.Client] transport) that
+// serves known receipts directly rather than using the network.
+type receiptsTransport struct {
+	receipts map[string]receipt.AnyReceipt
+}
+
+var _ http.RoundTripper = (*receiptsTransport)(nil)
+
+func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	path := req.URL.Path
+	invCid := path[10:]
+	rcpt, ok := r.receipts[invCid]
+	if !ok {
+		return nil, fmt.Errorf("no receipt for invocation %s", invCid)
+	}
+
+	msg, err := message.Build(nil, []receipt.AnyReceipt{rcpt})
+	if err != nil {
+		return nil, fmt.Errorf("building message: %w", err)
+	}
+
+	resp, err := carresp.Encode(msg)
+	if err != nil {
+		return nil, fmt.Errorf("encoding message %w", err)
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(resp.Body()),
+		Header:     resp.Headers(),
+	}, nil
+}
+
+// SpaceBlobAddClient creates an entire [client.Client] that's configured to
+// test [spaceblobcap.Add] invocations.
+func SpaceBlobAddClient() (*client.Client, error) {
+	receiptsTrans := receiptsTransport{
+		receipts: make(map[string]receipt.AnyReceipt),
+	}
+
+	connection := NewTestServerConnection(
+		server.WithServiceMethod(
+			spaceblobcap.Add.Can(),
+			server.Provide(
+				spaceblobcap.Add,
+				uhelpers.Must(SpaceBlobAddHandler(
+					func(rcpt receipt.AnyReceipt) {
+						receiptsTrans.receipts[rcpt.Ran().Root().Link().String()] = rcpt
+					},
+				)),
+			),
+		),
+		server.WithServiceMethod(
+			ucancap.Conclude.Can(),
+			server.Provide(
+				ucancap.Conclude,
+				func(
+					ctx context.Context,
+					cap ucan.Capability[ucancap.ConcludeCaveats],
+					inv invocation.Invocation,
+					context server.InvocationContext,
+				) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+					return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
+				},
+			),
+		),
+	)
+
+	return client.NewClient(
+		client.WithConnection(connection),
+		client.WithReceiptsClient(
+			receiptclient.New(
+				helpers.Must(url.Parse("https://receipts.example/receipts")),
+				receiptclient.WithHTTPClient(
+					&http.Client{
+						Transport: &receiptsTrans,
+					},
+				),
+			),
+		),
+	)
 }
