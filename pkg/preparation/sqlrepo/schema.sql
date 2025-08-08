@@ -80,12 +80,14 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE TABLE IF NOT EXISTS fs_entries (
   id BLOB PRIMARY KEY,
   source_id BLOB NOT NULL,
+  space_did BLOB NOT NULL,
   path TEXT NOT NULL,
   last_modified INTEGER NOT NULL,
   MODE INTEGER NOT NULL,
   size INTEGER NOT NULL,
   CHECKSUM BLOB,
-  FOREIGN KEY (source_id) REFERENCES sources(id)
+  FOREIGN KEY (source_id) REFERENCES sources(id),
+  FOREIGN KEY (space_did) REFERENCES spaces(did)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS directory_children (

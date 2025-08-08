@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -51,18 +52,19 @@ func TestFindOrCreateFile(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
+		spaceDID := testutil.RandomDID(t)
 
-		file, created, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+		file, created, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.True(t, created)
 		require.NotNil(t, file)
 
-		file2, created2, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+		file2, created2, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.False(t, created2)
 		require.Equal(t, file, file2)
 
-		file3, created3, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("different-checksum"), sourceId)
+		file3, created3, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("different-checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.True(t, created3)
 		require.NotEqual(t, file.ID(), file3.ID())
@@ -72,7 +74,8 @@ func TestFindOrCreateFile(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
-		_, _, err := repo.FindOrCreateFile(t.Context(), "some/directory", modTime, fs.ModeDir|0644, 12345, []byte("checksum"), sourceId)
+		spaceDID := testutil.RandomDID(t)
+		_, _, err := repo.FindOrCreateFile(t.Context(), "some/directory", modTime, fs.ModeDir|0644, 12345, []byte("checksum"), sourceId, spaceDID)
 		require.ErrorContains(t, err, "cannot create a file with directory mode")
 	})
 }
@@ -82,18 +85,19 @@ func TestFindOrCreateDirectory(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
+		spaceDID := testutil.RandomDID(t)
 
-		dir, created, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+		dir, created, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.True(t, created)
 		require.NotNil(t, dir)
 
-		dir2, created2, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+		dir2, created2, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.False(t, created2)
 		require.Equal(t, dir, dir2)
 
-		dir3, created3, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("different-checksum"), sourceId)
+		dir3, created3, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("different-checksum"), sourceId, spaceDID)
 		require.NoError(t, err)
 		require.True(t, created3)
 		require.NotEqual(t, dir.ID(), dir3.ID())
@@ -103,7 +107,8 @@ func TestFindOrCreateDirectory(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
-		_, _, err := repo.FindOrCreateDirectory(t.Context(), "some/file.txt", modTime, 0644, []byte("different-checksum"), sourceId)
+		spaceDID := testutil.RandomDID(t)
+		_, _, err := repo.FindOrCreateDirectory(t.Context(), "some/file.txt", modTime, 0644, []byte("different-checksum"), sourceId, spaceDID)
 		require.ErrorContains(t, err, "cannot create a directory with file mode")
 	})
 }
@@ -112,14 +117,15 @@ func TestCreateDirectoryChildren(t *testing.T) {
 	repo := sqlrepo.New(testdb.CreateTestDB(t))
 	modTime := time.Now().UTC().Truncate(time.Second)
 	sourceId := id.New()
+	spaceDID := testutil.RandomDID(t)
 
-	dir, _, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId)
+	dir, _, err := repo.FindOrCreateDirectory(t.Context(), "some/directory", modTime, fs.ModeDir|0644, []byte("checksum"), sourceId, spaceDID)
 	require.NoError(t, err)
 
-	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId, spaceDID)
 	require.NoError(t, err)
 
-	file2, _, err := repo.FindOrCreateFile(t.Context(), "some/another_file.txt", modTime, 0644, 67890, []byte("another-checksum"), sourceId)
+	file2, _, err := repo.FindOrCreateFile(t.Context(), "some/another_file.txt", modTime, 0644, 67890, []byte("another-checksum"), sourceId, spaceDID)
 	require.NoError(t, err)
 
 	err = repo.CreateDirectoryChildren(t.Context(), dir, []model.FSEntry{file, file2})
@@ -134,8 +140,9 @@ func TestGetFileByID(t *testing.T) {
 	repo := sqlrepo.New(testdb.CreateTestDB(t))
 	modTime := time.Now().UTC().Truncate(time.Second)
 	sourceId := id.New()
+	spaceDID := testutil.RandomDID(t)
 
-	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId)
+	file, _, err := repo.FindOrCreateFile(t.Context(), "some/file.txt", modTime, 0644, 12345, []byte("checksum"), sourceId, spaceDID)
 	require.NoError(t, err)
 
 	foundFile, err := repo.GetFileByID(t.Context(), file.ID())

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"time"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -118,11 +119,11 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 // FindOrCreateFile finds or creates a file entry in the repository with the given parameters.
 // If the file already exists, it returns the existing file and false.
 // If the file does not exist, it creates a new file entry and returns it along with true.
-func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*scanmodel.File, bool, error) {
+func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.File, bool, error) {
 	if mode.IsDir() {
 		return nil, false, errors.New("cannot create a file with directory mode")
 	}
-	entry, err := r.findFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID)
+	entry, err := r.findFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID, spaceDID)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to find file entry: %w", err)
 	}
@@ -134,7 +135,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 		return nil, false, errors.New("found entry is not a file")
 	}
 
-	newfile, err := scanmodel.NewFile(path, lastModified, mode, size, checksum, sourceID)
+	newfile, err := scanmodel.NewFile(path, lastModified, mode, size, checksum, sourceID, spaceDID)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to make new file entry: %w", err)
 	}
@@ -151,12 +152,12 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 // FindOrCreateDirectory finds or creates a directory entry in the repository with the given parameters.
 // If the directory already exists, it returns the existing directory and false.
 // If the directory does not exist, it creates a new directory entry and returns it along with true.
-func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*scanmodel.Directory, bool, error) {
+func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.Directory, bool, error) {
 	log.Debugf("Finding or creating directory: %s", path)
 	if !mode.IsDir() {
 		return nil, false, errors.New("cannot create a directory with file mode")
 	}
-	entry, err := r.findFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID) // size is not used for directories
+	entry, err := r.findFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID, spaceDID) // size is not used for directories
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to find directory entry: %w", err)
 	}
@@ -168,7 +169,7 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 		return nil, false, errors.New("found entry is not a directory")
 	}
 
-	newdir, err := scanmodel.NewDirectory(path, lastModified, mode, checksum, sourceID)
+	newdir, err := scanmodel.NewDirectory(path, lastModified, mode, checksum, sourceID, spaceDID)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to make new directory entry: %w", err)
 	}
@@ -202,7 +203,7 @@ func (r *repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 // DirectoryChildren retrieves the children of a directory from the repository.
 func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
 	query := `
-		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id
+		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id, fse.space_did
 		FROM directory_children dc
 		JOIN fs_entries fse ON dc.child_id = fse.id
 		WHERE dc.directory_id = $1
@@ -223,6 +224,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 			size *uint64,
 			checksum *[]byte,
 			sourceID *id.SourceID,
+			spaceDID *did.DID,
 		) error {
 			return rows.Scan(
 				id,
@@ -232,6 +234,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 				size,
 				checksum,
 				sourceID,
+				util.DbDID(spaceDID),
 			)
 		})
 		if err != nil {
@@ -259,10 +262,10 @@ func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 // GetFileByID retrieves a file by its unique ID from the repository.
 func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, path, last_modified, mode, size, checksum, source_id FROM fs_entries WHERE id = ?`, fileID,
+		`SELECT id, path, last_modified, mode, size, checksum, source_id, space_did FROM fs_entries WHERE id = ?`, fileID,
 	)
-	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error {
-		return row.Scan(id, path, util.TimestampScanner(lastModified), mode, size, checksum, sourceID)
+	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error {
+		return row.Scan(id, path, util.TimestampScanner(lastModified), mode, size, checksum, sourceID, util.DbDID(spaceDID))
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -276,9 +279,9 @@ func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	return nil, errors.New("found entry is not a file")
 }
 
-func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (scanmodel.FSEntry, error) {
+func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, error) {
 	query := `
-		SELECT id, path, last_modified, mode, size, checksum, source_id
+		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
 		FROM fs_entries
 		WHERE path = $1
 		  AND last_modified = $2
@@ -286,6 +289,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		  AND size = $4
 		  AND checksum = $5
 		  AND source_id = $6
+		  AND space_did = $7
 	`
 	row := r.db.QueryRowContext(
 		ctx,
@@ -296,6 +300,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		size,
 		checksum,
 		sourceID,
+		util.DbDID(&spaceDID),
 	)
 	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
 		id *id.FSEntryID,
@@ -305,6 +310,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		size *uint64,
 		checksum *[]byte,
 		sourceID *id.SourceID,
+		spaceDID *did.DID,
 	) error {
 		return row.Scan(
 			id,
@@ -314,6 +320,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 			size,
 			checksum,
 			sourceID,
+			util.DbDID(spaceDID),
 		)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -324,8 +331,8 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 
 func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error {
 	insertQuery := `
-		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
 	return scanmodel.WriteFSEntryToDatabase(
@@ -338,6 +345,7 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 			size uint64,
 			checksum []byte,
 			sourceID id.SourceID,
+			spaceDID did.DID,
 		) error {
 			_, err := r.db.ExecContext(
 				ctx,
@@ -349,6 +357,7 @@ func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 				size,
 				checksum,
 				sourceID,
+				util.DbDID(&spaceDID),
 			)
 			return err
 		})

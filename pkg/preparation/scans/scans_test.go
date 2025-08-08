@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,6 +33,7 @@ var _ scans.Repo = (*repoErrOnUpdateScan)(nil)
 func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 	uploadID := id.New()
 	sourceID := id.New()
+	spaceDID := testutil.RandomDID(t)
 	scan, err := model.NewScan(uploadID)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create new scan: %v", err))
@@ -38,8 +41,8 @@ func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 
 	scansAPI := scans.API{
 		Repo: sqlrepo.New(testdb.CreateTestDB(t)),
-		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-			return sourceID, nil
+		UploadLookup: func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
+			return uploadsmodel.NewUpload(spaceDID, sourceID)
 		},
 		SourceAccessor: func(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
 			return nil, nil
@@ -97,8 +100,8 @@ func TestExecuteScan(t *testing.T) {
 
 	t.Run("with an error looking up the source ID", func(t *testing.T) {
 		scan, scansProcess := newScanAndAPI(t)
-		scansProcess.UploadSourceLookup = func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-			return id.SourceID{}, fmt.Errorf("couldn't look up source ID for upload ID %s", uploadID)
+		scansProcess.UploadLookup = func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
+			return nil, fmt.Errorf("couldn't look up upload for upload ID %s", uploadID)
 		}
 
 		err := scansProcess.ExecuteScan(t.Context(), scan, func(entry model.FSEntry) error {
@@ -107,7 +110,7 @@ func TestExecuteScan(t *testing.T) {
 
 		require.NoError(t, err, "should not return an error when scan itself is failed")
 		require.Equal(t, model.ScanStateFailed, scan.State())
-		require.ErrorContains(t, scan.Error(), "looking up source ID: couldn't look up source ID for upload ID")
+		require.ErrorContains(t, scan.Error(), "looking up upload: couldn't look up upload for upload ID")
 	})
 
 	t.Run("with an error accessing the source", func(t *testing.T) {

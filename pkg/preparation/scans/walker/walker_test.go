@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/iterable"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
@@ -23,6 +24,7 @@ func TestWalker(t *testing.T) {
 
 	mockVisitor := &mockFSVisitor{
 		visitedChildren: make(map[string][]model.FSEntry),
+		t:               t,
 	}
 
 	rt, err := walker.WalkDir(afero.NewIOFS(memFS), ".", mockVisitor)
@@ -71,14 +73,17 @@ type mockFSVisitor struct {
 	visitedFiles       []string
 	visitedDirectories []string
 	visitedChildren    map[string][]model.FSEntry
+	t                  *testing.T
 }
 
 func (v *mockFSVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, error) {
 	v.visitedFiles = append(v.visitedFiles, path)
-	return model.NewFile(path, time.Now(), 0, 0, []byte(path), id.New())
+	spaceDID := testutil.RandomDID(v.t)
+	return model.NewFile(path, time.Now(), fs.FileMode(0644), 0, []byte(path), id.New(), spaceDID)
 }
 func (v *mockFSVisitor) VisitDirectory(path string, dirEntry fs.DirEntry, children []model.FSEntry) (*model.Directory, error) {
 	v.visitedDirectories = append(v.visitedDirectories, path)
 	v.visitedChildren[path] = children
-	return model.NewDirectory(path, time.Now(), 0, []byte(path), id.New())
+	spaceDID := testutil.RandomDID(v.t)
+	return model.NewDirectory(path, time.Now(), fs.FileMode(0755), []byte(path), id.New(), spaceDID)
 }
