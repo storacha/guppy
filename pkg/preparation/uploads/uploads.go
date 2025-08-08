@@ -20,12 +20,14 @@ type RunDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, no
 type RestartDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
+type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
-	Repo                     Repo
-	RunNewScan               RunNewScanFunc
-	RunDagScansForUpload     RunDagScansForUploadFunc
-	RestartDagScansForUpload RestartDagScansForUploadFunc
+	Repo                        Repo
+	RunNewScan                  RunNewScanFunc
+	RunDagScansForUpload        RunDagScansForUploadFunc
+	RestartDagScansForUpload    RestartDagScansForUploadFunc
+	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if an existing open shard was closed,
@@ -96,7 +98,7 @@ func (e executor) execute(ctx context.Context) error {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	dagWork := make(chan struct{}, 1)
-	shardWork := make(chan struct{}, 1)
+	blobWork := make(chan struct{}, 1)
 
 	// This one is just marking it as started, so it can be synchronous.
 	if e.upload.NeedsStart() {
@@ -116,7 +118,12 @@ func (e executor) execute(ctx context.Context) error {
 	}
 	if e.upload.NeedsDagScan() {
 		eg.Go(func() error {
-			return e.runDAGScanWorker(ctx, dagWork, shardWork)
+			return e.runDAGScanWorker(ctx, dagWork, blobWork)
+		})
+	}
+	if e.upload.NeedsUpload() {
+		eg.Go(func() error {
+			return e.runSpaceBlobAddWorker(ctx, blobWork)
 		})
 	}
 
@@ -182,9 +189,9 @@ func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) e
 	return nil
 }
 
-// runShardsWorker runs the worker that scans files and directories into blocks,
+// runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
-func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}, shardWork chan<- struct{}) error {
+func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}, blobWork chan<- struct{}) error {
 	err := e.api.RestartDagScansForUpload(ctx, e.upload.ID())
 	if err != nil {
 		return fmt.Errorf("restarting scans for upload %s: %w", e.upload.ID(), err)
@@ -204,7 +211,7 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 				}
 
 				if shardClosed {
-					signalWorkAvailable(shardWork)
+					signalWorkAvailable(blobWork)
 				}
 
 				return nil
@@ -239,10 +246,10 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 			}
 
 			if shardClosed {
-				signalWorkAvailable(shardWork)
+				signalWorkAvailable(blobWork)
 			}
 
-			close(shardWork) // close the work channel to signal completion
+			close(blobWork) // close the work channel to signal completion
 
 			if err := e.upload.DAGGenerationComplete(rootCid); err != nil {
 				return fmt.Errorf("completing DAG generation: %w", err)
@@ -253,5 +260,28 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagWork <-chan struct{}
 
 			return nil
 		},
+	)
+}
+
+// runSpaceBlobAddWorker runs the worker that scans files and directories into blocks,
+// and buckets them into shards.
+func (e *executor) runSpaceBlobAddWorker(ctx context.Context, blobWork <-chan struct{}) error {
+	return Worker(
+		ctx,
+		blobWork,
+
+		// doWork
+		func() error {
+			err := e.api.SpaceBlobAddShardsForUpload(ctx, e.upload.ID())
+
+			if err != nil {
+				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", e.upload.ID(), err)
+			}
+
+			return nil
+		},
+
+		// finalize
+		nil,
 	)
 }

@@ -71,6 +71,14 @@ func (s *Shard) Close() error {
 	return nil
 }
 
+func (s *Shard) Added() error {
+	if s.state != ShardStateClosed {
+		return fmt.Errorf("cannot add shard in state %s", s.state)
+	}
+	s.state = ShardStateAdded
+	return nil
+}
+
 type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,
@@ -107,6 +115,10 @@ func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 
 func (s *Shard) ID() id.ShardID {
 	return s.id
+}
+
+func (s *Shard) State() ShardState {
+	return s.state
 }
 
 func (s *Shard) Bytes() io.Reader {
