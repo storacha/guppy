@@ -42,14 +42,12 @@ import (
 //
 // The `content` is the blob content to be added.
 //
-// The `receiptsURL` is the URL where the service can poll for receipts.
-//
 // The `proofs` are delegation proofs to use in addition to those in the client.
 // They won't be saved in the client, only used for this invocation.
 //
 // Returns the multihash of the added blob and the location commitment that contains details about where the
 // blob can be located, or an error if something went wrong.
-func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, receiptsURL *url.URL) (multihash.Multihash, delegation.Delegation, error) {
+func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID) (multihash.Multihash, delegation.Delegation, error) {
 	contentBytes, err := io.ReadAll(content)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading content: %w", err)
@@ -221,7 +219,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	var anyAcceptRcpt receipt.AnyReceipt
 	var site ucan.Link
 	var rcptBlocks iter.Seq2[ipld.Block, error]
-	rcptClient := receiptclient.New(receiptsURL)
+	rcptClient := receiptclient.New(c.receiptsURL)
 	if acceptRcpt == nil && legacyAcceptRcpt == nil {
 		anyAcceptRcpt, err = rcptClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 		if err != nil {
