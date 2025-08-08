@@ -23,32 +23,28 @@ import (
 	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client/nodevalue"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 type Client struct {
-	connection  uclient.Connection
-	receiptsURL *url.URL
-	data        agentdata.AgentData
-	saveFn      func(agentdata.AgentData) error
+	connection     uclient.Connection
+	receiptsURL    *url.URL
+	receiptsClient *receiptclient.Client
+	data           agentdata.AgentData
+	saveFn         func(agentdata.AgentData) error
 }
 
-// NewClient creates a new client. If [connection] is `nil`, the default
-// connection will be used. If [receiptsURL] is `nil`, the default receipts URL
-// will be used.
-func NewClient(connection uclient.Connection, receiptsURL *url.URL, options ...Option) (*Client, error) {
+// NewClient creates a new client.
+func NewClient(options ...Option) (*Client, error) {
 	c := Client{
-		connection:  connection,
-		receiptsURL: receiptsURL,
+		connection:     DefaultConnection,
+		receiptsClient: DefaultReceiptsClient,
 	}
 
 	for _, opt := range options {
 		if err := opt(&c); err != nil {
 			return nil, err
 		}
-	}
-
-	if c.connection == nil {
-		c.connection = DefaultConnection
 	}
 
 	if c.data.Principal == nil {

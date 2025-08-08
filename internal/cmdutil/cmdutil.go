@@ -20,6 +20,7 @@ import (
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 const defaultServiceName = "staging.up.storacha.network"
@@ -86,9 +87,11 @@ func MustGetClient(proofs ...delegation.Delegation) *client.Client {
 	}
 
 	c, err := client.NewClient(
-		MustGetConnection(),
-		MustGetReceiptsURL(),
-		clientOptions...,
+		append(
+			clientOptions,
+			client.WithConnection(MustGetConnection()),
+			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL())),
+		)...,
 	)
 	if err != nil {
 		log.Fatalf("creating client: %s", err)

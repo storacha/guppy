@@ -13,7 +13,7 @@ import (
 
 func TestReset(t *testing.T) {
 	var savedData agentdata.AgentData
-	c := uhelpers.Must(client.NewClient(nil, nil, client.WithSaveFn(func(data agentdata.AgentData) error {
+	c := uhelpers.Must(client.NewClient(client.WithSaveFn(func(data agentdata.AgentData) error {
 		savedData = data
 		return nil
 	})))
