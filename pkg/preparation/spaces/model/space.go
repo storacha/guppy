@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types"
-	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // MaxShardSize is the maximum allowed size for a shard, set to 4GB
@@ -26,16 +26,16 @@ var ErrShardSizeTooSmall = errors.New("Shard size must be at least 128 bytes")
 
 // Space represents the space for an upload or uploads
 type Space struct {
-	id        id.SpaceID
+	did       did.DID
 	name      string
 	createdAt time.Time
 
 	shardSize uint64 // blob size in bytes
 }
 
-// ID returns the unique identifier of the space.
-func (u *Space) ID() id.SpaceID {
-	return u.id
+// DID returns the unique identifier of the space.
+func (u *Space) DID() did.DID {
+	return u.did
 }
 
 // Name returns the name of the space.
@@ -67,8 +67,8 @@ func WithShardSize(shardSize uint64) SpaceOption {
 
 // validateSpace checks if the space is valid.
 func validateSpace(u *Space) (*Space, error) {
-	if u.id == id.Nil {
-		return nil, types.ErrEmpty{Field: "id"}
+	if u.did.String() == "" {
+		return nil, types.ErrEmpty{Field: "did"}
 	}
 	if u.name == "" {
 		return nil, types.ErrEmpty{Field: "name"}
@@ -83,9 +83,9 @@ func validateSpace(u *Space) (*Space, error) {
 }
 
 // NewSpace creates a new Space instance with the given name and options.
-func NewSpace(name string, opts ...SpaceOption) (*Space, error) {
+func NewSpace(spaceDID did.DID, name string, opts ...SpaceOption) (*Space, error) {
 	u := &Space{
-		id:        id.New(),
+		did:       spaceDID,
 		name:      name,
 		shardSize: DefaultShardSize, // default shard size
 		createdAt: time.Now().UTC().Truncate(time.Second),
@@ -99,12 +99,12 @@ func NewSpace(name string, opts ...SpaceOption) (*Space, error) {
 }
 
 // SpaceRowScanner is a function type for scanning a space row from the database.
-type SpaceRowScanner func(id *id.SpaceID, name *string, createdAt *time.Time, shardSize *uint64) error
+type SpaceRowScanner func(did *did.DID, name *string, createdAt *time.Time, shardSize *uint64) error
 
 // ReadSpaceFromDatabase reads a Space from the database using the provided scanner function.
 func ReadSpaceFromDatabase(scanner SpaceRowScanner) (*Space, error) {
 	space := &Space{}
-	err := scanner(&space.id, &space.name, &space.createdAt, &space.shardSize)
+	err := scanner(&space.did, &space.name, &space.createdAt, &space.shardSize)
 	if err != nil {
 		return nil, fmt.Errorf("reading space from database: %w", err)
 	}

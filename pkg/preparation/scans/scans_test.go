@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +37,7 @@ func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 	}
 
 	scansAPI := scans.API{
-		Repo: sqlrepo.New(testutil.CreateTestDB(t)),
+		Repo: sqlrepo.New(testdb.CreateTestDB(t)),
 		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
 			return sourceID, nil
 		},

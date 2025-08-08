@@ -7,6 +7,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -41,20 +42,20 @@ type API struct {
 }
 
 // CreateUploads creates uploads for a given space and its associated sources.
-func (a API) CreateUploads(ctx context.Context, spaceID id.SpaceID) ([]*model.Upload, error) {
-	log.Debugf("Creating uploads for space %s", spaceID)
-	sources, err := a.Repo.ListSpaceSources(ctx, spaceID)
+func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Upload, error) {
+	log.Debugf("Creating uploads for space %s", spaceDID)
+	sources, err := a.Repo.ListSpaceSources(ctx, spaceDID)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Debugf("Found %d sources for space %s", len(sources), spaceID)
+	log.Debugf("Found %d sources for space %s", len(sources), spaceDID)
 
-	uploads, err := a.Repo.CreateUploads(ctx, spaceID, sources)
+	uploads, err := a.Repo.CreateUploads(ctx, spaceDID, sources)
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Created %d uploads for space %s", len(uploads), spaceID)
+	log.Debugf("Created %d uploads for space %s", len(uploads), spaceDID)
 	return uploads, nil
 }
 
