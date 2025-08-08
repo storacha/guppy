@@ -38,10 +38,10 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, "some/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	created, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
+	shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
 	require.NoError(t, err)
 
-	require.True(t, created, "expected a new shard to be created")
+	require.False(t, shardClosed)
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
@@ -56,10 +56,10 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 1<<14, "some/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	created, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
+	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
 	require.NoError(t, err)
 
-	require.False(t, created, "expected no new shard to be created")
+	require.False(t, shardClosed)
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
@@ -74,10 +74,10 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 1<<15, "yet/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	created, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
+	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
 	require.NoError(t, err)
 
-	require.True(t, created, "expected a new shard to be created")
+	require.True(t, shardClosed)
 	closedShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
 	require.NoError(t, err)
 	require.Len(t, closedShards, 1)
@@ -97,8 +97,9 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 
 	// finally, close the last shard with CloseUploadShards()
 
-	err = api.CloseUploadShards(t.Context(), upload.ID())
+	shardClosed, err = api.CloseUploadShards(t.Context(), upload.ID())
 	require.NoError(t, err)
+	require.True(t, shardClosed)
 
 	closedShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
 	require.NoError(t, err)
