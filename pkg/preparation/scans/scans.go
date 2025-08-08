@@ -12,12 +12,13 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 // API is a dependency container for executing scans on a repository.
 type API struct {
-	Repo               Repo
-	UploadSourceLookup UploadSourceLookupFunc
+	Repo         Repo
+	UploadLookup UploadLookupFunc
 	SourceAccessor     SourceAccessorFunc
 	WalkerFn           WalkerFunc
 }
@@ -28,8 +29,8 @@ type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.F
 // SourceAccessorFunc is a function type that retrieves the file system for a given source ID.
 type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, error)
 
-// UploadSourceLookupFunc is a function type that retrieves the source ID for a given upload ID.
-type UploadSourceLookupFunc func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
+// UploadLookupFunc is a function type that retrieves the upload for a given upload ID.
+type UploadLookupFunc func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
 
 // ExecuteScan executes a scan on the given source, creating files and directories in the repository.
 func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
@@ -63,15 +64,15 @@ func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(m
 }
 
 func (a API) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) (model.FSEntry, error) {
-	sourceID, err := a.UploadSourceLookup(ctx, scan.UploadID())
+	upload, err := a.UploadLookup(ctx, scan.UploadID())
 	if err != nil {
-		return nil, fmt.Errorf("looking up source ID: %w", err)
+		return nil, fmt.Errorf("looking up upload: %w", err)
 	}
-	fsys, err := a.SourceAccessor(ctx, sourceID)
+	fsys, err := a.SourceAccessor(ctx, upload.SourceID())
 	if err != nil {
 		return nil, fmt.Errorf("accessing source: %w", err)
 	}
-	fsEntry, err := a.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, a.Repo, sourceID, fsEntryCb))
+	fsEntry, err := a.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, a.Repo, upload.SourceID(), upload.SpaceDID(), fsEntryCb))
 	if err != nil {
 		return nil, fmt.Errorf("recursively creating directories: %w", err)
 	}
@@ -86,7 +87,10 @@ func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
 	}
 
 	stat, err := fs.Stat(fsys, file.Path())
-	checksum := checksum.FileChecksum(file.Path(), stat, file.SourceID())
+	if err != nil {
+		return nil, fmt.Errorf("getting file stat for %s: %w", file.Path(), err)
+	}
+	checksum := checksum.FileChecksum(file.Path(), stat, file.SourceID(), file.SpaceDID())
 	if !bytes.Equal(checksum, file.Checksum()) {
 		return nil, fmt.Errorf("checksum mismatch for file %s: expected %x, got %x", file.Path(), file.Checksum(), checksum)
 	}

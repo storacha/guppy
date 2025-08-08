@@ -83,8 +83,8 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	scansAPI := scans.API{
 		Repo: repo,
 		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
-		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-			return uploadsAPI.GetSourceIDForUploadID(ctx, uploadID)
+		UploadLookup: func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
+			return uploadsAPI.GetUploadByID(ctx, uploadID)
 		},
 		SourceAccessor: sourcesAPI.AccessByID,
 		WalkerFn:       walker.WalkDir,

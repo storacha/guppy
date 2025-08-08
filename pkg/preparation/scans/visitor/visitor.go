@@ -7,6 +7,7 @@ import (
 	"time"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -16,8 +17,8 @@ var log = logging.Logger("preparation/scans/visitor")
 
 // Repo defines the interface for a repository that manages file system entries during a scan
 type Repo interface {
-	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*model.File, bool, error)
-	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*model.Directory, bool, error)
+	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*model.File, bool, error)
+	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*model.Directory, bool, error)
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
 }
 
@@ -30,15 +31,17 @@ type ScanVisitor struct {
 	repo     Repo
 	ctx      context.Context
 	sourceID id.SourceID
+	spaceDID did.DID
 	cb       FSEntryCallback
 }
 
 // NewScanVisitor creates a new ScanVisitor with the provided context, repository, source ID, and callback function.
-func NewScanVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, cb FSEntryCallback) ScanVisitor {
+func NewScanVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, spaceDID did.DID, cb FSEntryCallback) ScanVisitor {
 	return ScanVisitor{
 		repo:     repo,
 		ctx:      ctx,
 		sourceID: sourceID,
+		spaceDID: spaceDID,
 		cb:       cb,
 	}
 }
@@ -50,7 +53,7 @@ func (v ScanVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, 
 	if err != nil {
 		return nil, fmt.Errorf("reading file info: %w", err)
 	}
-	file, created, err := v.repo.FindOrCreateFile(v.ctx, path, info.ModTime(), info.Mode(), uint64(info.Size()), checksum.FileChecksum(path, info, v.sourceID), v.sourceID)
+	file, created, err := v.repo.FindOrCreateFile(v.ctx, path, info.ModTime(), info.Mode(), uint64(info.Size()), checksum.FileChecksum(path, info, v.sourceID, v.spaceDID), v.sourceID, v.spaceDID)
 	if err != nil {
 		return nil, fmt.Errorf("creating file: %w", err)
 	}
@@ -71,7 +74,7 @@ func (v ScanVisitor) VisitDirectory(path string, dirEntry fs.DirEntry, children 
 	if err != nil {
 		return nil, fmt.Errorf("reading directory info: %w", err)
 	}
-	dir, created, err := v.repo.FindOrCreateDirectory(v.ctx, path, info.ModTime(), info.Mode(), checksum.DirChecksum(path, info, v.sourceID, children), v.sourceID)
+	dir, created, err := v.repo.FindOrCreateDirectory(v.ctx, path, info.ModTime(), info.Mode(), checksum.DirChecksum(path, info, v.sourceID, v.spaceDID, children), v.sourceID, v.spaceDID)
 	if err != nil {
 		return nil, fmt.Errorf("creating directory: %w", err)
 	}
