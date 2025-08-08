@@ -15,8 +15,8 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +71,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a UnixFS node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testutil.CreateTestDB(t)),
+			sqlrepo.New(testdb.CreateTestDB(t)),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
@@ -90,7 +90,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a leaf node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testutil.CreateTestDB(t)),
+			sqlrepo.New(testdb.CreateTestDB(t)),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
@@ -106,7 +106,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 
 	t.Run("stores and calls back with matching CID", func(t *testing.T) {
 		var callbackCids []cid.Cid
-		repo := sqlrepo.New(testutil.CreateTestDB(t))
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 
 		v := visitor.NewUnixFSFileNodeVisitor(
@@ -133,7 +133,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 }
 
 func TestUnixFSDirectoryNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
 
 	v := visitor.NewUnixFSDirectoryNodeVisitor(
 		t.Context(),

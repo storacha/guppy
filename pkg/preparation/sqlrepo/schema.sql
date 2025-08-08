@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS sources (
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS spaces (
-  id BLOB PRIMARY KEY,
+  did BLOB PRIMARY KEY,
   name TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   shard_size INTEGER NOT NULL
@@ -32,15 +32,15 @@ CREATE TABLE IF NOT EXISTS spaces (
 
 CREATE TABLE IF NOT EXISTS space_sources (
   source_id BLOB NOT NULL,
-  space_id BLOB NOT NULL,
+  space_did BLOB NOT NULL,
   FOREIGN KEY (source_id) REFERENCES sources(id),
-  FOREIGN KEY (space_id) REFERENCES spaces(id),
-  PRIMARY KEY (source_id, space_id)
+  FOREIGN KEY (space_did) REFERENCES spaces(did),
+  PRIMARY KEY (source_id, space_did)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS uploads (
   id BLOB PRIMARY KEY,
-  space_id BLOB NOT NULL,
+  space_did BLOB NOT NULL,
   source_id BLOB NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   error_message TEXT,
   root_fs_entry_id BLOB,
   root_cid BLOB,
-  FOREIGN KEY (space_id) REFERENCES spaces(id),
+  FOREIGN KEY (space_did) REFERENCES spaces(did),
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id),
   FOREIGN KEY (root_cid) REFERENCES nodes(cid)

@@ -52,12 +52,12 @@ func largeUpload(cCtx *cli.Context) error {
 	}
 	fmt.Println("Created source:", source.ID())
 
-	err = repo.AddSourceToSpace(cCtx.Context, space.ID(), source.ID())
+	err = repo.AddSourceToSpace(cCtx.Context, space.DID(), source.ID())
 	if err != nil {
 		return fmt.Errorf("command failed to add source to space: %w", err)
 	}
 
-	uploads, err := api.CreateUploads(cCtx.Context, space.ID())
+	uploads, err := api.CreateUploads(cCtx.Context, space.DID())
 	if err != nil {
 		return fmt.Errorf("command failed to create uploads: %w", err)
 	}

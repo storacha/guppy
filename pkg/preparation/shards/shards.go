@@ -13,9 +13,9 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
-	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
@@ -46,9 +46,9 @@ var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
-	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
+	space, err := a.Repo.GetSpaceByUploadID(ctx, uploadID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
+		return false, fmt.Errorf("failed to get space for upload %s: %w", uploadID, err)
 	}
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
@@ -62,7 +62,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := a.roomInShard(ctx, s, nodeCID, config)
+		hasRoom, err := a.roomInShard(ctx, s, nodeCID, space)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -92,7 +92,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	return closed, nil
 }
 
-func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
+func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, space *spacesmodel.Space) (bool, error) {
 	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
@@ -107,7 +107,7 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
 	}
 
-	if currentSize+nodeSize > config.ShardSize() {
+	if currentSize+nodeSize > space.ShardSize() {
 		return false, nil // No room in the shard
 	}
 
