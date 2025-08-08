@@ -44,7 +44,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	}
 
 	var shard *model.Shard
-	var created bool
+	var closed bool
 
 	// Look for an open shard that has room for the node, and close any that don't
 	// have room. (There should only be at most one open shard, but there's no
@@ -62,6 +62,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
 			return false, fmt.Errorf("updating scan: %w", err)
 		}
+		closed = true
 	}
 
 	// If no such shard exists, create a new one
@@ -70,14 +71,13 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		if err != nil {
 			return false, fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
 		}
-		created = true
 	}
 
 	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
-	return created, nil
+	return closed, nil
 }
 
 func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
@@ -121,18 +121,21 @@ func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
 	return pllen + vilen
 }
 
-func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) error {
+func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
+
+	var closed bool
 
 	for _, s := range openShards {
 		s.Close()
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
+			return false, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
 		}
+		closed = true
 	}
 
-	return nil
+	return closed, nil
 }
