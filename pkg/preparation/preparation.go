@@ -1,13 +1,16 @@
 package preparation
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/dags"
@@ -15,6 +18,7 @@ import (
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/shards"
+	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -48,7 +52,7 @@ type config struct {
 	getLocalFSForPathFn func(path string) (fs.FS, error)
 }
 
-func NewAPI(repo Repo, options ...Option) API {
+func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
 	}
@@ -87,7 +91,12 @@ func NewAPI(repo Repo, options ...Option) API {
 	}
 
 	shardsAPI := shards.API{
-		Repo: repo,
+		Repo:   repo,
+		Client: client,
+		Space:  space,
+		CarForShard: func(shard *shardsmodel.Shard) (io.Reader, error) {
+			return bytes.NewReader([]byte{1, 2, 3}), nil // Placeholder, should be replaced with actual CAR generation logic
+		},
 	}
 
 	uploadsAPI = uploads.API{
@@ -118,10 +127,11 @@ func NewAPI(repo Repo, options ...Option) API {
 
 			return scan.RootID(), nil
 		},
-		RestartDagScansForUpload: dagsAPI.RestartDagScansForUpload,
-		RunDagScansForUpload:     dagsAPI.RunDagScansForUpload,
-		AddNodeToUploadShards:    shardsAPI.AddNodeToUploadShards,
-		CloseUploadShards:        shardsAPI.CloseUploadShards,
+		RestartDagScansForUpload:    dagsAPI.RestartDagScansForUpload,
+		RunDagScansForUpload:        dagsAPI.RunDagScansForUpload,
+		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
+		CloseUploadShards:           shardsAPI.CloseUploadShards,
+		SpaceBlobAddShardsForUpload: shardsAPI.SpaceBlobAddShardsForUpload,
 	}
 
 	return API{
