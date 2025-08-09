@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -81,13 +82,15 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 	return shards, nil
 }
 
-func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid) error {
+func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO nodes_in_shards (
 			node_cid,
+			space_did,
 			shard_id
-		) VALUES (?, ?)`,
+		) VALUES (?, ?, ?)`,
 		nodeCID.Bytes(),
+		util.DbDID(&spaceDID),
 		shardID,
 	)
 	if err != nil {
@@ -96,22 +99,24 @@ func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	return nil
 }
 
-func (r *repo) FindNodeByCid(ctx context.Context, c cid.Cid) (dagsmodel.Node, error) {
+func (r *repo) FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
 	findQuery := `
 		SELECT
 			cid,
 			size,
+			space_did,
 			ufsdata,
 			path,
 			source_id,
 			offset
 		FROM nodes
-		WHERE cid = ?
+		WHERE cid = ? AND space_did = ?
 	`
 	row := r.db.QueryRowContext(
 		ctx,
 		findQuery,
 		c.Bytes(),
+		util.DbDID(&spaceDID),
 	)
 	return r.getNodeFromRow(row)
 }
@@ -121,12 +126,13 @@ func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(d
 		SELECT
 			nodes.cid,
 			nodes.size,
+			nodes.space_did,
 			nodes.ufsdata,
 			nodes.path,
 			nodes.source_id,
 			nodes.offset
 		FROM nodes_in_shards
-		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid
+		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
 		WHERE shard_id = ?`,
 		shardID,
 	)

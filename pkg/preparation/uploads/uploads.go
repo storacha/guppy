@@ -160,7 +160,7 @@ func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) e
 	// [Worker], because it never has to wait for work.
 
 	fsEntryID, err := e.api.RunNewScan(ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-		_, err := e.api.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID())
+		_, err := e.api.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID(), e.upload.SpaceDID())
 		if err != nil {
 			return fmt.Errorf("creating DAG scan: %w", err)
 		}

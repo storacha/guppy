@@ -107,7 +107,7 @@ func (nr *NodeReader) getUnixFSNodeData(ctx context.Context, node *model.UnixFSN
 	if node.UFSData() == nil {
 		return nil, fs.ErrInvalid
 	}
-	links, err := nr.repo.LinksForCID(ctx, node.CID())
+	links, err := nr.repo.LinksForCID(ctx, node.CID(), node.SpaceDID())
 	if err != nil {
 		return nil, err
 	}

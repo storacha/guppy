@@ -9,6 +9,7 @@ import (
 	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -22,17 +23,19 @@ type NodeCallback func(node model.Node, data []byte) error
 // [builder.BuildUnixFSDirectory] which visits produced nodes with [cb] as
 // they're encoded.
 type UnixFSDirectoryNodeVisitor struct {
-	repo Repo
-	ctx  context.Context
-	cb   NodeCallback
+	repo     Repo
+	ctx      context.Context
+	cb       NodeCallback
+	spaceDID did.DID
 }
 
 // NewUnixFSDirectoryNodeVisitor creates a new [UnixFSDirectoryNodeVisitor].
-func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, cb NodeCallback) UnixFSDirectoryNodeVisitor {
+func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, cb NodeCallback) UnixFSDirectoryNodeVisitor {
 	return UnixFSDirectoryNodeVisitor{
-		repo: repo,
-		ctx:  ctx,
-		cb:   cb,
+		repo:     repo,
+		ctx:      ctx,
+		cb:       cb,
+		spaceDID: spaceDID,
 	}
 }
 
@@ -51,7 +54,7 @@ func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node
 		pbLinks = append(pbLinks, pbLink)
 	}
 
-	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, ufsData)
+	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, v.spaceDID, ufsData)
 	if err != nil {
 		return fmt.Errorf("creating unixfs node: %w", err)
 	}
@@ -65,7 +68,7 @@ func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node
 					TSize: uint64(link.FieldTsize().Must().Int()),
 				}
 			}
-			if err := v.repo.CreateLinks(v.ctx, cid, links); err != nil {
+			if err := v.repo.CreateLinks(v.ctx, cid, v.spaceDID, links); err != nil {
 				return fmt.Errorf("creating links for unixfs node %s: %w", cid, err)
 			}
 		}
@@ -88,9 +91,9 @@ type UnixFSFileNodeVisitor struct {
 	readerPosition ReaderPosition
 }
 
-func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSFileNodeVisitor {
+func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, spaceDID did.DID, cb NodeCallback) UnixFSFileNodeVisitor {
 	return UnixFSFileNodeVisitor{
-		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, cb),
+		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, spaceDID, cb),
 		sourceID:                   sourceID,
 		path:                       path,
 		readerPosition:             readerPosition,
@@ -104,7 +107,7 @@ func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid ci
 
 	// this raw block has already been read, so we subtract its size to get the beginning offset
 	offset := v.readerPosition.Offset() - size
-	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.path, v.sourceID, offset)
+	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.spaceDID, v.path, v.sourceID, offset)
 	if err != nil {
 		return fmt.Errorf("creating raw node: %w", err)
 	}

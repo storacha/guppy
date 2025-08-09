@@ -17,10 +17,10 @@ import (
 
 // API is a dependency container for executing scans on a repository.
 type API struct {
-	Repo         Repo
-	UploadLookup UploadLookupFunc
-	SourceAccessor     SourceAccessorFunc
-	WalkerFn           WalkerFunc
+	Repo           Repo
+	UploadLookup   UploadLookupFunc
+	SourceAccessor SourceAccessorFunc
+	WalkerFn       WalkerFunc
 }
 
 // WalkerFunc is a function type that defines how to walk the file system.
