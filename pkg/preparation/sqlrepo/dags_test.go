@@ -16,7 +16,8 @@ func TestDAGScan(t *testing.T) {
 	t.Run("updates the DAG scan state and error message", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		uploadID := id.New()
-		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), false, uploadID)
+		spaceDID := testutil.RandomDID(t)
+		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), false, uploadID, spaceDID)
 		require.NoError(t, err)
 		require.Equal(t, model.DAGScanStatePending, dagScan.State())
 
@@ -63,21 +64,22 @@ func TestFindOrCreateRawNode(t *testing.T) {
 	t.Run("finds a matching raw node, or creates a new one", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		sourceId := id.New()
+		spaceDID := testutil.RandomDID(t)
 
 		cid1 := testutil.RandomCID(t)
 		cid2 := testutil.RandomCID(t)
 
-		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, "some/path1", sourceId, 0)
+		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, "some/path1", sourceId, 0)
 		require.NoError(t, err)
 		require.True(t, created)
 		require.NotNil(t, rawNode)
 
-		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, "some/path1", sourceId, 0)
+		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, "some/path1", sourceId, 0)
 		require.NoError(t, err)
 		require.False(t, created2)
 		require.Equal(t, rawNode, rawNode2)
 
-		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, "some/path2", sourceId, 0)
+		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, spaceDID, "some/path2", sourceId, 0)
 		require.NoError(t, err)
 		require.True(t, created3)
 		require.NotEqual(t, rawNode.CID(), rawNode3.CID())
@@ -87,7 +89,8 @@ func TestFindOrCreateRawNode(t *testing.T) {
 func TestDirectoryLinks(t *testing.T) {
 	t.Run("for a new DAG scan is empty", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
-		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New())
+		spaceDID := testutil.RandomDID(t)
+	dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New(), spaceDID)
 		require.NoError(t, err)
 		dirScan, ok := dagScan.(*model.DirectoryDAGScan)
 		require.True(t, ok, "Expected dagScan to be a DirectoryDAGScan")

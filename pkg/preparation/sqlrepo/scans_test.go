@@ -136,7 +136,7 @@ func TestCreateDirectoryChildren(t *testing.T) {
 	require.ElementsMatch(t, []model.FSEntry{file, file2}, children)
 }
 
-func TestGetFileByID(t *testing.T) {
+func TestGetFSEntryByID(t *testing.T) {
 	repo := sqlrepo.New(testdb.CreateTestDB(t))
 	modTime := time.Now().UTC().Truncate(time.Second)
 	sourceId := id.New()

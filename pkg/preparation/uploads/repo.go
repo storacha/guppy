@@ -23,7 +23,7 @@ type Repo interface {
 	// CIDForFSEntry retrieves the CID for a file system entry by its ID.
 	CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error)
 	// CreateDAGScanForFSEntry creates a new DAG scan for a file system entry.
-	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error)
+	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error)
 	// ListSpaceSources lists all space sources for the given space DID.
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
 }

@@ -154,7 +154,7 @@ func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 }
 
 func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
-	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
+	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
 	ds, err := dagmodel.ReadDAGScanFromDatabase(r.dagScanScanner(row))
 	if err != nil {
@@ -166,26 +166,27 @@ func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.C
 	return ds.CID(), nil
 }
 
-func (r *repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error) {
+func (r *repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
 	if isDirectory {
-		return dagmodel.NewDirectoryDAGScan(fsEntryID, uploadID)
+		return dagmodel.NewDirectoryDAGScan(fsEntryID, uploadID, spaceDID)
 	}
-	return dagmodel.NewFileDAGScan(fsEntryID, uploadID)
+	return dagmodel.NewFileDAGScan(fsEntryID, uploadID, spaceDID)
 }
 
-func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error) {
+func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
 	log.Debugf("Creating DAG scan for fsEntryID: %s, isDirectory: %t, uploadID: %s", fsEntryID, isDirectory, uploadID)
-	dagScan, err := r.newDAGScan(fsEntryID, isDirectory, uploadID)
+	dagScan, err := r.newDAGScan(fsEntryID, isDirectory, uploadID, spaceDID)
 	if err != nil {
 		return nil, err
 	}
 
-	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid cid.Cid) error {
+	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
-			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, created_at, updated_at, error_message, state, cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, space_did, created_at, updated_at, error_message, state, cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			kind,
 			fsEntryID,
 			uploadID,
+			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
 			errorMessage,

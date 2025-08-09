@@ -85,7 +85,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, space.DID())
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
@@ -93,7 +93,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 }
 
 func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, space *spacesmodel.Space) (bool, error) {
-	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
+	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, space.DID())
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}
