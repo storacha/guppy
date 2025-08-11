@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/core/result"
+	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
@@ -45,7 +46,7 @@ func (l linkBuilder) ToIPLD() (datamodel.Node, error) {
 }
 
 func TestPollClaim(t *testing.T) {
-	var responses []result.Result[access.ClaimOk, error]
+	var responses []result.Result[access.ClaimOk, failure.IPLDBuilderFailure]
 	var c *client.Client
 
 	claimedChan := make(chan struct{})
@@ -61,18 +62,13 @@ func TestPollClaim(t *testing.T) {
 					cap ucan.Capability[access.ClaimCaveats],
 					inv invocation.Invocation,
 					context server.InvocationContext,
-				) (access.ClaimOk, fx.Effects, error) {
-					var response result.Result[access.ClaimOk, error]
+				) (result.Result[access.ClaimOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+					var response result.Result[access.ClaimOk, failure.IPLDBuilderFailure]
 					if len(responses) == 0 {
-						return access.ClaimOk{}, nil, fmt.Errorf("no more responses available")
+						return nil, nil, fmt.Errorf("no more responses available")
 					}
 					response, responses = responses[0], responses[1:]
-
-					ok, err := result.Unwrap(response)
-					if err != nil {
-						return access.ClaimOk{}, nil, err
-					}
-					return ok, nil, nil
+					return response, nil, nil
 				},
 			),
 		),
@@ -99,10 +95,10 @@ func TestPollClaim(t *testing.T) {
 	))
 
 	t.Run("polls until it finds authorized delegations", func(t *testing.T) {
-		responses = []result.Result[access.ClaimOk, error]{
-			result.Ok[access.ClaimOk, error](access.ClaimOk{Delegations: buildDelegationsModel()}),
-			result.Ok[access.ClaimOk, error](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel)}),
-			result.Ok[access.ClaimOk, error](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel, relatedDel)}),
+		responses = []result.Result[access.ClaimOk, failure.IPLDBuilderFailure]{
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel()}),
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel)}),
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel, relatedDel)}),
 		}
 
 		// A channel of three ticks, ready to read
@@ -126,8 +122,8 @@ func TestPollClaim(t *testing.T) {
 	})
 
 	t.Run("reports an error during claim", func(t *testing.T) {
-		responses = []result.Result[access.ClaimOk, error]{
-			result.Error[access.ClaimOk](fmt.Errorf("Something went wrong!")),
+		responses = []result.Result[access.ClaimOk, failure.IPLDBuilderFailure]{
+			result.Error[access.ClaimOk](failure.FromError(fmt.Errorf("Something went wrong!"))),
 		}
 
 		// A channel of a tick, ready to read

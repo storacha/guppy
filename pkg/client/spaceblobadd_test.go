@@ -184,7 +184,7 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 	spaceBlobAddMethod := server.Provide(
 		spaceblobcap.Add,
 		func(ctx context.Context,
-			cap ucan.Capability[spaceblobcap.AddCaveats], inv invocation.Invocation, context server.InvocationContext) (spaceblobcap.AddOk, fx.Effects, error) {
+			cap ucan.Capability[spaceblobcap.AddCaveats], inv invocation.Invocation, context server.InvocationContext) (result.Result[spaceblobcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
 			// add task for blob/allocate
 			blobDigest := cap.Nb().Blob.Digest
 			blobSize := cap.Nb().Blob.Size
@@ -311,23 +311,23 @@ func setupTestUCANServer(t *testing.T, serverPrincipal principal.Signer, putBlob
 				},
 			}
 
-			return ok, fxs, nil
+			return result.Ok[spaceblobcap.AddOk, failure.IPLDBuilderFailure](ok), fxs, nil
 		},
 	)
 
 	// ucan/conclude handler
 	ucanConcludeMethod := server.Provide(
 		ucancap.Conclude,
-		func(ctx context.Context, capability ucan.Capability[ucancap.ConcludeCaveats], invocation invocation.Invocation, context server.InvocationContext) (ucancap.ConcludeOk, fx.Effects, error) {
-			return ucancap.ConcludeOk{}, nil, nil
+		func(ctx context.Context, capability ucan.Capability[ucancap.ConcludeCaveats], invocation invocation.Invocation, context server.InvocationContext) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+			return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
 		},
 	)
 
 	// upload/add handler
 	uploadAddMethod := server.Provide(
 		uploadcap.Add,
-		func(ctx context.Context, capability ucan.Capability[uploadcap.AddCaveats], invocation invocation.Invocation, context server.InvocationContext) (uploadcap.AddOk, fx.Effects, error) {
-			return uploadcap.AddOk{}, nil, nil
+		func(ctx context.Context, capability ucan.Capability[uploadcap.AddCaveats], invocation invocation.Invocation, context server.InvocationContext) (result.Result[uploadcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+			return result.Ok[uploadcap.AddOk, failure.IPLDBuilderFailure](uploadcap.AddOk{}), nil, nil
 		},
 	)
 

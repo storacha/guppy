@@ -11,6 +11,8 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
+	"github.com/storacha/go-ucanto/core/result"
+	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
@@ -50,10 +52,10 @@ func TestClaimAccess(t *testing.T) {
 						cap ucan.Capability[access.ClaimCaveats],
 						inv invocation.Invocation,
 						context server.InvocationContext,
-					) (access.ClaimOk, fx.Effects, error) {
+					) (result.Result[access.ClaimOk, failure.IPLDBuilderFailure], fx.Effects, error) {
 						assert.Equal(t, c.Issuer().DID().String(), cap.With(), "expected to claim access for the agent")
 
-						return access.ClaimOk{Delegations: storedDels}, nil, nil
+						return result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: storedDels}), nil, nil
 					},
 				),
 			),
@@ -88,8 +90,8 @@ func TestClaimAccess(t *testing.T) {
 						cap ucan.Capability[access.ClaimCaveats],
 						inv invocation.Invocation,
 						context server.InvocationContext,
-					) (access.ClaimOk, fx.Effects, error) {
-						return access.ClaimOk{}, nil, fmt.Errorf("Something went wrong!")
+					) (result.Result[access.ClaimOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						return nil, nil, fmt.Errorf("Something went wrong!")
 					},
 				),
 			),

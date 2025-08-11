@@ -7,6 +7,8 @@ import (
 	"github.com/storacha/go-libstoracha/capabilities/access"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
+	"github.com/storacha/go-ucanto/core/result"
+	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
@@ -29,13 +31,15 @@ func TestRequestAccess(t *testing.T) {
 						cap ucan.Capability[access.AuthorizeCaveats],
 						inv invocation.Invocation,
 						context server.InvocationContext,
-					) (access.AuthorizeOk, fx.Effects, error) {
+					) (result.Result[access.AuthorizeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
 						invokedInvocations = append(invokedInvocations, inv)
 						invokedCapabilities = append(invokedCapabilities, cap)
-						return access.AuthorizeOk{
-							Request:    inv.Link(),
-							Expiration: 123,
-						}, nil, nil
+						return result.Ok[access.AuthorizeOk, failure.IPLDBuilderFailure](
+							access.AuthorizeOk{
+								Request:    inv.Link(),
+								Expiration: 123,
+							},
+						), nil, nil
 					},
 				),
 			),
