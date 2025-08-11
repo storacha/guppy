@@ -19,36 +19,44 @@ var _ dags.Repo = (*repo)(nil)
 
 // CreateLinks creates links in the repository for the given parent CID and link parameters.
 func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []model.LinkParams) error {
+	if len(linkParams) == 0 {
+		return nil // No links to create
+	}
+
 	links := make([]*model.Link, 0, len(linkParams))
 	for i, p := range linkParams {
 		link, err := model.NewLink(p, parent, uint64(i))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create link %d for parent %s: %w", i, parent, err)
 		}
 		links = append(links, link)
 	}
-	insertQuery := `INSERT INTO links (
+
+	return r.WithTx(ctx, func(tx *sql.Tx) error {
+		insertQuery := `INSERT INTO links (
 			name,
-  		t_size,
-  	  hash,
-  		parent_id,
-  	  ordering,
-		) VALUES`
-	for _, link := range links {
-		_, err := r.db.ExecContext(
-			ctx,
-			insertQuery,
-			link.Name(),
-			link.TSize(),
-			link.Hash().Bytes(),
-			link.Parent().Bytes(),
-			link.Order(),
-		)
-		if err != nil {
-			return err
+			t_size,
+			hash,
+			parent_id,
+			ordering
+		) VALUES (?, ?, ?, ?, ?)`
+
+		for _, link := range links {
+			_, err := tx.ExecContext(
+				ctx,
+				insertQuery,
+				link.Name(),
+				link.TSize(),
+				link.Hash().Bytes(),
+				link.Parent().Bytes(),
+				link.Order(),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert link %s for parent %s: %w", link.Name(), parent, err)
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 type sqlScanner interface {

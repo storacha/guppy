@@ -89,55 +89,64 @@ func (r *repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID)
 // CreateUploads creates uploads for a given configuration and source IDs.
 func (r *repo) CreateUploads(ctx context.Context, configurationID id.ConfigurationID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
 	var uploads []*model.Upload
-	for _, sourceID := range sourceIDs {
-		upload, err := model.NewUpload(configurationID, sourceID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to instantiate upload for configuration %s and source %s: %w", configurationID, sourceID, err)
-		}
 
-		insertQuery := `
-			INSERT INTO uploads (
-				id,
-				configuration_id,
-				source_id,
-				created_at,
-				updated_at,
-				state,
-				error_message,
-				root_fs_entry_id,
-				root_cid
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	err := r.WithTx(ctx, func(tx *sql.Tx) error {
+		for _, sourceID := range sourceIDs {
+			upload, err := model.NewUpload(configurationID, sourceID)
+			if err != nil {
+				return fmt.Errorf("failed to instantiate upload for configuration %s and source %s: %w", configurationID, sourceID, err)
+			}
 
-		err = model.WriteUploadToDatabase(func(
-			id,
-			configurationID,
-			sourceID id.SourceID,
-			createdAt,
-			updatedAt time.Time,
-			state model.UploadState,
-			errorMessage *string,
-			rootFSEntryID *id.FSEntryID,
-			rootCID cid.Cid,
-		) error {
-			_, err := r.db.ExecContext(ctx,
-				insertQuery,
+			insertQuery := `
+				INSERT INTO uploads (
+					id,
+					configuration_id,
+					source_id,
+					created_at,
+					updated_at,
+					state,
+					error_message,
+					root_fs_entry_id,
+					root_cid
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+			err = model.WriteUploadToDatabase(func(
 				id,
 				configurationID,
-				sourceID,
-				createdAt.Unix(),
-				updatedAt.Unix(),
-				state,
-				NullString(errorMessage),
-				Null(rootFSEntryID),
-				util.DbCid(&rootCID),
-			)
-			return err
-		}, upload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to write upload to database for configuration %s and source %s: %w", configurationID, sourceID, err)
+				sourceID id.SourceID,
+				createdAt,
+				updatedAt time.Time,
+				state model.UploadState,
+				errorMessage *string,
+				rootFSEntryID *id.FSEntryID,
+				rootCID cid.Cid,
+			) error {
+				_, err := tx.ExecContext(ctx,
+					insertQuery,
+					id,
+					configurationID,
+					sourceID,
+					createdAt.Unix(),
+					updatedAt.Unix(),
+					state,
+					NullString(errorMessage),
+					Null(rootFSEntryID),
+					util.DbCid(&rootCID),
+				)
+				return err
+			}, upload)
+			if err != nil {
+				return fmt.Errorf("failed to write upload to database for configuration %s and source %s: %w", configurationID, sourceID, err)
+			}
+			uploads = append(uploads, upload)
 		}
-		uploads = append(uploads, upload)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
+
 	return uploads, nil
 }
 
