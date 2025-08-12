@@ -153,3 +153,20 @@ CREATE TABLE IF NOT EXISTS shards (
   cid BLOB,
   state TEXT NOT NULL
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS shard_blocks (
+  shard_id BLOB NOT NULL,
+  block_cid BLOB NOT NULL,
+  offset INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  FOREIGN KEY (shard_id) REFERENCES shards(id),
+  PRIMARY KEY (shard_id, block_cid)
+) STRICT;
+
+-- Simple index manifests - one per upload
+CREATE TABLE IF NOT EXISTS index_manifests (
+  upload_id BLOB PRIMARY KEY,
+  manifest_data TEXT NOT NULL, -- JSON data
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (upload_id) REFERENCES uploads(id)
+) STRICT;

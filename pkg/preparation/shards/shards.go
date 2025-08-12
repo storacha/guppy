@@ -22,9 +22,15 @@ const noRootsHeaderLen = 17
 
 var log = logging.Logger("preparation/shards")
 
+type RepoWithIndexes interface {
+	Repo
+	// Add block position tracking
+	AddShardBlock(ctx context.Context, shardID id.ShardID, blockCID cid.Cid, offset, size uint64) error
+}
+
 // API provides methods to interact with the Shards in the repository.
 type API struct {
-	Repo        Repo
+	Repo        RepoWithIndexes //
 	Client      client.Client
 	Space       did.DID
 	ReceiptsURL *url.URL
@@ -74,6 +80,71 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
+	return created, nil
+}
+
+func (a API) AddNodeToUploadShardsWithPosition(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
+	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get configuration for upload %s: %w", uploadID, err)
+	}
+
+	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	if err != nil {
+		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+	}
+
+	var shard *model.Shard
+	var created bool
+
+	// Find or create shard (same logic as before)
+	for _, s := range openShards {
+		hasRoom, err := a.roomInShard(ctx, s, nodeCID, config)
+		if err != nil {
+			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+		}
+		if hasRoom {
+			shard = s
+			break
+		}
+		s.Close()
+		if err := a.Repo.UpdateShard(ctx, s); err != nil {
+			return false, fmt.Errorf("updating shard: %w", err)
+		}
+	}
+
+	if shard == nil {
+		shard, err = a.Repo.CreateShard(ctx, uploadID)
+		if err != nil {
+			return false, fmt.Errorf("failed to create shard: %w", err)
+		}
+		created = true
+	}
+
+	// Get node size for position calculation
+	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
+	if err != nil {
+		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+	}
+
+	// Calculate current position in shard
+	currentSize, err := a.currentSizeOfShard(ctx, shard.ID())
+	if err != nil {
+		return false, fmt.Errorf("failed to get current shard size: %w", err)
+	}
+
+	// Add to shard
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
+	if err != nil {
+		return false, fmt.Errorf("failed to add node to shard: %w", err)
+	}
+
+	// NEW: Track block position
+	err = a.Repo.AddShardBlock(ctx, shard.ID(), nodeCID, currentSize, node.Size())
+	if err != nil {
+		return false, fmt.Errorf("failed to track block position: %w", err)
+	}
+
 	return created, nil
 }
 
