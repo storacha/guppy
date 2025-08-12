@@ -98,7 +98,7 @@ func TestExecuteUpload(t *testing.T) {
 	require.Len(t, uploads, 1, "expected exactly one upload to be created")
 	upload := uploads[0]
 
-	err = api.ExecuteUpload(ctx, upload)
+	_, err = api.ExecuteUpload(ctx, upload)
 	require.NoError(t, err)
 
 	openShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateOpen)

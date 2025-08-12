@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/configurations"
@@ -162,6 +163,6 @@ func (a API) CreateUploads(ctx context.Context, configurationID id.Configuration
 	return a.Uploads.CreateUploads(ctx, configurationID)
 }
 
-func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) error {
+func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
 	return a.Uploads.ExecuteUpload(ctx, upload)
 }
