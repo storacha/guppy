@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
@@ -116,8 +117,8 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
 	var totalSize uint64 = noRootsHeaderLen
 
-	err := a.Repo.ForEachNodeCIDAndSize(ctx, shardID, func(cid cid.Cid, size uint64) error {
-		totalSize += nodeEncodingLength(cid, size)
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
+		totalSize += nodeEncodingLength(node.CID(), node.Size())
 		return nil
 	})
 	if err != nil {

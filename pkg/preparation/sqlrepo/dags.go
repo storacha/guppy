@@ -201,9 +201,15 @@ func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []b
 	return r.getNodeFromRow(row)
 }
 
-func (r *repo) getNodeFromRow(row *sql.Row) (model.Node, error) {
+// RowScanner can scan a row into a set of destinations. It should not be
+// confused with [sql.Scanner], which is used to scan a single value.
+type RowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (r *repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
+		return scanner.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
