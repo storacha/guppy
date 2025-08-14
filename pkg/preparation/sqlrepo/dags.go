@@ -27,13 +27,14 @@ func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []mod
 		}
 		links = append(links, link)
 	}
-	insertQuery := `INSERT INTO links (
+	insertQuery := `
+		INSERT INTO links (
 			name,
   		t_size,
   	  hash,
   		parent_id,
-  	  ordering,
-		) VALUES`
+  	  ordering
+		) VALUES ($1, $2, $3, $4, $5)`
 	for _, link := range links {
 		_, err := r.db.ExecContext(
 			ctx,
@@ -45,7 +46,7 @@ func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []mod
 			link.Order(),
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert link: %w", err)
 		}
 	}
 	return nil
