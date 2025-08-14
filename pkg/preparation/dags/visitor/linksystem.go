@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
-	"hash"
 	"io"
 
 	"github.com/ipfs/go-cid"
@@ -46,10 +45,6 @@ func encode(encoder codec.Encoder, codec uint64, node datamodel.Node, w io.Write
 	return cid, data, nil
 }
 
-func identityHasherChooser(lp datamodel.LinkPrototype) (hash.Hash, error) {
-	return multihash.GetHasher(multihash.IDENTITY)
-}
-
 func noopStorage(lc linking.LinkContext) (io.Writer, linking.BlockWriteCommitter, error) {
 	return io.Discard, func(l datamodel.Link) error {
 		// This is a no-op for writing links, as we handle link creation in VisitUnixFSNode.
@@ -78,9 +73,6 @@ func (v UnixFSFileNodeVisitor) LinkSystem() *linking.LinkSystem {
 func linkSystemWithVisitFns(visitFns map[uint64]VisitNodeFunc) *linking.LinkSystem {
 	ls := cidlink.DefaultLinkSystem()
 	originalChooser := ls.EncoderChooser
-
-	// uses identity hasher to avoid extra hash computation, since we will do that in the encode step
-	ls.HasherChooser = identityHasherChooser
 
 	// no op storage system
 	ls.StorageWriteOpener = noopStorage
