@@ -116,7 +116,7 @@ func (r *repo) FindNodeByCid(ctx context.Context, c cid.Cid) (dagsmodel.Node, er
 	return r.getNodeFromRow(row)
 }
 
-func (r *repo) ForEachNodeCIDAndSize(ctx context.Context, shardID id.ShardID, yield func(cid.Cid, uint64)) error {
+func (r *repo) ForEachNodeCIDAndSize(ctx context.Context, shardID id.ShardID, yield func(cid.Cid, uint64) error) error {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT nodes.cid, nodes.size
 		FROM nodes_in_shards
@@ -135,7 +135,10 @@ func (r *repo) ForEachNodeCIDAndSize(ctx context.Context, shardID id.ShardID, yi
 		if err := rows.Scan(util.DbCid(&nodeCID), &size); err != nil {
 			return fmt.Errorf("failed to scan node for shard %s: %w", shardID, err)
 		}
-		yield(nodeCID, size)
+		if err := yield(nodeCID, size); err != nil {
+			return fmt.Errorf("failed to yield node CID %s with size %d for shard %s: %w", nodeCID, size, shardID, err)
+		}
+
 	}
 
 	return nil

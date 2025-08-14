@@ -116,8 +116,9 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
 	var totalSize uint64 = noRootsHeaderLen
 
-	err := a.Repo.ForEachNodeCIDAndSize(ctx, shardID, func(cid cid.Cid, size uint64) {
+	err := a.Repo.ForEachNodeCIDAndSize(ctx, shardID, func(cid cid.Cid, size uint64) error {
 		totalSize += nodeEncodingLength(cid, size)
+		return nil
 	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
