@@ -68,20 +68,16 @@ func pbNode(t *testing.T) datamodel.Node {
 }
 
 func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
-	sourceID := id.New()
-	reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
-
-	v := visitor.NewUnixFSFileNodeVisitor(
-		t.Context(),
-		repo,
-		sourceID,
-		"some/path",
-		reader,
-		func(node model.Node, data []byte) error { return nil },
-	)
-
 	t.Run("encodes a UnixFS node", func(t *testing.T) {
+		v := visitor.NewUnixFSFileNodeVisitor(
+			t.Context(),
+			sqlrepo.New(testutil.CreateTestDB(t)),
+			id.New(),
+			"some/path",
+			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
+			nil,
+		)
+
 		pbnode := pbNode(t)
 
 		encoderChooser := v.LinkSystem().EncoderChooser
@@ -92,11 +88,47 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	})
 
 	t.Run("encodes a leaf node", func(t *testing.T) {
+		v := visitor.NewUnixFSFileNodeVisitor(
+			t.Context(),
+			sqlrepo.New(testutil.CreateTestDB(t)),
+			id.New(),
+			"some/path",
+			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
+			nil,
+		)
+
 		encoderChooser := v.LinkSystem().EncoderChooser
 		encoder, err := encoderChooser(leafLinkProto)
 		require.NoError(t, err)
 		err = encoder(basicnode.NewBytes([]byte{}), bytes.NewBuffer(nil))
 		require.NoError(t, err)
+	})
+
+	t.Run("stores and calls back with matching CID", func(t *testing.T) {
+		var callbackCids []cid.Cid
+		repo := sqlrepo.New(testutil.CreateTestDB(t))
+		reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
+
+		v := visitor.NewUnixFSFileNodeVisitor(
+			t.Context(),
+			repo,
+			id.New(),
+			"some/path",
+			reader,
+			func(node model.Node, data []byte) error {
+				callbackCids = append(callbackCids, node.CID())
+				return nil
+			},
+		)
+
+		l, _, err := builder.BuildUnixFSFile(reader, "size-4", v.LinkSystem())
+		require.NoError(t, err)
+
+		c := l.(cidlink.Link).Cid
+		node, err := repo.FindNodeByCid(t.Context(), c)
+		require.NoError(t, err)
+		require.NotNilf(t, node, "expected a stored node with returned CID %s", c)
+		require.Containsf(t, callbackCids, c, "expected callback with CID %s", c)
 	})
 }
 
