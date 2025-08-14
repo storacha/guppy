@@ -38,7 +38,7 @@ type API struct {
 	Repo        Repo
 	Client      SpaceBlobAdder
 	Space       did.DID
-	CarForShard func(shard *model.Shard) (io.Reader, error)
+	CarForShard func(ctx context.Context, shard *model.Shard) (io.Reader, error)
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
@@ -160,7 +160,7 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	}
 
 	for _, shard := range closedShards {
-		reader, err := a.CarForShard(shard)
+		reader, err := a.CarForShard(ctx, shard)
 		if err != nil {
 			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 		}

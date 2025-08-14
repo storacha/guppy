@@ -173,8 +173,8 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		spaceBlobAdder := mockSpaceBlobAdder{T: t}
 
-		carForShard := func(shard *model.Shard) (io.Reader, error) {
-			nodes := nodesInShard(t.Context(), t, db, shard.ID())
+		carForShard := func(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+			nodes := nodesInShard(ctx, t, db, shard.ID())
 			b := []byte("CAR CONTAINING NODES:")
 			for _, n := range nodes {
 				b = append(b, ' ')
