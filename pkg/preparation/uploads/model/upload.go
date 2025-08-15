@@ -114,6 +114,10 @@ func (u *Upload) RootFSEntryID() id.FSEntryID {
 	return *u.rootFSEntryID
 }
 
+func (u *Upload) RootCID() cid.Cid {
+	return u.rootCID
+}
+
 func (u *Upload) Fail(errorMessage string) error {
 	if TerminatedState(u.state) {
 		return fmt.Errorf("cannot fail upload in state %s", u.state)
