@@ -45,16 +45,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   state TEXT NOT NULL CHECK (
-    state IN (
-      'pending',
-      'started',
-      'scanned',
-      'dagged',
-      'sharded',
-      'completed',
-      'failed',
-      'canceled'
-    )
+    state IN ('pending', 'started',)
   ),
   error_message TEXT,
   root_fs_entry_id BLOB,
