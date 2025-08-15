@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -50,6 +51,33 @@ func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []mod
 		}
 	}
 	return nil
+}
+
+func (r *repo) LinksForCID(ctx context.Context, c cid.Cid) ([]*model.Link, error) {
+	query := `SELECT name, t_size, hash, parent_id, ordering FROM links WHERE parent_id = ?`
+	rows, err := r.db.QueryContext(ctx, query, c.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*model.Link
+	for rows.Next() {
+		link, err := model.ReadLinkFromDatabase(func(name *string, tSize *uint64, hash, parent *cid.Cid, order *uint64) error {
+			return rows.Scan(name, tSize, util.DbCid(hash), util.DbCid(parent), order)
+		})
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(links, func(a, b *model.Link) int {
+		return int(a.Order() - b.Order())
+	})
+	return links, nil
 }
 
 type sqlScanner interface {
@@ -173,9 +201,15 @@ func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []b
 	return r.getNodeFromRow(row)
 }
 
-func (r *repo) getNodeFromRow(row *sql.Row) (model.Node, error) {
+// RowScanner can scan a row into a set of destinations. It should not be
+// confused with [sql.Scanner], which is used to scan a single value.
+type RowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (r *repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
-		return row.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
+		return scanner.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

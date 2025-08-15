@@ -18,5 +18,5 @@ type Repo interface {
 	GetConfigurationByUploadID(ctx context.Context, uploadID id.UploadID) (*configurationsmodel.Configuration, error)
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid) error
 	FindNodeByCid(ctx context.Context, c cid.Cid) (dagsmodel.Node, error)
-	ForEachNodeCIDAndSize(ctx context.Context, shardID id.ShardID, yield func(cid.Cid, uint64)) error
+	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(dagsmodel.Node) error) error
 }
