@@ -33,29 +33,15 @@ const (
 	// UploadStateCompleted indicates that the entire upload has completed
 	// successfully.
 	UploadStateCompleted UploadState = "completed"
-
-	// UploadStateFailed indicates that the upload has failed.
-	UploadStateFailed UploadState = "failed"
-
-	// UploadStateCanceled indicates that the upload has been canceled.
-	UploadStateCanceled UploadState = "canceled"
 )
 
 func validUploadState(state UploadState) bool {
 	switch state {
-	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateCompleted, UploadStateFailed, UploadStateCanceled:
+	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateCompleted:
 		return true
 	default:
 		return false
 	}
-}
-
-func TerminatedState(state UploadState) bool {
-	return state == UploadStateCompleted || state == UploadStateFailed || state == UploadStateCanceled
-}
-
-func RestartableState(state UploadState) bool {
-	return state == UploadStateStarted || state == UploadStateScanned || state == UploadStateDagged || state == UploadStateCanceled
 }
 
 // Upload represents the process of full or partial upload of data from a source, eventually represented as an upload in storacha.
@@ -121,10 +107,9 @@ func (u *Upload) RootCID() cid.Cid {
 }
 
 func (u *Upload) Fail(errorMessage string) error {
-	if TerminatedState(u.state) {
+	if u.state == UploadStateCompleted {
 		return fmt.Errorf("cannot fail upload in state %s", u.state)
 	}
-	u.state = UploadStateFailed
 	u.errorMessage = &errorMessage
 	u.updatedAt = time.Now()
 	return nil
@@ -141,13 +126,7 @@ func (u *Upload) Complete() error {
 }
 
 func (u *Upload) Cancel() error {
-	if TerminatedState(u.state) {
-		return fmt.Errorf("cannot cancel upload in state %s", u.state)
-	}
-	u.state = UploadStateCanceled
-	u.errorMessage = nil
-	u.updatedAt = time.Now()
-	return nil
+	return u.Fail("upload was canceled")
 }
 
 func (u *Upload) Start() error {
@@ -182,18 +161,6 @@ func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
 	return nil
 }
 
-func (u *Upload) Restart() error {
-	if !RestartableState(u.state) {
-		return fmt.Errorf("cannot restart upload in state %s", u.state)
-	}
-	u.state = UploadStatePending
-	u.rootFSEntryID = nil // Reset root file system entry ID
-	u.rootCID = cid.Undef // Reset root CID if applicable
-	u.errorMessage = nil
-	u.updatedAt = time.Now()
-	return nil
-}
-
 func validateUpload(upload *Upload) error {
 	if upload.id == id.Nil {
 		return types.ErrEmpty{Field: "upload ID"}
@@ -209,9 +176,6 @@ func validateUpload(upload *Upload) error {
 	}
 	if !validUploadState(upload.state) {
 		return fmt.Errorf("invalid upload state: %s", upload.state)
-	}
-	if upload.errorMessage != nil && upload.state != UploadStateFailed {
-		return fmt.Errorf("error message is set but upload state is not 'failed': %s", upload.state)
 	}
 	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateStarted) {
 		return fmt.Errorf("root file system entry ID is set but upload has not completed file system scan")
