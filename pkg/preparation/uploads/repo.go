@@ -7,6 +7,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -26,6 +27,8 @@ type Repo interface {
 	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error)
 	// ListSpaceSources lists all space sources for the given space DID.
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
+	// CreateScan creates a new scan for an upload.
+	CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel.Scan, error)
 }
 
 // IncompleteDagScanError is returned by CIDForFSEntry when the DAG scan for the file system entry is not completed.

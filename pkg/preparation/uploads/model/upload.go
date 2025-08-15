@@ -139,23 +139,13 @@ func (u *Upload) Start() error {
 	return nil
 }
 
-func (u *Upload) ScanComplete(rootFSEntryID id.FSEntryID) error {
-	if u.state != UploadStateStarted {
-		return fmt.Errorf("cannot complete scan in state %s", u.state)
-	}
-	u.state = UploadStateScanned
-	u.errorMessage = nil
+func (u *Upload) SetRootFSEntryID(rootFSEntryID id.FSEntryID) error {
 	u.rootFSEntryID = &rootFSEntryID
 	u.updatedAt = time.Now()
 	return nil
 }
 
-func (u *Upload) DAGGenerationComplete(rootCID cid.Cid) error {
-	if u.state != UploadStateScanned {
-		return fmt.Errorf("cannot complete DAG generation in state %s", u.state)
-	}
-	u.state = UploadStateDagged
-	u.errorMessage = nil
+func (u *Upload) SetRootCID(rootCID cid.Cid) error {
 	u.rootCID = rootCID
 	u.updatedAt = time.Now()
 	return nil

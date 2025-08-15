@@ -11,7 +11,9 @@ import (
 
 	"fmt"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation"
+	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/urfave/cli/v2"
 	_ "modernc.org/sqlite"
@@ -39,9 +41,17 @@ func largeUpload(cCtx *cli.Context) error {
 
 	repo := sqlrepo.New(db)
 
-	api := preparation.NewAPI(repo)
+	spaceDID, err := did.Parse("did:example:replace-this-with-an-argument")
+	if err != nil {
+		return fmt.Errorf("command failed to parse space DID: %w", err)
+	}
 
-	space, err := api.CreateSpace(cCtx.Context, "Large Upload Space")
+	// TODO: Replace with a real client.
+	var client shards.SpaceBlobAdder
+
+	api := preparation.NewAPI(repo, client, spaceDID)
+
+	_, err = api.FindOrCreateSpace(cCtx.Context, spaceDID, "Large Upload Space")
 	if err != nil {
 		return fmt.Errorf("command failed to create space: %w", err)
 	}
@@ -52,12 +62,12 @@ func largeUpload(cCtx *cli.Context) error {
 	}
 	fmt.Println("Created source:", source.ID())
 
-	err = repo.AddSourceToSpace(cCtx.Context, space.DID(), source.ID())
+	err = repo.AddSourceToSpace(cCtx.Context, spaceDID, source.ID())
 	if err != nil {
 		return fmt.Errorf("command failed to add source to space: %w", err)
 	}
 
-	uploads, err := api.CreateUploads(cCtx.Context, space.DID())
+	uploads, err := api.CreateUploads(cCtx.Context, spaceDID)
 	if err != nil {
 		return fmt.Errorf("command failed to create uploads: %w", err)
 	}
