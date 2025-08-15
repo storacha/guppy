@@ -79,8 +79,8 @@ func (a API) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(m
 	return fsEntry, nil
 }
 
-// OpenFile opens a file for reading, ensuring the checksum matches the expected value.
-func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
+// openFile opens a file for reading, ensuring the checksum matches the expected value.
+func (a API) openFile(ctx context.Context, file *model.File) (fs.File, error) {
 	fsys, err := a.SourceAccessor(ctx, file.SourceID())
 	if err != nil {
 		return nil, fmt.Errorf("accessing source for file %s: %w", file.ID(), err)
@@ -101,8 +101,8 @@ func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
 	return fsFile, nil
 }
 
-// GetFileByID retrieves a file by its ID from the repository, returning an error if not found.
-func (a API) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
+// getFileByID retrieves a file by its ID from the repository, returning an error if not found.
+func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
 	file, err := a.Repo.GetFileByID(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
@@ -115,11 +115,11 @@ func (a API) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File,
 
 // OpenFileByID retrieves a file by its ID and opens it for reading, returning an error if not found or if the file cannot be opened.
 func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id.SourceID, string, error) {
-	file, err := a.GetFileByID(ctx, fileID)
+	file, err := a.getFileByID(ctx, fileID)
 	if err != nil {
 		return nil, id.SourceID{}, "", err
 	}
-	fsFile, err := a.OpenFile(ctx, file)
+	fsFile, err := a.openFile(ctx, file)
 	if err != nil {
 		return nil, id.SourceID{}, "", err
 	}
