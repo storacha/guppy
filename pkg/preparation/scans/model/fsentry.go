@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"time"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -20,6 +21,7 @@ type FSEntry interface {
 	// For directories, it's a hash of path and modified, plus the concatenation of the checksums of all its children.
 	Checksum() []byte
 	SourceID() id.SourceID
+	SpaceDID() did.DID
 	isFsEntry()
 }
 
@@ -30,6 +32,7 @@ type fsEntry struct {
 	mode         fs.FileMode
 	checksum     []byte      // checksum is the hash of the
 	sourceID     id.SourceID // sourceID is the ID of the source this entry belongs to
+	spaceDID     did.DID     // spaceDID is the DID of the space this entry belongs to
 }
 
 func (f *fsEntry) ID() id.FSEntryID {
@@ -53,6 +56,10 @@ func (f *fsEntry) Checksum() []byte {
 }
 func (f *fsEntry) SourceID() id.SourceID {
 	return f.sourceID
+}
+
+func (f *fsEntry) SpaceDID() did.DID {
+	return f.spaceDID
 }
 
 type File struct {
@@ -87,10 +94,13 @@ func validateFsEntry(f *fsEntry) error {
 	if f.sourceID == id.Nil {
 		return types.ErrEmpty{Field: "sourceID"}
 	}
+	if !f.spaceDID.Defined() {
+		return types.ErrEmpty{Field: "spaceDID"}
+	}
 	return nil
 }
 
-func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*File, error) {
+func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*File, error) {
 	file := &File{
 		fsEntry: fsEntry{
 			id:           id.New(),
@@ -99,6 +109,7 @@ func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64,
 			mode:         mode,
 			checksum:     checksum,
 			sourceID:     sourceID,
+			spaceDID:     spaceDID,
 		},
 		size: size,
 	}
@@ -108,7 +119,7 @@ func NewFile(path string, lastModified time.Time, mode fs.FileMode, size uint64,
 	return file, nil
 }
 
-func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*Directory, error) {
+func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*Directory, error) {
 	directory := &Directory{
 		fsEntry: fsEntry{
 			id:           id.New(),
@@ -117,6 +128,7 @@ func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksu
 			mode:         mode,
 			checksum:     checksum,
 			sourceID:     sourceID,
+			spaceDID:     spaceDID,
 		},
 	}
 	if err := validateFsEntry(&directory.fsEntry); err != nil {
@@ -125,22 +137,22 @@ func NewDirectory(path string, lastModified time.Time, mode fs.FileMode, checksu
 	return directory, nil
 }
 
-type FSEntryWriter func(id id.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) error
+type FSEntryWriter func(id id.FSEntryID, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) error
 
 func WriteFSEntryToDatabase(entry FSEntry, writer FSEntryWriter) error {
 	size := uint64(0)
 	if file, ok := entry.(*File); ok {
 		size = file.Size()
 	}
-	return writer(entry.ID(), entry.Path(), entry.LastModified(), entry.Mode(), size, entry.Checksum(), entry.SourceID())
+	return writer(entry.ID(), entry.Path(), entry.LastModified(), entry.Mode(), size, entry.Checksum(), entry.SourceID(), entry.SpaceDID())
 }
 
-type FSEntryScanner func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID) error
+type FSEntryScanner func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error
 
 func ReadFSEntryFromDatabase(scanner FSEntryScanner) (FSEntry, error) {
 	fsEntry := &fsEntry{}
 	size := uint64(0) // size is only used for files
-	err := scanner(&fsEntry.id, &fsEntry.path, &fsEntry.lastModified, &fsEntry.mode, &size, &fsEntry.checksum, &fsEntry.sourceID)
+	err := scanner(&fsEntry.id, &fsEntry.path, &fsEntry.lastModified, &fsEntry.mode, &size, &fsEntry.checksum, &fsEntry.sourceID, &fsEntry.spaceDID)
 	if err != nil {
 		return nil, fmt.Errorf("reading file from database: %w", err)
 	}

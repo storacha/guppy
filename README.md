@@ -46,6 +46,46 @@ GLOBAL OPTIONS:
    --help, -h  show help
 ```
 
+## Guppy vs the Storacha JS CLI
+
+While both Guppy and the [Storacha JS CLI](https://github.com/storacha/upload-service/tree/main/packages/cli) provide access to the Storacha Network, they serve different use cases and are optimized for different scenarios:
+
+### Design Goals
+
+**Storacha JS CLI**: Designed for easy integration in web applications and straightforward file uploads. Perfect for developers who need simple, quick uploads and standard web-based workflows.
+
+**Guppy**: Built specifically for enterprise-scale, large data uploads with a focus on efficiency, reliability, and incremental updates. Ideal for organizations managing substantial datasets that change over time.
+
+### Key Differences
+
+Guppy provides several enterprise-focused features that set it apart:
+
+**Resumable Uploads**: Guppy can resume interrupted uploads, ensuring that large datasets don't need to be re-uploaded from scratch if something goes wrong.
+
+**Multiple Data Source Support**: Pull data from various sources including:
+- Local filesystems
+- Remote data sources
+- Cloud storage providers
+- Other network locations
+
+**Incremental & Updatable Uploads**: Rather than treating each upload as independent, Guppy supports incremental uploads that only transfer what has changed since the last upload, dramatically reducing bandwidth and time for large, evolving datasets.
+
+**Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
+
+### Space Concepts
+
+In Guppy, a "space" represents more than just a collection of uploads. Each space is configured with a set of data sources, and Guppy treats uploads intelligently:
+
+- **Initial Upload**: The first upload from a data source captures the complete dataset
+- **Subsequent Uploads**: All following uploads are treated as "updates" that only include changes (additions, modifications, deletions) since the last upload
+- **Change Detection**: Guppy automatically detects what has changed and only processes the delta, making updates extremely efficient even for massive datasets
+
+This approach makes Guppy particularly well-suited for scenarios like:
+- Regular backups of large databases
+- Synchronizing evolving datasets
+- Enterprise content management systems
+- Any situation where large amounts of data change incrementally over time
+
 ## How to
 
 ### Generate a DID

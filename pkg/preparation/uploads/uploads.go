@@ -7,6 +7,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -40,21 +41,21 @@ type API struct {
 	CloseUploadShards CloseUploadShardsFunc
 }
 
-// CreateUploads creates uploads for a given configuration and its associated sources.
-func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*model.Upload, error) {
-	log.Debugf("Creating uploads for configuration %s", configurationID)
-	sources, err := a.Repo.ListConfigurationSources(ctx, configurationID)
+// CreateUploads creates uploads for a given space and its associated sources.
+func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Upload, error) {
+	log.Debugf("Creating uploads for space %s", spaceDID)
+	sources, err := a.Repo.ListSpaceSources(ctx, spaceDID)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Debugf("Found %d sources for configuration %s", len(sources), configurationID)
+	log.Debugf("Found %d sources for space %s", len(sources), spaceDID)
 
-	uploads, err := a.Repo.CreateUploads(ctx, configurationID, sources)
+	uploads, err := a.Repo.CreateUploads(ctx, spaceDID, sources)
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Created %d uploads for configuration %s", len(uploads), configurationID)
+	log.Debugf("Created %d uploads for space %s", len(uploads), spaceDID)
 	return uploads, nil
 }
 
@@ -159,7 +160,7 @@ func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) e
 	// [Worker], because it never has to wait for work.
 
 	fsEntryID, err := e.api.RunNewScan(ctx, e.upload.ID(), func(id id.FSEntryID, isDirectory bool) error {
-		_, err := e.api.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID())
+		_, err := e.api.Repo.CreateDAGScan(ctx, id, isDirectory, e.upload.ID(), e.upload.SpaceDID())
 		if err != nil {
 			return fmt.Errorf("creating DAG scan: %w", err)
 		}

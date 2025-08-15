@@ -10,6 +10,7 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/storacha/go-libstoracha/capabilities/access"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/ipld"
@@ -17,10 +18,9 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/server"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
-	"github.com/storacha/guppy/pkg/client/testutil"
+	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +53,7 @@ func TestPollClaim(t *testing.T) {
 	claimedChan := make(chan struct{})
 	defer close(claimedChan)
 
-	connection := testutil.NewTestServerConnection(
+	connection := ctestutil.NewTestServerConnection(
 		server.WithServiceMethod(
 			access.Claim.Can(),
 			server.Provide(
@@ -75,31 +75,31 @@ func TestPollClaim(t *testing.T) {
 		),
 	)
 
-	c = uhelpers.Must(client.NewClient(client.WithConnection(connection)))
+	c = testutil.Must(client.NewClient(client.WithConnection(connection)))(t)
 
-	requestLink := uhelpers.RandomCID()
+	requestLink := testutil.RandomCID(t)
 
-	unrelatedDel := uhelpers.Must(uploadcap.Get.Delegate(
+	unrelatedDel := testutil.Must(uploadcap.Get.Delegate(
 		c.Issuer(),
 		c.Issuer(),
 		c.Issuer().DID().String(),
-		uploadcap.GetCaveats{Root: uhelpers.RandomCID()},
-	))
-	relatedDel := uhelpers.Must(uploadcap.Get.Delegate(
+		uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+	))(t)
+	relatedDel := testutil.Must(uploadcap.Get.Delegate(
 		c.Issuer(),
 		c.Issuer(),
 		c.Issuer().DID().String(),
-		uploadcap.GetCaveats{Root: uhelpers.RandomCID()},
+		uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
 		delegation.WithFacts([]ucan.FactBuilder{factBuilder{
 			"access/request": linkBuilder{link: requestLink},
 		}}),
-	))
+	))(t)
 
 	t.Run("polls until it finds authorized delegations", func(t *testing.T) {
 		responses = []result.Result[access.ClaimOk, failure.IPLDBuilderFailure]{
-			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel()}),
-			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel)}),
-			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(unrelatedDel, relatedDel)}),
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(t)}),
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(t, unrelatedDel)}),
+			result.Ok[access.ClaimOk, failure.IPLDBuilderFailure](access.ClaimOk{Delegations: buildDelegationsModel(t, unrelatedDel, relatedDel)}),
 		}
 
 		// A channel of three ticks, ready to read

@@ -156,7 +156,7 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	}
 	defer f.Close()
 	reader := visitor.ReaderPositionFromReader(f)
-	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, sourceID, path, reader, nodeCB)
+	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, sourceID, path, reader, dagScan.SpaceDID(), nodeCB)
 	log.Debugf("Building UnixFS file with source ID %s and path %s", sourceID, path)
 	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
 	if err != nil {
@@ -173,7 +173,7 @@ func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Directo
 		return cid.Undef, fmt.Errorf("getting directory links for DAG scan: %w", err)
 	}
 	log.Debugf("Found %d child links for directory scan %s", len(childLinks), dagScan.FsEntryID())
-	visitor := visitor.NewUnixFSDirectoryNodeVisitor(ctx, a.Repo, nodeCB)
+	visitor := visitor.NewUnixFSDirectoryNodeVisitor(ctx, a.Repo, dagScan.SpaceDID(), nodeCB)
 	pbLinks, err := toLinks(childLinks)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("converting links to PBLinks: %w", err)

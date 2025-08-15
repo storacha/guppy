@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -17,11 +18,12 @@ type LinkParams struct {
 
 // Link represents a DAG protobuf link inside a Node
 type Link struct {
-	name   string
-	tSize  uint64
-	hash   cid.Cid
-	parent cid.Cid
-	order  uint64
+	name     string
+	tSize    uint64
+	hash     cid.Cid
+	parent   cid.Cid
+	spaceDID did.DID
+	order    uint64
 }
 
 // Name returns the name of the link
@@ -44,6 +46,11 @@ func (l *Link) Parent() cid.Cid {
 	return l.parent
 }
 
+// SpaceDID returns the space DID of the link
+func (l *Link) SpaceDID() did.DID {
+	return l.spaceDID
+}
+
 // Order returns the order of the link, which is used to determine the order of links in a Node
 func (l *Link) Order() uint64 {
 	return l.order
@@ -56,20 +63,24 @@ func validateLink(link *Link) error {
 	if link.parent == cid.Undef {
 		return types.ErrEmpty{Field: "link parent"}
 	}
+	if !link.spaceDID.Defined() {
+		return types.ErrEmpty{Field: "link spaceDID"}
+	}
 	if link.parent.Type() != cid.DagProtobuf {
 		return fmt.Errorf("invalid CID type: expected DagProtobuf, got %x", link.parent.Type())
 	}
 	return nil
 }
 
-// NewLink creates a new Link instance with the provided name, tSize, hash, parent CID, and order.
-func NewLink(params LinkParams, parent cid.Cid, order uint64) (*Link, error) {
+// NewLink creates a new Link instance with the provided name, tSize, hash, parent CID, spaceDID, and order.
+func NewLink(params LinkParams, parent cid.Cid, spaceDID did.DID, order uint64) (*Link, error) {
 	link := &Link{
-		name:   params.Name,
-		tSize:  params.TSize,
-		hash:   params.Hash,
-		parent: parent,
-		order:  order,
+		name:     params.Name,
+		tSize:    params.TSize,
+		hash:     params.Hash,
+		parent:   parent,
+		spaceDID: spaceDID,
+		order:    order,
 	}
 	if err := validateLink(link); err != nil {
 		return nil, err
@@ -78,13 +89,13 @@ func NewLink(params LinkParams, parent cid.Cid, order uint64) (*Link, error) {
 }
 
 // LinkScanner is a function type for scanning a Link from the database
-type LinkScanner func(name *string, tSize *uint64, hash *cid.Cid, parent *cid.Cid, order *uint64) error
+type LinkScanner func(name *string, tSize *uint64, hash *cid.Cid, parent *cid.Cid, spaceDID *did.DID, order *uint64) error
 
 // ReadLinkFromDatabase reads a Link from the database using the provided scanner function.
 func ReadLinkFromDatabase(scanner LinkScanner) (*Link, error) {
 	var link Link
 
-	if err := scanner(&link.name, &link.tSize, &link.hash, &link.parent, &link.order); err != nil {
+	if err := scanner(&link.name, &link.tSize, &link.hash, &link.parent, &link.spaceDID, &link.order); err != nil {
 		return nil, err
 	}
 	if err := validateLink(&link); err != nil {
@@ -97,12 +108,14 @@ func ReadLinkFromDatabase(scanner LinkScanner) (*Link, error) {
 type Node interface {
 	CID() cid.Cid
 	Size() uint64
+	SpaceDID() did.DID
 	isNode()
 }
 
 type node struct {
-	cid  cid.Cid
-	size uint64
+	cid      cid.Cid
+	size     uint64
+	spaceDID did.DID
 }
 
 // CID returns the CID of the Node
@@ -114,9 +127,16 @@ func (n *node) Size() uint64 {
 	return n.size
 }
 
+func (n *node) SpaceDID() did.DID {
+	return n.spaceDID
+}
+
 func validateNode(node *node) error {
 	if node.cid == cid.Undef {
 		return types.ErrEmpty{Field: "node CID"}
+	}
+	if !node.spaceDID.Defined() {
+		return types.ErrEmpty{Field: "spaceDID"}
 	}
 	return nil
 }
@@ -150,12 +170,13 @@ func validateUnixFSNode(node *UnixFSNode) error {
 	return nil
 }
 
-// NewUnixFSNode creates a new UnixFSNode instance with the provided CID, Size, and UFS data.
-func NewUnixFSNode(cid cid.Cid, size uint64, ufsdata []byte) (*UnixFSNode, error) {
+// NewUnixFSNode creates a new UnixFSNode instance with the provided CID, Size, spaceDID, and UFS data.
+func NewUnixFSNode(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte) (*UnixFSNode, error) {
 	node := &UnixFSNode{
 		node: node{
-			cid:  cid,
-			size: size,
+			cid:      cid,
+			size:     size,
+			spaceDID: spaceDID,
 		},
 		ufsdata: ufsdata,
 	}
@@ -204,12 +225,13 @@ func validateRawNode(node *RawNode) error {
 	return nil
 }
 
-// NewRawNode creates a new RawNode instance with the provided CID, Size, path, source ID, and offset.
-func NewRawNode(cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*RawNode, error) {
+// NewRawNode creates a new RawNode instance with the provided CID, Size, spaceDID, path, source ID, and offset.
+func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*RawNode, error) {
 	node := &RawNode{
 		node: node{
-			cid:  cid,
-			size: size,
+			cid:      cid,
+			size:     size,
+			spaceDID: spaceDID,
 		},
 		path:     path,
 		sourceID: sourceID,
@@ -222,22 +244,22 @@ func NewRawNode(cid cid.Cid, size uint64, path string, sourceID id.SourceID, off
 }
 
 // NodeWriter is a function type for writing a Node to the database.
-type NodeWriter func(cid cid.Cid, size uint64, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error
+type NodeWriter func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error
 
 // WriteNodeToDatabase writes a Node to the database using the provided writer function.
 func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 	switch n := node.(type) {
 	case *UnixFSNode:
-		return writer(n.cid, n.size, n.ufsdata, "", id.Nil, 0)
+		return writer(n.cid, n.size, n.spaceDID, n.ufsdata, "", id.Nil, 0)
 	case *RawNode:
-		return writer(n.cid, n.size, nil, n.path, n.sourceID, n.offset)
+		return writer(n.cid, n.size, n.spaceDID, nil, n.path, n.sourceID, n.offset)
 	default:
 		return fmt.Errorf("unsupported node type: %T", node)
 	}
 }
 
 // NodeScanner is a function type for scanning a Node from the database.
-type NodeScanner func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error
+type NodeScanner func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error
 
 // ReadNodeFromDatabase reads a Node from the database using the provided scanner function.
 func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
@@ -246,7 +268,7 @@ func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 	var path string
 	var sourceID id.SourceID
 	var offset uint64
-	if err := scanner(&node.cid, &node.size, &ufsdata, &path, &sourceID, &offset); err != nil {
+	if err := scanner(&node.cid, &node.size, &node.spaceDID, &ufsdata, &path, &sourceID, &offset); err != nil {
 		return nil, err
 	}
 	switch node.cid.Type() {

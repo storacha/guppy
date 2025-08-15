@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/stretchr/testify/require"
@@ -13,21 +13,21 @@ import (
 
 func TestReset(t *testing.T) {
 	var savedData agentdata.AgentData
-	c := uhelpers.Must(client.NewClient(client.WithSaveFn(func(data agentdata.AgentData) error {
+	c := testutil.Must(client.NewClient(client.WithSaveFn(func(data agentdata.AgentData) error {
 		savedData = data
 		return nil
-	})))
+	})))(t)
 	require.Empty(t, c.Proofs(), "expected no proofs to be present initially")
 
 	issuer := c.Issuer()
 
 	// Some arbitrary delegation
-	del := uhelpers.Must(uploadcap.Get.Delegate(
+	del := testutil.Must(uploadcap.Get.Delegate(
 		c.Issuer(),
 		c.Issuer(),
 		c.Issuer().DID().String(),
-		uploadcap.GetCaveats{Root: uhelpers.RandomCID()},
-	))
+		uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+	))(t)
 
 	err := c.AddProofs(del)
 	require.NoError(t, err)

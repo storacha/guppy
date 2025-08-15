@@ -15,8 +15,6 @@ import (
 	ipldcar "github.com/ipld/go-car"
 	"github.com/ipld/go-car/util"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/pkg/preparation/configurations"
-	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/scans"
@@ -26,6 +24,8 @@ import (
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
+	"github.com/storacha/guppy/pkg/preparation/spaces"
+	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -34,7 +34,7 @@ import (
 var log = logging.Logger("preparation")
 
 type Repo interface {
-	configurations.Repo
+	spaces.Repo
 	uploads.Repo
 	sources.Repo
 	scans.Repo
@@ -43,11 +43,11 @@ type Repo interface {
 }
 
 type API struct {
-	Configurations configurations.API
-	Uploads        uploads.API
-	Sources        sources.API
-	DAGs           dags.API
-	Scans          scans.API
+	Spaces  spaces.API
+	Uploads uploads.API
+	Sources sources.API
+	DAGs    dags.API
+	Scans   scans.API
 }
 
 // Option is an option configuring the API.
@@ -71,7 +71,7 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	// first and initialize it last.
 	var uploadsAPI uploads.API
 
-	configurationsAPI := configurations.API{
+	spacesAPI := spaces.API{
 		Repo: repo,
 	}
 
@@ -83,8 +83,8 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	scansAPI := scans.API{
 		Repo: repo,
 		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
-		UploadSourceLookup: func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-			return uploadsAPI.GetSourceIDForUploadID(ctx, uploadID)
+		UploadLookup: func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
+			return uploadsAPI.GetUploadByID(ctx, uploadID)
 		},
 		SourceAccessor: sourcesAPI.AccessByID,
 		WalkerFn:       walker.WalkDir,
@@ -192,11 +192,11 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	}
 
 	return API{
-		Configurations: configurationsAPI,
-		Uploads:        uploadsAPI,
-		Sources:        sourcesAPI,
-		DAGs:           dagsAPI,
-		Scans:          scansAPI,
+		Spaces:  spacesAPI,
+		Uploads: uploadsAPI,
+		Sources: sourcesAPI,
+		DAGs:    dagsAPI,
+		Scans:   scansAPI,
 	}
 }
 
@@ -207,16 +207,16 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 	}
 }
 
-func (a API) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
-	return a.Configurations.CreateConfiguration(ctx, name, options...)
+func (a API) FindOrCreateSpace(ctx context.Context, spaceDID did.DID, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
+	return a.Spaces.FindOrCreateSpace(ctx, spaceDID, name, options...)
 }
 
 func (a API) CreateSource(ctx context.Context, name string, path string, options ...sourcesmodel.SourceOption) (*sourcesmodel.Source, error) {
 	return a.Sources.CreateSource(ctx, name, path, options...)
 }
 
-func (a API) CreateUploads(ctx context.Context, configurationID id.ConfigurationID) ([]*uploadsmodel.Upload, error) {
-	return a.Uploads.CreateUploads(ctx, configurationID)
+func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmodel.Upload, error) {
+	return a.Uploads.CreateUploads(ctx, spaceDID)
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {

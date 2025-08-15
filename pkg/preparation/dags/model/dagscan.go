@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -46,6 +47,7 @@ func TerminatedState(state DAGScanState) bool {
 type DAGScan interface {
 	FsEntryID() id.FSEntryID
 	UploadID() id.UploadID
+	SpaceDID() did.DID
 	CreatedAt() time.Time
 	UpdatedAt() time.Time
 	Error() error
@@ -63,6 +65,7 @@ type DAGScan interface {
 type dagScan struct {
 	fsEntryID    id.FSEntryID
 	uploadID     id.UploadID
+	spaceDID     did.DID
 	createdAt    time.Time
 	updatedAt    time.Time
 	errorMessage *string
@@ -76,6 +79,12 @@ type dagScan struct {
 func validateDAGScan(d *dagScan) (*dagScan, error) {
 	if d.fsEntryID == id.Nil {
 		return nil, types.ErrEmpty{Field: "fsEntryID"}
+	}
+	if d.uploadID == id.Nil {
+		return nil, types.ErrEmpty{Field: "uploadID"}
+	}
+	if !d.spaceDID.Defined() {
+		return nil, types.ErrEmpty{Field: "spaceDID"}
 	}
 	if !validDAGScanState(d.state) {
 		return nil, fmt.Errorf("invalid scan state: %s", d.state)
@@ -95,6 +104,9 @@ func (d *dagScan) FsEntryID() id.FSEntryID {
 }
 func (d *dagScan) UploadID() id.UploadID {
 	return d.uploadID
+}
+func (d *dagScan) SpaceDID() did.DID {
+	return d.spaceDID
 }
 func (d *dagScan) CreatedAt() time.Time {
 	return d.createdAt
@@ -192,11 +204,12 @@ func (d *DirectoryDAGScan) ChildrenCompleted() error {
 }
 
 // NewFileDAGScan creates a new FileDAGScan with the given fsEntryID.
-func NewFileDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID) (*FileDAGScan, error) {
+func NewFileDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID) (*FileDAGScan, error) {
 	fds := &FileDAGScan{
 		dagScan: dagScan{
 			fsEntryID: fsEntryID,
 			uploadID:  uploadID,
+			spaceDID:  spaceDID,
 			createdAt: time.Now(),
 			updatedAt: time.Now(),
 			state:     DAGScanStatePending,
@@ -209,11 +222,12 @@ func NewFileDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID) (*FileDAGScan,
 }
 
 // NewDirectoryDAGScan creates a new DirectoryDAGScan with the given fsEntryID.
-func NewDirectoryDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID) (*DirectoryDAGScan, error) {
+func NewDirectoryDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID) (*DirectoryDAGScan, error) {
 	dds := &DirectoryDAGScan{
 		dagScan: dagScan{
 			fsEntryID: fsEntryID,
 			uploadID:  uploadID,
+			spaceDID:  spaceDID,
 			createdAt: time.Now(),
 			updatedAt: time.Now(),
 			state:     DAGScanStateAwaitingChildren,
@@ -226,7 +240,7 @@ func NewDirectoryDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID) (*Directo
 }
 
 // DAGScanWriter is a function type for writing a DAGScan to the database.
-type DAGScanWriter func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state DAGScanState, cid cid.Cid) error
+type DAGScanWriter func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state DAGScanState, cid cid.Cid) error
 
 // WriteDAGScanToDatabase writes a DAGScan to the database using the provided writer function.
 func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
@@ -249,6 +263,7 @@ func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
 		kind,
 		ds.fsEntryID,
 		ds.uploadID,
+		ds.spaceDID,
 		ds.createdAt,
 		ds.updatedAt,
 		ds.errorMessage,
@@ -258,13 +273,13 @@ func WriteDAGScanToDatabase(scan DAGScan, writer DAGScanWriter) error {
 }
 
 // DAGScanScanner is a function type for scanning a DAGScan from the database.
-type DAGScanScanner func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *DAGScanState, cid *cid.Cid) error
+type DAGScanScanner func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, spaceDID *did.DID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *DAGScanState, cid *cid.Cid) error
 
 // ReadDAGScanFromDatabase reads a DAGScan from the database using the provided scanner function.
 func ReadDAGScanFromDatabase(scanner DAGScanScanner) (DAGScan, error) {
 	var kind string
 	var dagScan dagScan
-	err := scanner(&kind, &dagScan.fsEntryID, &dagScan.uploadID, &dagScan.createdAt, &dagScan.updatedAt, &dagScan.errorMessage, &dagScan.state, &dagScan.cid)
+	err := scanner(&kind, &dagScan.fsEntryID, &dagScan.uploadID, &dagScan.spaceDID, &dagScan.createdAt, &dagScan.updatedAt, &dagScan.errorMessage, &dagScan.state, &dagScan.cid)
 	if err != nil {
 		return nil, fmt.Errorf("reading dag scan from database: %w", err)
 	}

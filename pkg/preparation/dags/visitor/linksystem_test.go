@@ -13,10 +13,11 @@ import (
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
+	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -71,10 +72,11 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a UnixFS node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testutil.CreateTestDB(t)),
+			sqlrepo.New(testdb.CreateTestDB(t)),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
+			testutil.RandomDID(t),
 			nil,
 		)
 
@@ -90,10 +92,11 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a leaf node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testutil.CreateTestDB(t)),
+			sqlrepo.New(testdb.CreateTestDB(t)),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
+			testutil.RandomDID(t),
 			nil,
 		)
 
@@ -106,15 +109,16 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 
 	t.Run("stores and calls back with matching CID", func(t *testing.T) {
 		var callbackCids []cid.Cid
-		repo := sqlrepo.New(testutil.CreateTestDB(t))
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
-
+		spaceDID := testutil.RandomDID(t)
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
 			repo,
 			id.New(),
 			"some/path",
 			reader,
+			spaceDID,
 			func(node model.Node, data []byte) error {
 				callbackCids = append(callbackCids, node.CID())
 				return nil
@@ -125,7 +129,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		c := l.(cidlink.Link).Cid
-		node, err := repo.FindNodeByCid(t.Context(), c)
+		node, err := repo.FindNodeByCidAndSpaceDID(t.Context(), c, spaceDID)
 		require.NoError(t, err)
 		require.NotNilf(t, node, "expected a stored node with returned CID %s", c)
 		require.Containsf(t, callbackCids, c, "expected callback with CID %s", c)
@@ -133,11 +137,13 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 }
 
 func TestUnixFSDirectoryNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testutil.CreateTestDB(t))
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	spaceDID := testutil.RandomDID(t)
 
 	v := visitor.NewUnixFSDirectoryNodeVisitor(
 		t.Context(),
 		repo,
+		spaceDID,
 		func(node model.Node, data []byte) error { return nil },
 	)
 
