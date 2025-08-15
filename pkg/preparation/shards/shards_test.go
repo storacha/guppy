@@ -55,7 +55,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.Len(t, openShards, 1)
 	firstShard := openShards[0]
 
-	foundNodeCids := nodesInShard(t, db, firstShard.ID())
+	foundNodeCids := nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1}, foundNodeCids)
 
 	// with an open shard with room, adds the node to the shard
@@ -73,7 +73,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.Len(t, openShards, 1)
 	require.Equal(t, firstShard.ID(), openShards[0].ID())
 
-	foundNodeCids = nodesInShard(t, db, firstShard.ID())
+	foundNodeCids = nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1, nodeCid2}, foundNodeCids)
 
 	// with an open shard without room, closes the shard and creates another
@@ -91,7 +91,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.Len(t, closedShards, 1)
 	require.Equal(t, firstShard.ID(), closedShards[0].ID())
 
-	foundNodeCids = nodesInShard(t, db, firstShard.ID())
+	foundNodeCids = nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1, nodeCid2}, foundNodeCids)
 
 	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
@@ -100,7 +100,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	secondShard := openShards[0]
 	require.NotEqual(t, firstShard.ID(), secondShard.ID())
 
-	foundNodeCids = nodesInShard(t, db, secondShard.ID())
+	foundNodeCids = nodesInShard(t.Context(), t, db, secondShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid3}, foundNodeCids)
 
 	// finally, close the last shard with CloseUploadShards()
@@ -126,8 +126,8 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 }
 
 // (Until the repo has a way to query for this itself...)
-func nodesInShard(t *testing.T, db *sql.DB, shardID id.ShardID) []cid.Cid {
-	rows, err := db.QueryContext(t.Context(), `SELECT node_cid FROM nodes_in_shards WHERE shard_id = ?`, shardID)
+func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.ShardID) []cid.Cid {
+	rows, err := db.QueryContext(ctx, `SELECT node_cid FROM nodes_in_shards WHERE shard_id = ?`, shardID)
 	require.NoError(t, err)
 	defer rows.Close()
 
@@ -173,8 +173,8 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		spaceBlobAdder := mockSpaceBlobAdder{T: t}
 
-		carForShard := func(shard *model.Shard) (io.Reader, error) {
-			nodes := nodesInShard(t, db, shard.ID())
+		carForShard := func(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+			nodes := nodesInShard(ctx, t, db, shard.ID())
 			b := []byte("CAR CONTAINING NODES:")
 			for _, n := range nodes {
 				b = append(b, ' ')
