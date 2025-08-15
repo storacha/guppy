@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
+	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +45,56 @@ func TestCreateScan(t *testing.T) {
 
 		_, err := repo.CreateScan(ctx, uploadID)
 		require.ErrorContains(t, err, "context canceled")
+	})
+}
+
+func TestUpdateScan(t *testing.T) {
+	t.Run("with a persisted scan", func(t *testing.T) {
+		util.SetNowFunc(func() time.Time {
+			return time.Date(2025, 1, 2, 3, 4, 5, 6, time.UTC)
+		})
+
+		repo := sqlrepo.New(testutil.CreateTestDB(t))
+		scan, err := repo.CreateScan(t.Context(), id.New())
+		require.NoError(t, err)
+
+		readScanBefore, err := repo.GetScanByID(t.Context(), scan.ID())
+		require.NoError(t, err)
+
+		util.SetNowFunc(func() time.Time {
+			return time.Date(2026, 2, 3, 4, 5, 6, 7, time.UTC)
+		})
+		scan.Fail("oh no!")
+		err = repo.UpdateScan(t.Context(), scan)
+		require.NoError(t, err)
+
+		readScanAfter, err := repo.GetScanByID(t.Context(), scan.ID())
+		require.NoError(t, err)
+
+		require.Equal(t, scan.ID(), readScanAfter.ID())
+
+		require.Equal(t, readScanBefore.ID(), readScanAfter.ID())
+		require.Equal(t, readScanBefore.UploadID(), readScanAfter.UploadID())
+		require.Equal(t, readScanBefore.RootID(), readScanAfter.RootID())
+		require.Equal(t, readScanBefore.CreatedAt(), readScanAfter.CreatedAt())
+
+		require.Equal(t, time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC), readScanBefore.UpdatedAt())
+		require.Equal(t, time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC), readScanAfter.UpdatedAt())
+		require.Equal(t, model.ScanStatePending, readScanBefore.State())
+		require.Equal(t, model.ScanStateFailed, readScanAfter.State())
+		require.Nil(t, readScanBefore.Error())
+		require.ErrorContains(t, readScanAfter.Error(), "oh no!")
+	})
+
+	t.Run("with an unknown scan", func(t *testing.T) {
+		repo := sqlrepo.New(testutil.CreateTestDB(t))
+
+		unsavedScan, err := scanmodel.NewScan(id.New())
+		require.NoError(t, err)
+
+		unsavedScan.Fail("oh no!")
+		err = repo.UpdateScan(t.Context(), unsavedScan)
+		require.ErrorContains(t, err, "no scan found with ID")
 	})
 }
 

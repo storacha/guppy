@@ -246,12 +246,46 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 	query := `
 		UPDATE scans
-		SET upload_id = $2, root_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7
+		SET
+			upload_id = $2,
+			root_id = $3,
+			created_at = $4,
+			updated_at = $5,
+			state = $6,
+			error_message = $7
 		WHERE id = $1
 	`
 
-	return scanmodel.WriteScanToDatabase(scan, func(id id.ScanID, uploadID id.UploadID, rootID *id.FSEntryID, createdAt, updatedAt time.Time, state scanmodel.ScanState, errorMessage *string) error {
-		_, err := r.db.ExecContext(ctx, query, id, uploadID, Null(rootID), createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage))
+	return scanmodel.WriteScanToDatabase(scan, func(
+		id id.ScanID,
+		uploadID id.UploadID,
+		rootID *id.FSEntryID,
+		createdAt,
+		updatedAt time.Time,
+		state scanmodel.ScanState,
+		errorMessage *string,
+	) error {
+		result, err := r.db.ExecContext(
+			ctx,
+			query,
+			id,
+			uploadID,
+			Null(rootID),
+			createdAt.Unix(),
+			updatedAt.Unix(),
+			state,
+			NullString(errorMessage),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update scan: %w", err)
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected: %w", err)
+		}
+		if rowsAffected == 0 {
+			return fmt.Errorf("no scan found with ID %s", id)
+		}
 		return err
 	})
 }

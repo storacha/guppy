@@ -31,10 +31,6 @@ var _ scans.Repo = (*repoErrOnUpdateScan)(nil)
 func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 	uploadID := id.New()
 	sourceID := id.New()
-	scan, err := model.NewScan(uploadID)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create new scan: %v", err))
-	}
 
 	scansAPI := scans.API{
 		Repo: sqlrepo.New(testutil.CreateTestDB(t)),
@@ -47,6 +43,11 @@ func newScanAndAPI(t *testing.T) (*model.Scan, scans.API) {
 		WalkerFn: func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
 			return nil, nil
 		},
+	}
+
+	scan, err := scansAPI.Repo.CreateScan(t.Context(), uploadID)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create new scan: %v", err))
 	}
 
 	return scan, scansAPI
