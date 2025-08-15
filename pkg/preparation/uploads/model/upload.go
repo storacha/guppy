@@ -21,23 +21,11 @@ const (
 	// UploadStateStarted indicates that the upload has been started, but nothing
 	// is complete yet.
 	UploadStateStarted UploadState = "started"
-
-	// UploadStateScanned indicates that the upload has completed the file system
-	// scan.
-	UploadStateScanned UploadState = "scanned"
-
-	// UploadStateDagged indicates that the upload has completed the DAG scan and
-	// sharding.
-	UploadStateDagged UploadState = "dagged"
-
-	// UploadStateCompleted indicates that the entire upload has completed
-	// successfully.
-	UploadStateCompleted UploadState = "completed"
 )
 
 func validUploadState(state UploadState) bool {
 	switch state {
-	case UploadStatePending, UploadStateStarted, UploadStateScanned, UploadStateDagged, UploadStateCompleted:
+	case UploadStatePending, UploadStateStarted:
 		return true
 	default:
 		return false
@@ -107,20 +95,10 @@ func (u *Upload) RootCID() cid.Cid {
 }
 
 func (u *Upload) Fail(errorMessage string) error {
-	if u.state == UploadStateCompleted {
+	if u.state == UploadStatePending {
 		return fmt.Errorf("cannot fail upload in state %s", u.state)
 	}
 	u.errorMessage = &errorMessage
-	u.updatedAt = time.Now()
-	return nil
-}
-
-func (u *Upload) Complete() error {
-	if u.state != UploadStateDagged {
-		return fmt.Errorf("cannot complete upload in state %s", u.state)
-	}
-	u.state = UploadStateCompleted
-	u.errorMessage = nil
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -167,11 +145,11 @@ func validateUpload(upload *Upload) error {
 	if !validUploadState(upload.state) {
 		return fmt.Errorf("invalid upload state: %s", upload.state)
 	}
-	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending || upload.state == UploadStateStarted) {
-		return fmt.Errorf("root file system entry ID is set but upload has not completed file system scan")
+	if upload.rootFSEntryID != nil && (upload.state == UploadStatePending) {
+		return fmt.Errorf("root file system entry ID is set but upload has not started")
 	}
-	if upload.rootCID != cid.Undef && (upload.state == UploadStatePending || upload.state == UploadStateStarted || upload.state == UploadStateScanned) {
-		return fmt.Errorf("root CID is set but upload has not completed file system scan")
+	if upload.rootCID != cid.Undef && (upload.state == UploadStatePending) {
+		return fmt.Errorf("root CID is set but upload has not started")
 	}
 	if upload.updatedAt.IsZero() {
 		return types.ErrEmpty{Field: "updated at"}
