@@ -219,3 +219,70 @@ func (r *repo) ListConfigurationSources(ctx context.Context, configurationID id.
 	}
 	return sources, nil
 }
+
+func (r *repo) GetResumableUploads(ctx context.Context) ([]*model.Upload, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT
+			id,
+			configuration_id,
+			source_id,
+			created_at,
+			updated_at,
+			state,
+			error_message,
+			root_fs_entry_id,
+			root_cid
+		FROM uploads
+		WHERE state IN ('started', 'scanned', 'dagged', 'canceled')
+		ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var uploads []*model.Upload
+	for rows.Next() {
+		upload, err := model.ReadUploadFromDatabase(func(
+			id,
+			configurationID,
+			sourceID *id.SourceID,
+			createdAt,
+			updatedAt *time.Time,
+			state *model.UploadState,
+			errorMessage **string,
+			rootFSEntryID **id.FSEntryID,
+			rootCID *cid.Cid,
+		) error {
+			var nullErrorMessage sql.NullString
+			err := rows.Scan(
+				id,
+				configurationID,
+				sourceID,
+				util.TimestampScanner(createdAt),
+				util.TimestampScanner(updatedAt),
+				state,
+				&nullErrorMessage,
+				rootFSEntryID,
+				util.DbCid(rootCID),
+			)
+			if err != nil {
+				return err
+			}
+			if nullErrorMessage.Valid {
+				*errorMessage = &nullErrorMessage.String
+			} else {
+				*errorMessage = nil
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		uploads = append(uploads, upload)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return uploads, nil
+}
