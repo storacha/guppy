@@ -153,7 +153,7 @@ func (e *executor) runStartWorker(ctx context.Context, uploadAvailable <-chan st
 
 		// doWork
 		func() error {
-			if e.upload.NeedsStart() {
+			if e.upload.State() == model.UploadStatePending {
 				if err := e.upload.Start(); err != nil {
 					return fmt.Errorf("starting upload: %w", err)
 				}
