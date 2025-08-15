@@ -81,7 +81,7 @@ func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nod
 				executions++
 			case model.DAGScanStateAwaitingChildren:
 				log.Debugf("Handling awaiting children for dag scan %s in state %s", dagScan.FsEntryID(), dagScan.State())
-				if err := a.HandleAwaitingChildren(ctx, dagScan); err != nil {
+				if err := a.handleAwaitingChildren(ctx, dagScan); err != nil {
 					return fmt.Errorf("handling awaiting children for dag scan %s: %w", dagScan.FsEntryID(), err)
 				}
 				// if the scan is now in a state where it can be executed, execute it
@@ -183,8 +183,8 @@ func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Directo
 	return l.(cidlink.Link).Cid, err
 }
 
-// HandleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
-func (a API) HandleAwaitingChildren(ctx context.Context, dagScan model.DAGScan) error {
+// handleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
+func (a API) handleAwaitingChildren(ctx context.Context, dagScan model.DAGScan) error {
 	if dagScan.State() != model.DAGScanStateAwaitingChildren {
 		return fmt.Errorf("DAG scan is not in awaiting children state: %s", dagScan.State())
 	}
