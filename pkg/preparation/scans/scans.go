@@ -7,20 +7,16 @@ import (
 	"fmt"
 	"io/fs"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
-// API is a dependency container for executing scans on a repository.
-type API struct {
-	Repo               Repo
-	UploadSourceLookup UploadSourceLookupFunc
-	SourceAccessor     SourceAccessorFunc
-	WalkerFn           WalkerFunc
-}
+var log = logging.Logger("preparation/scans")
 
 // WalkerFunc is a function type that defines how to walk the file system.
 type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
@@ -31,7 +27,36 @@ type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, 
 // UploadSourceLookupFunc is a function type that retrieves the source ID for a given upload ID.
 type UploadSourceLookupFunc func(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
 
-// ExecuteScan executes a scan on the given source, creating files and directories in the repository.
+// API is a dependency container for executing scans on a repository.
+type API struct {
+	Repo               Repo
+	UploadSourceLookup UploadSourceLookupFunc
+	SourceAccessor     SourceAccessorFunc
+	WalkerFn           WalkerFunc
+}
+
+var _ uploads.ExecuteScansForUploadFunc = API{}.ExecuteScansForUpload
+
+func (a API) ExecuteScansForUpload(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
+	scans, err := a.Repo.ScansForUploadByStatus(ctx, uploadID, model.ScanStatePending, model.ScanStateRunning)
+	if err != nil {
+		return fmt.Errorf("getting scans for upload %s: %w", uploadID, err)
+	}
+
+	for _, scan := range scans {
+		log.Infof("Executing scan %s for upload %s", scan.ID(), uploadID)
+		if err := a.ExecuteScan(ctx, scan, fsEntryCb); err != nil {
+			return fmt.Errorf("executing scan %s: %w", scan.ID(), err)
+		}
+	}
+
+	return nil
+}
+
+// ExecuteScan executes a scan on the given source, creating files and
+// directories in the repository.
+// TODO: This is now only exported for testing purposes. It can be made private,
+// and the tests adjusted to use [ExecuteScansForUpload] instead.
 func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
 	err := scan.Start()
 	if err != nil {

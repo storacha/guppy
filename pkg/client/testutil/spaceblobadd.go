@@ -397,6 +397,10 @@ func SpaceBlobAddClient() (*client.Client, error) {
 	)
 }
 
+type BlobReceiver interface {
+	ReceivedBlobs() [][]byte
+}
+
 // blobPutTransport is an [http.RoundTripper] (an [http.Client] transport) that
 // accepts blob PUTs and remembers what was received.
 type blobPutTransport struct {
@@ -404,6 +408,7 @@ type blobPutTransport struct {
 }
 
 var _ http.RoundTripper = (*blobPutTransport)(nil)
+var _ BlobReceiver = (*blobPutTransport)(nil)
 
 func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	blob, err := io.ReadAll(req.Body)
@@ -417,12 +422,16 @@ func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}, nil
 }
 
+func (r *blobPutTransport) ReceivedBlobs() [][]byte {
+	return r.receivedBlobs
+}
+
 func ReceivedBlobs(putClient *http.Client) [][]byte {
-	transport, ok := putClient.Transport.(*blobPutTransport)
+	transport, ok := putClient.Transport.(BlobReceiver)
 	if !ok {
 		panic("The client isn't tracking PUTs. Create a client with NewPutClient() to use ReceivedBlobs().")
 	}
-	return transport.receivedBlobs
+	return transport.ReceivedBlobs()
 }
 
 // NewPutClient creates a new mock [http.Client] that accepts and tracks any PUT

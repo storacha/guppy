@@ -37,30 +37,10 @@ type API struct {
 // FileAccessorFunc is a function type that retrieves a file for a given fsEntryID.
 type FileAccessorFunc func(ctx context.Context, fsEntryID id.FSEntryID) (fs.File, id.SourceID, string, error)
 
-var _ uploads.RestartDagScansForUploadFunc = API{}.RestartDagScansForUpload
-var _ uploads.RunDagScansForUploadFunc = API{}.RunDagScansForUpload
+var _ uploads.ExecuteDagScansForUploadFunc = API{}.ExecuteDagScansForUpload
 
-// RestartDagScansForUpload restarts all canceled or running DAG scans for the given upload ID.
-func (a API) RestartDagScansForUpload(ctx context.Context, uploadID id.UploadID) error {
-	// restart all canceled/running dag scans
-	restartableDagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStateCanceled, model.DAGScanStateRunning)
-	if err != nil {
-		return fmt.Errorf("getting restartable dag scans for upload %s: %w", uploadID, err)
-	}
-	for _, dagScan := range restartableDagScans {
-		err := dagScan.Restart()
-		if err != nil {
-			return fmt.Errorf("restarting dag scan %s: %w", dagScan.FsEntryID(), err)
-		}
-		if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-			return fmt.Errorf("updating restarted dag scan %s: %w", dagScan.FsEntryID(), err)
-		}
-	}
-	return nil
-}
-
-// RunDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
-func (a API) RunDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
+// ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
+func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
 		dagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending, model.DAGScanStateAwaitingChildren)
 		if err != nil {

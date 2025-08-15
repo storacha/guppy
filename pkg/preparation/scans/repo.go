@@ -10,7 +10,7 @@ import (
 )
 
 type Repo interface {
-	CreateScan(ctx context.Context, uploadID id.UploadID) (*model.Scan, error)
+	ScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.ScanState) ([]*model.Scan, error)
 	FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID) (*model.File, bool, error)
 	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID) (*model.Directory, bool, error)
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
