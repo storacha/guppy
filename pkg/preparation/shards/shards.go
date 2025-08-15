@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
@@ -37,7 +38,7 @@ type API struct {
 	Repo        Repo
 	Client      SpaceBlobAdder
 	Space       did.DID
-	CarForShard func(shard *model.Shard) (io.Reader, error)
+	CarForShard func(ctx context.Context, shard *model.Shard) (io.Reader, error)
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
@@ -116,8 +117,9 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
 	var totalSize uint64 = noRootsHeaderLen
 
-	err := a.Repo.ForEachNodeCIDAndSize(ctx, shardID, func(cid cid.Cid, size uint64) {
-		totalSize += nodeEncodingLength(cid, size)
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
+		totalSize += nodeEncodingLength(node.CID(), node.Size())
+		return nil
 	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
@@ -158,7 +160,7 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	}
 
 	for _, shard := range closedShards {
-		reader, err := a.CarForShard(shard)
+		reader, err := a.CarForShard(ctx, shard)
 		if err != nil {
 			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 		}

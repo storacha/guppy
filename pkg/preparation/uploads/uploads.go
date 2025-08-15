@@ -69,7 +69,7 @@ func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Up
 }
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
-func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) error {
+func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) (cid.Cid, error) {
 	return executor{
 		upload: upload,
 		api:    a,
@@ -93,7 +93,7 @@ func signalWorkAvailable(work chan<- struct{}) {
 	}
 }
 
-func (e executor) execute(ctx context.Context) error {
+func (e executor) execute(ctx context.Context) (cid.Cid, error) {
 	log.Debugf("Executing upload %s in state %s", e.upload.ID(), e.upload.State())
 
 	eg, ctx := errgroup.WithContext(ctx)
@@ -103,10 +103,10 @@ func (e executor) execute(ctx context.Context) error {
 	// This one is just marking it as started, so it can be synchronous.
 	if e.upload.NeedsStart() {
 		if err := e.upload.Start(); err != nil {
-			return fmt.Errorf("starting scan: %w", err)
+			return cid.Undef, fmt.Errorf("starting scan: %w", err)
 		}
 		if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
-			return fmt.Errorf("updating upload: %w", err)
+			return cid.Undef, fmt.Errorf("updating upload: %w", err)
 		}
 	}
 
@@ -133,23 +133,23 @@ func (e executor) execute(ctx context.Context) error {
 	if errors.Is(err, context.Canceled) {
 		log.Debugf("Upload %s was canceled", e.upload.ID())
 		if err := e.upload.Cancel(); err != nil {
-			return fmt.Errorf("cancelling upload: %w", err)
+			return cid.Undef, fmt.Errorf("cancelling upload: %w", err)
 		}
 		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
-			return fmt.Errorf("updating upload after failure: %w", err)
+			return cid.Undef, fmt.Errorf("updating upload after failure: %w", err)
 		}
 	} else if err != nil {
 		log.Errorf("Error executing upload %s: %v", e.upload.ID(), err)
 		if failErr := e.upload.Fail(err.Error()); failErr != nil {
-			return fmt.Errorf("failing upload: %w", failErr)
+			return cid.Undef, fmt.Errorf("failing upload: %w", failErr)
 		}
 		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
-			return fmt.Errorf("updating upload after failure: %w", err)
+			return cid.Undef, fmt.Errorf("updating upload after failure: %w", err)
 		}
 
 	}
 
-	return err
+	return e.upload.RootCID(), err
 }
 
 func (e *executor) runScanWorker(ctx context.Context, dagWork chan<- struct{}) error {
