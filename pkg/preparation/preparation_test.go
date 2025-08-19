@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,8 +31,10 @@ import (
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/sources"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/testutil"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -221,4 +225,66 @@ func TestExecuteUpload(t *testing.T) {
 	)
 
 	require.True(t, areEqual, "expected all files to be present and match")
+}
+
+func TestStreamingShardCAR(t *testing.T) {
+	db := testutil.CreateTestDB(t)
+	repo := sqlrepo.New(db)
+
+	// Setup test data
+	config, err := repo.CreateConfiguration(t.Context(), "Test Config")
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+
+	// Create test files
+	testFiles := []struct {
+		name string
+		data []byte
+	}{
+		{"file1.txt", []byte("hello world from file 1")},
+		{"file2.txt", []byte("this is file 2 with more content")},
+		{"file3.txt", []byte("file 3 has different data here")},
+	}
+
+	for _, tf := range testFiles {
+		filePath := filepath.Join(tempDir, tf.name)
+		err := os.WriteFile(filePath, tf.data, 0644)
+		require.NoError(t, err)
+	}
+
+	source, err := repo.CreateSource(t.Context(), "Test Source", tempDir)
+	require.NoError(t, err)
+
+	uploads, err := repo.CreateUploads(t.Context(), config.ID(), []id.SourceID{source.ID()})
+	require.NoError(t, err)
+	upload := uploads[0]
+
+	shard, err := repo.CreateShard(t.Context(), upload.ID())
+	require.NoError(t, err)
+
+	for _, tf := range testFiles {
+		nodeCID := testutil.RandomCID(t)
+		_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(tf.data)), tf.name, source.ID(), 0)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID)
+		require.NoError(t, err)
+	}
+
+	sourcesAPI := sources.API{
+		Repo: repo,
+		GetLocalFSForPathFn: func(path string) (fs.FS, error) {
+			return os.DirFS(path), nil
+		},
+	}
+
+	// Test streaming CAR creation
+	reader, err := preparation.NewStreamingShardCAR(t.Context(), shard, repo, sourcesAPI)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Greater(t, len(data), 100, "Should produce CAR data")
+
+	t.Logf("Successfully streamed %d bytes", len(data))
 }

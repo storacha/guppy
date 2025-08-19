@@ -100,62 +100,9 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 		Client: client,
 		Space:  space,
 		CarForShard: func(ctx context.Context, shard *shardsmodel.Shard) (io.Reader, error) {
-			var buf bytes.Buffer
-
-			header, err := cbor.DumpObject(
-				ipldcar.CarHeader{
-					Roots:   nil,
-					Version: 1,
-				},
-			)
-			if err != nil {
-				return nil, fmt.Errorf("dumping CAR header: %w", err)
-			}
-
-			err = util.LdWrite(&buf, header)
-			if err != nil {
-				return nil, fmt.Errorf("writing CAR header: %w", err)
-			}
-
-			nr, err := dags.NewNodeReader(repo, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
-				source, err := repo.GetSourceByID(ctx, sourceID)
-				if err != nil {
-					return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
-				}
-
-				fs, err := sourcesAPI.Access(source)
-				if err != nil {
-					return nil, fmt.Errorf("failed to access source %s: %w", sourceID, err)
-				}
-
-				f, err := fs.Open(path)
-				if err != nil {
-					return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
-				}
-				return f, nil
-			}, false)
-
-			err = repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
-				data, err := nr.GetData(ctx, node)
-				if err != nil {
-					return fmt.Errorf("getting data for node %s: %w", node.CID(), err)
-				}
-
-				err = util.LdWrite(&buf, []byte(node.CID().KeyString()), data)
-				if err != nil {
-					return fmt.Errorf("writing CAR block for CID %s: %w", node.CID(), err)
-				}
-
-				return nil
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
-			}
-
-			return bytes.NewReader(buf.Bytes()), nil
+			return NewStreamingShardCAR(ctx, shard, repo, sourcesAPI)
 		},
 	}
-
 	uploadsAPI = uploads.API{
 		Repo: repo,
 		RunNewScan: func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error) {
@@ -221,4 +168,152 @@ func (a API) CreateUploads(ctx context.Context, configurationID id.Configuration
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
 	return a.Uploads.ExecuteUpload(ctx, upload)
+}
+
+type streamingShardCAR struct {
+	ctx        context.Context
+	repo       Repo
+	nodeReader *dags.NodeReader
+	shardID    id.ShardID
+
+	header     []byte
+	headerSent bool
+	streamErr  error
+
+	// Streaming state
+	currentData []byte
+	nodes       []dagsmodel.Node
+	nodeIndex   int
+	finished    bool
+}
+
+// NewStreamingShardCAR creates a memory-efficient CAR reader for a shard.
+func NewStreamingShardCAR(ctx context.Context, shard *shardsmodel.Shard, repo Repo, sourcesAPI sources.API) (io.Reader, error) {
+	nodeReader, err := dags.NewNodeReader(repo, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+		source, err := repo.GetSourceByID(ctx, sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
+		}
+
+		fsys, err := sourcesAPI.Access(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to access source %s: %w", sourceID, err)
+		}
+
+		f, err := fsys.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
+		}
+		return f, nil
+	}, false)
+	if err != nil {
+		return nil, fmt.Errorf("creating node reader: %w", err)
+	}
+
+	header, err := buildCARHeader()
+	if err != nil {
+		return nil, fmt.Errorf("building CAR header: %w", err)
+	}
+
+	var nodes []dagsmodel.Node
+	err = repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+		nodes = append(nodes, node)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getting nodes for shard: %w", err)
+	}
+
+	return &streamingShardCAR{
+		ctx:        ctx,
+		repo:       repo,
+		nodeReader: nodeReader,
+		shardID:    shard.ID(),
+		header:     header,
+		nodes:      nodes,
+		nodeIndex:  0,
+	}, nil
+}
+
+// Loads data on-demand based on buffer size provided by caller.
+func (s *streamingShardCAR) Read(p []byte) (n int, err error) {
+	if s.streamErr != nil {
+		return 0, s.streamErr
+	}
+
+	if s.finished {
+		return 0, io.EOF
+	}
+
+	if err := s.ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	if !s.headerSent {
+		copied := copy(p, s.header)
+		s.header = s.header[copied:]
+		if len(s.header) == 0 {
+			s.headerSent = true
+		}
+		if copied > 0 {
+			return copied, nil
+		}
+	}
+
+	if len(s.currentData) == 0 {
+		if s.nodeIndex >= len(s.nodes) {
+			s.finished = true
+			return 0, io.EOF
+		}
+
+		// Load data for current node only one node at a time
+		nodeData, err := s.nodeReader.GetData(s.ctx, s.nodes[s.nodeIndex])
+		if err != nil {
+			return 0, fmt.Errorf("getting data for node %s: %w", s.nodes[s.nodeIndex].CID(), err)
+		}
+
+		s.currentData = s.buildBlock(s.nodes[s.nodeIndex], nodeData)
+		if s.streamErr != nil {
+			return 0, s.streamErr
+		}
+		s.nodeIndex++
+	}
+
+	copied := copy(p, s.currentData)
+	s.currentData = s.currentData[copied:]
+
+	return copied, nil
+}
+
+func buildCARHeader() ([]byte, error) {
+	header, err := cbor.DumpObject(
+		ipldcar.CarHeader{
+			Roots:   nil,
+			Version: 1,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("encoding CAR header: %w", err)
+	}
+
+	var buf bytes.Buffer
+	err = util.LdWrite(&buf, header)
+	if err != nil {
+		return nil, fmt.Errorf("writing length-delimited CAR header: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func (s *streamingShardCAR) buildBlock(node dagsmodel.Node, data []byte) []byte {
+	var buf bytes.Buffer
+
+	cidBytes := node.CID().Bytes()
+	err := util.LdWrite(&buf, cidBytes, data)
+	if err != nil {
+		s.streamErr = fmt.Errorf("writing CAR block for %s: %w", node.CID(), err)
+		return nil
+	}
+
+	return buf.Bytes()
 }
