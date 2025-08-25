@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -21,7 +22,9 @@ type Repo interface {
 	UpdateUpload(ctx context.Context, upload *uploadmodel.Upload) error
 	// CIDForFSEntry retrieves the CID for a file system entry by its ID.
 	CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error)
-	// CreateDAGScanForFSEntry creates a new DAG scan for a file system entry.
+	// CreateScan creates a new scan for an upload.
+	CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel.Scan, error)
+	// CreateDAGScan creates a new DAG scan for a file system entry.
 	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID) (dagmodel.DAGScan, error)
 	// ListConfigurationSources lists all configuration sources for the given configuration ID.
 	ListConfigurationSources(ctx context.Context, configID id.ConfigurationID) ([]id.SourceID, error)
