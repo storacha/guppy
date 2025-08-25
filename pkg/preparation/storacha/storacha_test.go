@@ -3,12 +3,10 @@ package storacha_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"testing"
 
-	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/testutil"
@@ -20,27 +18,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
-
-// (Until the repo has a way to query for this itself...)
-func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.ShardID) []cid.Cid {
-	rows, err := db.QueryContext(ctx, `SELECT node_cid FROM nodes_in_shards WHERE shard_id = ?`, shardID)
-	require.NoError(t, err)
-	defer rows.Close()
-
-	var foundNodeCids []cid.Cid
-	for rows.Next() {
-		var foundNodeCid cid.Cid
-		err = rows.Scan(util.DbCid(&foundNodeCid))
-		require.NoError(t, err)
-		foundNodeCids = append(foundNodeCids, foundNodeCid)
-	}
-	return foundNodeCids
-}
 
 type mockSpaceBlobAdder struct {
 	T           *testing.T
@@ -75,13 +56,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		spaceBlobAdder := mockSpaceBlobAdder{T: t}
 
 		carForShard := func(ctx context.Context, shard *model.Shard) (io.Reader, error) {
-			nodes := nodesInShard(ctx, t, db, shard.ID())
-			b := []byte("CAR CONTAINING NODES:")
-			for _, n := range nodes {
-				b = append(b, ' ')
-				b = append(b, []byte(n.String())...)
-			}
-			return bytes.NewReader(b), nil
+			return bytes.NewReader([]byte(fmt.Sprintf("CAR OF SHARD: %s", shard.ID()))), nil
 		}
 
 		api := storacha.API{
@@ -122,6 +97,16 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
 		require.NoError(t, err)
 
+		shards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+		require.NoError(t, err)
+		require.Len(t, shards, 1)
+		firstShard := shards[0]
+
+		shards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+		require.NoError(t, err)
+		require.Len(t, shards, 1)
+		secondShard := shards[0]
+
 		// Upload shards that are ready to go.
 		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID())
 		require.NoError(t, err)
@@ -129,7 +114,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// This run should `space/blob/add` the first, closed shard.
 		require.Len(t, spaceBlobAdder.invocations, 1)
 		require.NotEmpty(t, spaceBlobAdder.invocations[0].contentRead)
-		require.Equal(t, fmt.Appendf(nil, "CAR CONTAINING NODES: %s %s", nodeCid1, nodeCid2), spaceBlobAdder.invocations[0].contentRead)
+		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", firstShard.ID()), spaceBlobAdder.invocations[0].contentRead)
 		require.Equal(t, spaceDID, spaceBlobAdder.invocations[0].spaceAddedTo)
 
 		// Now close the upload shards and run it again.
@@ -141,7 +126,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, spaceBlobAdder.invocations, 2)
 		require.NotEmpty(t, spaceBlobAdder.invocations[1].contentRead)
-		require.Equal(t, fmt.Appendf(nil, "CAR CONTAINING NODES: %s", nodeCid3), spaceBlobAdder.invocations[1].contentRead)
+		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", secondShard.ID()), spaceBlobAdder.invocations[1].contentRead)
 		require.Equal(t, spaceDID, spaceBlobAdder.invocations[1].spaceAddedTo)
 	})
 }
