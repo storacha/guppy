@@ -1,13 +1,19 @@
 package shards
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ipfs/go-cid"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	logging "github.com/ipfs/go-log/v2"
+	ipldcar "github.com/ipld/go-car"
+	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
+	"github.com/storacha/guppy/pkg/preparation/dags"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -22,7 +28,8 @@ var log = logging.Logger("preparation/shards")
 
 // API provides methods to interact with the Shards in the repository.
 type API struct {
-	Repo Repo
+	Repo       Repo
+	NodeReader *dags.NodeReader
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
@@ -134,4 +141,42 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	}
 
 	return closed, nil
+}
+
+func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+	var buf bytes.Buffer
+
+	header, err := cbor.DumpObject(
+		ipldcar.CarHeader{
+			Roots:   nil,
+			Version: 1,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("dumping CAR header: %w", err)
+	}
+
+	err = util.LdWrite(&buf, header)
+	if err != nil {
+		return nil, fmt.Errorf("writing CAR header: %w", err)
+	}
+
+	err = a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+		data, err := a.NodeReader.GetData(ctx, node)
+		if err != nil {
+			return fmt.Errorf("getting data for node %s: %w", node.CID(), err)
+		}
+
+		err = util.LdWrite(&buf, []byte(node.CID().KeyString()), data)
+		if err != nil {
+			return fmt.Errorf("writing CAR block for CID %s: %w", node.CID(), err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
+	}
+
+	return bytes.NewReader(buf.Bytes()), nil
 }

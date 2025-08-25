@@ -1,25 +1,18 @@
 package preparation
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 
 	"github.com/ipfs/go-cid"
-	cbor "github.com/ipfs/go-ipld-cbor"
 	logging "github.com/ipfs/go-log/v2"
-	ipldcar "github.com/ipld/go-car"
-	"github.com/ipld/go-car/util"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags"
-	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/shards"
-	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/spaces"
@@ -96,69 +89,37 @@ func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) 
 		FileAccessor: scansAPI.OpenFileByID,
 	}
 
+	nr, err := dags.NewNodeReader(repo, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+		source, err := repo.GetSourceByID(ctx, sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
+		}
+
+		fs, err := sourcesAPI.Access(source)
+		if err != nil {
+			return nil, fmt.Errorf("failed to access source %s: %w", sourceID, err)
+		}
+
+		f, err := fs.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
+		}
+		return f, nil
+	}, false)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create node reader: %v", err))
+	}
+
 	shardsAPI := shards.API{
-		Repo: repo,
+		Repo:       repo,
+		NodeReader: nr,
 	}
 
 	storachaAPI := storacha.API{
-		Repo:   repo,
-		Client: client,
-		Space:  space,
-		CarForShard: func(ctx context.Context, shard *shardsmodel.Shard) (io.Reader, error) {
-			var buf bytes.Buffer
-
-			header, err := cbor.DumpObject(
-				ipldcar.CarHeader{
-					Roots:   nil,
-					Version: 1,
-				},
-			)
-			if err != nil {
-				return nil, fmt.Errorf("dumping CAR header: %w", err)
-			}
-
-			err = util.LdWrite(&buf, header)
-			if err != nil {
-				return nil, fmt.Errorf("writing CAR header: %w", err)
-			}
-
-			nr, err := dags.NewNodeReader(repo, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
-				source, err := repo.GetSourceByID(ctx, sourceID)
-				if err != nil {
-					return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
-				}
-
-				fs, err := sourcesAPI.Access(source)
-				if err != nil {
-					return nil, fmt.Errorf("failed to access source %s: %w", sourceID, err)
-				}
-
-				f, err := fs.Open(path)
-				if err != nil {
-					return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
-				}
-				return f, nil
-			}, false)
-
-			err = repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
-				data, err := nr.GetData(ctx, node)
-				if err != nil {
-					return fmt.Errorf("getting data for node %s: %w", node.CID(), err)
-				}
-
-				err = util.LdWrite(&buf, []byte(node.CID().KeyString()), data)
-				if err != nil {
-					return fmt.Errorf("writing CAR block for CID %s: %w", node.CID(), err)
-				}
-
-				return nil
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
-			}
-
-			return bytes.NewReader(buf.Bytes()), nil
-		},
+		Repo:        repo,
+		Client:      client,
+		Space:       space,
+		CarForShard: shardsAPI.CarForShard,
 	}
 
 	uploadsAPI = uploads.API{
