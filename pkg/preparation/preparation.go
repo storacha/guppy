@@ -24,6 +24,7 @@ import (
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/spaces"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
+	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -40,6 +41,8 @@ type Repo interface {
 	shards.Repo
 }
 
+type SpaceBlobAdder = storacha.SpaceBlobAdder
+
 type API struct {
 	Spaces  spaces.API
 	Uploads uploads.API
@@ -55,7 +58,7 @@ type config struct {
 	getLocalFSForPathFn func(path string) (fs.FS, error)
 }
 
-func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...Option) API {
+func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
 	}
@@ -94,6 +97,10 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	}
 
 	shardsAPI := shards.API{
+		Repo: repo,
+	}
+
+	storachaAPI := storacha.API{
 		Repo:   repo,
 		Client: client,
 		Space:  space,
@@ -160,7 +167,7 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 		ExecuteDagScansForUpload:    dagsAPI.ExecuteDagScansForUpload,
 		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
 		CloseUploadShards:           shardsAPI.CloseUploadShards,
-		SpaceBlobAddShardsForUpload: shardsAPI.SpaceBlobAddShardsForUpload,
+		SpaceBlobAddShardsForUpload: storachaAPI.SpaceBlobAddShardsForUpload,
 	}
 
 	return API{
