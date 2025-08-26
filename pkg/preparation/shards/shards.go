@@ -13,7 +13,6 @@ import (
 	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
-	"github.com/storacha/guppy/pkg/preparation/dags"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -26,10 +25,14 @@ const noRootsHeaderLen = 17
 
 var log = logging.Logger("preparation/shards")
 
+type NodeDataGetter interface {
+	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
+}
+
 // API provides methods to interact with the Shards in the repository.
 type API struct {
 	Repo       Repo
-	NodeReader *dags.NodeReader
+	NodeReader NodeDataGetter
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
