@@ -145,7 +145,14 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 type stubNodeReader struct{}
 
 func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error) {
-	return fmt.Appendf(nil, "BLOCK DATA: %s", node.(*dagsmodel.RawNode).Path()), nil
+	rawNode := node.(*dagsmodel.RawNode)
+	data := fmt.Appendf(nil, "BLOCK DATA: %s", rawNode.Path())
+	if rawNode.Size() != uint64(len(data)) {
+		// The size in FindOrCreateRawNode is a bit of a magic number, but at least
+		// this can tell us early if we need to change it.
+		panic(fmt.Errorf("size for node %s (%s) should be set to %d, not %d", rawNode.CID(), rawNode.Path(), len(data), rawNode.Size()))
+	}
+	return data, nil
 }
 
 func TestCarForShard(t *testing.T) {
@@ -164,11 +171,11 @@ func TestCarForShard(t *testing.T) {
 	nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
 	nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 16, spaceDID, "dir/file1", id.New(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 21, spaceDID, "dir/file1", id.New(), 0)
 	require.NoError(t, err)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 16, spaceDID, "dir/file2", id.New(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 21, spaceDID, "dir/file2", id.New(), 0)
 	require.NoError(t, err)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 16, spaceDID, "dir/file3", id.New(), 0)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
 	require.NoError(t, err)
 
 	shard, err := repo.CreateShard(t.Context(), uploadID)
@@ -208,13 +215,13 @@ func TestCarForShard(t *testing.T) {
 
 	b, err = bs.Get(t.Context(), nodeCid1)
 	require.NoError(t, err)
-	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file1"), b.RawData())
+	require.Equal(t, []byte("BLOCK DATA: dir/file1"), b.RawData())
 
 	b, err = bs.Get(t.Context(), nodeCid2)
 	require.NoError(t, err)
-	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file2"), b.RawData())
+	require.Equal(t, []byte("BLOCK DATA: dir/file2"), b.RawData())
 
 	b, err = bs.Get(t.Context(), nodeCid3)
 	require.NoError(t, err)
-	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file3"), b.RawData())
+	require.Equal(t, []byte("BLOCK DATA: dir/dir2/file3"), b.RawData())
 }
