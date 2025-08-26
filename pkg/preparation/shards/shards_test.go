@@ -1,12 +1,18 @@
 package shards_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"testing"
 
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-car/v2/blockstore"
 	configurationsmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
+	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -132,4 +138,75 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 		foundNodeCids = append(foundNodeCids, foundNodeCid)
 	}
 	return foundNodeCids
+}
+
+type stubNodeReader struct{}
+
+func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error) {
+	return fmt.Appendf(nil, "BLOCK DATA: %s", node.(*dagsmodel.RawNode).Path()), nil
+}
+
+func TestCarForShard(t *testing.T) {
+	db := testutil.CreateTestDB(t)
+	repo := sqlrepo.New(db)
+	api := shards.API{
+		Repo:       repo,
+		NodeReader: stubNodeReader{},
+	}
+
+	uploadID := id.New()
+
+	node1, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 16, "dir/file1", id.New(), 0)
+	require.NoError(t, err)
+	node2, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 16, "dir/file2", id.New(), 0)
+	require.NoError(t, err)
+	node3, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 16, "dir/file3", id.New(), 0)
+	require.NoError(t, err)
+
+	shard, err := repo.CreateShard(t.Context(), uploadID)
+
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), node1.CID())
+	require.NoError(t, err)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), node2.CID())
+	require.NoError(t, err)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), node3.CID())
+	require.NoError(t, err)
+
+	carReader, err := api.CarForShard(t.Context(), shard)
+	require.NoError(t, err)
+
+	// Read in the entire CAR, so we can create an [io.ReaderAt] for the
+	// blockstore. In the future, the reader we create could be an [io.ReaderAt]
+	// itself, as it technically knows enough information to jump around. However,
+	// that's complex, and in our use case, we're going to end up reading the
+	// whole thing anyway to store it in Storacha.
+	carBytes, err := io.ReadAll(carReader)
+	require.NoError(t, err)
+	bufferedCarReader := bytes.NewReader(carBytes)
+
+	// Try to read the CAR bytes as a CAR.
+	bs, err := blockstore.NewReadOnly(bufferedCarReader, nil)
+	require.NoError(t, err)
+
+	cidsCh, err := bs.AllKeysChan(t.Context())
+	require.NoError(t, err)
+	var cids []cid.Cid
+	for cid := range cidsCh {
+		cids = append(cids, cid)
+	}
+	require.Equal(t, []cid.Cid{node1.CID(), node2.CID(), node3.CID()}, cids)
+
+	var b blocks.Block
+
+	b, err = bs.Get(t.Context(), node1.CID())
+	require.NoError(t, err)
+	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file1"), b.RawData())
+
+	b, err = bs.Get(t.Context(), node2.CID())
+	require.NoError(t, err)
+	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file2"), b.RawData())
+
+	b, err = bs.Get(t.Context(), node3.CID())
+	require.NoError(t, err)
+	require.Equal(t, fmt.Appendf(nil, "BLOCK DATA: %s", "dir/file3"), b.RawData())
 }
