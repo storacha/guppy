@@ -3,6 +3,7 @@ package shards
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -20,10 +21,31 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
-// Byte length of a CBOR encoded CAR header with zero roots.
-const noRootsHeaderLen = 17
-
 var log = logging.Logger("preparation/shards")
+
+// A CAR header with zero roots.
+var noRootsHeader []byte
+
+func init() {
+	var err error
+	noRootsHeaderWithoutLength, err := cbor.Encode(
+		ipldcar.CarHeader{
+			Roots:   nil,
+			Version: 1,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to encode CAR header: %v", err))
+	}
+
+	var buf bytes.Buffer
+	err = util.LdWrite(&buf, noRootsHeaderWithoutLength)
+	if err != nil {
+		panic(fmt.Sprintf("failed to length-delimit CAR header: %v", err))
+	}
+
+	noRootsHeader = buf.Bytes()
+}
 
 type NodeDataGetter interface {
 	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
@@ -108,7 +130,7 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 }
 
 func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
-	var totalSize uint64 = noRootsHeaderLen
+	var totalSize uint64 = uint64(len(noRootsHeader))
 
 	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
 		totalSize += nodeEncodingLength(node.CID(), node.Size())
@@ -147,39 +169,65 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 }
 
 func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, error) {
-	var buf bytes.Buffer
+	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
+	err := a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
+		cidReader := bytes.NewReader(node.CID().Bytes())
+		newReader := NewLazyReader(func() ([]byte, error) {
+			data, err := a.NodeReader.GetData(ctx, node)
+			if err != nil {
+				return nil, fmt.Errorf("getting data for node %s: %w", node.CID(), err)
+			}
+			return data, nil
+		})
 
-	header, err := cbor.DumpObject(
-		ipldcar.CarHeader{
-			Roots:   nil,
-			Version: 1,
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dumping CAR header: %w", err)
-	}
-
-	err = util.LdWrite(&buf, header)
-	if err != nil {
-		return nil, fmt.Errorf("writing CAR header: %w", err)
-	}
-
-	err = a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
-		data, err := a.NodeReader.GetData(ctx, node)
-		if err != nil {
-			return fmt.Errorf("getting data for node %s: %w", node.CID(), err)
-		}
-
-		err = util.LdWrite(&buf, []byte(node.CID().KeyString()), data)
-		if err != nil {
-			return fmt.Errorf("writing CAR block for CID %s: %w", node.CID(), err)
-		}
-
+		readers = append(readers, lengthReader, cidReader, newReader)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
 	}
 
-	return bytes.NewReader(buf.Bytes()), nil
+	return io.MultiReader(readers...), nil
+}
+
+func lengthVarint(size uint64) []byte {
+	buf := make([]byte, 8)
+	n := binary.PutUvarint(buf, size)
+	return buf[:n]
+}
+
+// LazyReader calls a function to provide its bytes the first time it's
+// necessary, then holds the value buffered in memory.
+type LazyReader struct {
+	fn func() ([]byte, error)
+	r  *bytes.Reader
+}
+
+// LazyReader implements io.Reader. It could implement anything that
+// [bytes.Reader] does, but we'll have to implement each method we want
+// separately.
+var _ io.Reader = (*LazyReader)(nil)
+
+// NewLazyReader creates a new [LazyReader] with the given function
+func NewLazyReader(fn func() ([]byte, error)) *LazyReader {
+	return &LazyReader{fn: fn}
+}
+
+func (lr *LazyReader) materialize() error {
+	if lr.r == nil {
+		data, err := lr.fn()
+		if err != nil {
+			return err
+		}
+		lr.r = bytes.NewReader(data)
+	}
+	return nil
+}
+
+func (lr *LazyReader) Read(p []byte) (n int, err error) {
+	if err := lr.materialize(); err != nil {
+		return 0, err
+	}
+	return lr.r.Read(p)
 }
