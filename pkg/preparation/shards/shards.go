@@ -168,9 +168,9 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
-func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
 		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
 		cidReader := bytes.NewReader(node.CID().Bytes())
 		newReader := NewLazyReader(func() ([]byte, error) {
@@ -185,7 +185,7 @@ func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, er
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
+		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
 	return io.MultiReader(readers...), nil

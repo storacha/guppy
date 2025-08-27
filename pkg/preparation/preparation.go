@@ -34,7 +34,7 @@ type Repo interface {
 	shards.Repo
 }
 
-type SpaceBlobAdder = storacha.SpaceBlobAdder
+type StorachaClient = storacha.Client
 
 type API struct {
 	Spaces  spaces.API
@@ -51,7 +51,7 @@ type config struct {
 	getLocalFSForPathFn func(path string) (fs.FS, error)
 }
 
-func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) API {
+func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
 	}

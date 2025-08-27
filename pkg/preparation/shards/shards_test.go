@@ -163,7 +163,6 @@ func TestCarForShard(t *testing.T) {
 		NodeReader: stubNodeReader{},
 	}
 
-	uploadID := id.New()
 	spaceDID, err := did.Parse("did:storacha:space:example")
 	require.NoError(t, err)
 
@@ -178,16 +177,16 @@ func TestCarForShard(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
 	require.NoError(t, err)
 
-	shard, err := repo.CreateShard(t.Context(), uploadID)
+	shardID := id.New()
 
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid1, spaceDID)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid2, spaceDID)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid3, spaceDID)
 	require.NoError(t, err)
 
-	carReader, err := api.CarForShard(t.Context(), shard)
+	carReader, err := api.CarForShard(t.Context(), shardID)
 	require.NoError(t, err)
 
 	// Read in the entire CAR, so we can create an [io.ReaderAt] for the

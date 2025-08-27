@@ -44,14 +44,14 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// spaceBlobAddClient is a [storacha.SpaceBlobAdder] that wraps a
+// spaceBlobAddClient is a [storacha.Client] that wraps a
 // [client.Client] to use a custom putClient.
 type spaceBlobAddClient struct {
 	*client.Client
 	putClient *http.Client
 }
 
-var _ storacha.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
+var _ storacha.Client = (*spaceBlobAddClient)(nil)
 
 func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
