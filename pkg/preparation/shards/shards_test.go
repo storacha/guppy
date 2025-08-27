@@ -161,8 +161,6 @@ func TestCarForShard(t *testing.T) {
 		NodeReader: stubNodeReader{},
 	}
 
-	uploadID := id.New()
-
 	node1, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 21, "dir/file1", id.New(), 0)
 	require.NoError(t, err)
 	node2, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 21, "dir/file2", id.New(), 0)
@@ -170,16 +168,16 @@ func TestCarForShard(t *testing.T) {
 	node3, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t), 26, "dir/dir2/file3", id.New(), 0)
 	require.NoError(t, err)
 
-	shard, err := repo.CreateShard(t.Context(), uploadID)
+	shardID := id.New()
 
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), node1.CID())
+	err = repo.AddNodeToShard(t.Context(), shardID, node1.CID())
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), node2.CID())
+	err = repo.AddNodeToShard(t.Context(), shardID, node2.CID())
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), node3.CID())
+	err = repo.AddNodeToShard(t.Context(), shardID, node3.CID())
 	require.NoError(t, err)
 
-	carReader, err := api.CarForShard(t.Context(), shard)
+	carReader, err := api.CarForShard(t.Context(), shardID)
 	require.NoError(t, err)
 
 	// Read in the entire CAR, so we can create an [io.ReaderAt] for the
