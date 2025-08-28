@@ -14,11 +14,14 @@ import (
 	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
+	"github.com/storacha/go-libstoracha/blobindex"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
+	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var log = logging.Logger("preparation/shards")
@@ -59,6 +62,8 @@ type API struct {
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
+var _ storacha.CarForShardFunc = API{}.CarForShard
+var _ storacha.IndexForUploadFunc = API{}.IndexForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	space, err := a.Repo.GetSpaceByUploadID(ctx, uploadID)
@@ -214,4 +219,43 @@ func (lr *LazyReader) Read(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return lr.r.Read(p)
+}
+
+func (a API) IndexForUpload(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
+	if upload.RootCID() == cid.Undef {
+		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
+	}
+
+	index := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, 0)
+
+	shards, err := a.Repo.ShardsForUploadByStatus(ctx, upload.ID(), model.ShardStateAdded)
+	if err != nil {
+		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
+	}
+
+	for _, s := range shards {
+		if s.Digest() == nil || len(s.Digest()) == 0 {
+			return nil, fmt.Errorf("added shard %s has no digest set", s.ID())
+		}
+
+		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
+			position := blobindex.Position{
+				Offset: shardOffset,
+				Length: node.Size(),
+			}
+			index.SetSlice(s.Digest(), node.CID().Hash(), position)
+
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", s.ID(), err)
+		}
+	}
+
+	indexReader, err := blobindex.Archive(index)
+	if err != nil {
+		return nil, fmt.Errorf("archiving index for upload %s: %w", upload.ID(), err)
+	}
+
+	return indexReader, nil
 }

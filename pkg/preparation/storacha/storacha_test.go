@@ -21,6 +21,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,8 +115,8 @@ func TestAddIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		indexForUpload := func(ctx context.Context, uploadID id.UploadID) (io.Reader, error) {
-			return bytes.NewReader([]byte(fmt.Sprintf("INDEX OF UPLOAD: %s", uploadID))), nil
+		indexForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
+			return bytes.NewReader([]byte(fmt.Sprintf("INDEX OF UPLOAD: %s", upload.ID()))), nil
 		}
 
 		api := storacha.API{

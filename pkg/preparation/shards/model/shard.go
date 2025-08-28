@@ -72,11 +72,12 @@ func (s *Shard) Close() error {
 	return nil
 }
 
-func (s *Shard) Added() error {
+func (s *Shard) Added(dig multihash.Multihash) error {
 	if s.state != ShardStateClosed {
 		return fmt.Errorf("cannot add shard in state %s", s.state)
 	}
 	s.state = ShardStateAdded
+	s.digest = dig
 	return nil
 }
 
@@ -133,4 +134,8 @@ func (s *Shard) State() ShardState {
 
 func (s *Shard) Size() uint64 {
 	return s.size
+}
+
+func (s *Shard) Digest() multihash.Multihash {
+	return s.digest
 }
