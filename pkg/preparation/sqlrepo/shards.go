@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -21,17 +22,17 @@ func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Sh
 		return nil, err
 	}
 
-	err = model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
+	err = model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, digest multihash.Multihash, state model.ShardState) error {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO shards (
 				id,
 				upload_id,
-				cid,
+				digest,
 				state
 			) VALUES (?, ?, ?, ?)`,
 			id,
 			uploadID,
-			util.DbCid(&cid),
+			digest,
 			state,
 		)
 		return err
@@ -48,7 +49,7 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 		SELECT
 			id,
 			upload_id,
-			cid,
+			digest,
 			state
 		FROM shards
 		WHERE upload_id = ?
@@ -66,10 +67,10 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 		shard, err := model.ReadShardFromDatabase(func(
 			id *id.ShardID,
 			uploadID *id.UploadID,
-			cid *cid.Cid,
+			digest *multihash.Multihash,
 			state *model.ShardState,
 		) error {
-			return rows.Scan(id, uploadID, util.DbCid(cid), state)
+			return rows.Scan(id, uploadID, util.DbBytes(digest), state)
 		})
 		if err != nil {
 			return nil, err
@@ -156,17 +157,17 @@ func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(d
 
 // UpdateShard updates a DAG scan in the repository.
 func (r *repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
-	return model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
+	return model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, digest multihash.Multihash, state model.ShardState) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE shards
 			SET id = ?,
 			    upload_id = ?,
-			    cid = ?,
+			    digest = ?,
 			    state = ?
 			WHERE id = ?`,
 			id,
 			uploadID,
-			util.DbCid(&cid),
+			digest,
 			state,
 			id,
 		)

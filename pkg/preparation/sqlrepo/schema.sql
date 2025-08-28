@@ -149,9 +149,9 @@ CREATE TABLE IF NOT EXISTS shards (
   id BLOB PRIMARY KEY,
   -- The upload this shard belongs to
   upload_id BLOB NOT NULL,
-  -- The CID of the completed shard
+  -- The multihash digest of the completed shard
   -- If NULL, has not yet been calculated (and maybe cannot be, if still
   -- accepting new nodes)
-  cid BLOB,
+  digest BLOB,
   state TEXT NOT NULL
 ) STRICT;

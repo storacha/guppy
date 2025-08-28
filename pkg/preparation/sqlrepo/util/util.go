@@ -10,6 +10,12 @@ import (
 	"github.com/storacha/go-ucanto/did"
 )
 
+// timestampScanner returns a [sql.Scanner] that scans a timestamp (as an
+// integer of Unix time in seconds) into the given [time.Time] pointer.
+func TimestampScanner(t *time.Time) tsScanner {
+	return tsScanner{dst: t}
+}
+
 type tsScanner struct {
 	dst *time.Time
 }
@@ -30,12 +36,9 @@ func (ts tsScanner) Scan(value any) error {
 	return nil
 }
 
-// timestampScanner returns a sql.Scanner that scans a timestamp (as an integer
-// of Unix time in seconds) into the given time.Time pointer.
-func TimestampScanner(t *time.Time) tsScanner {
-	return tsScanner{dst: t}
-}
-
+// DbCid returns a [sql.Scanner] that scans a CID from a `[]byte` DB value (a
+// `BLOB`), and a [driver.Valuer] that writes a CID to the DB as a `[]byte` (a
+// `BLOB`), treating [cid.Undef] as `NULL`, and vice versa.
 func DbCid(cid *cid.Cid) dbCid {
 	return dbCid{cid: cid}
 }
@@ -106,5 +109,44 @@ func (dd dbDID) Scan(value any) error {
 	default:
 		return fmt.Errorf("unsupported type for did scanning: %T (%v)", v, v)
 	}
+	return nil
+}
+
+// DbBytes returns a [sql.Scanner] that scans a type with underlying type
+// `[]byte` from a `[]byte` DB value (a `BLOB`), and a [driver.Valuer] that
+// writes that type to the DB as a `[]byte` (a `BLOB`), treating nil and empty
+// slices as `NULL`, and vice versa.
+func DbBytes[V ~[]byte](v *V) dbBytes[V] {
+	return dbBytes[V]{v: v}
+}
+
+type dbBytes[V ~[]byte] struct {
+	v *V
+}
+
+var _ driver.Valuer = dbBytes[[]byte]{}
+var _ sql.Scanner = dbBytes[[]byte]{}
+
+func (db dbBytes[V]) Value() (driver.Value, error) {
+	if db.v == nil || *db.v == nil || len(*db.v) == 0 {
+		return nil, nil // Return nil for nil or empty slices
+	}
+	return *db.v, nil
+}
+
+func (db dbBytes[V]) Scan(value any) error {
+	var zero V
+
+	if value == nil {
+		*db.v = zero
+		return nil
+	}
+
+	b, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("unsupported type for TK scanning: %T (%v)", value, value)
+	}
+	*db.v = b
+
 	return nil
 }
