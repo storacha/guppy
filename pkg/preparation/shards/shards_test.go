@@ -56,6 +56,11 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.Len(t, openShards, 1)
 	firstShard := openShards[0]
 
+	// The CAR header is 18 bytes
+	// The varint length prefix for a ~1<<14 block is 3 bytes
+	// The CIDv1 is 36 bytes
+	require.Equal(t, uint64(18+3+36+(1<<14)), firstShard.Size())
+
 	foundNodeCids := nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1.(cidlink.Link).Cid}, foundNodeCids)
 
@@ -73,6 +78,9 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
 	require.Equal(t, firstShard.ID(), openShards[0].ID())
+	firstShard = openShards[0] // with fresh data from DB
+
+	require.Equal(t, uint64(18+3+36+(1<<14)+3+36+(1<<14)), firstShard.Size())
 
 	foundNodeCids = nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1.(cidlink.Link).Cid, nodeCid2.(cidlink.Link).Cid}, foundNodeCids)
@@ -101,6 +109,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	secondShard := openShards[0]
 	require.NotEqual(t, firstShard.ID(), secondShard.ID())
 
+	require.Equal(t, uint64(18+3+36+(1<<15)), secondShard.Size())
 	foundNodeCids = nodesInShard(t.Context(), t, db, secondShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid3.(cidlink.Link).Cid}, foundNodeCids)
 
@@ -177,16 +186,16 @@ func TestCarForShard(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
 	require.NoError(t, err)
 
-	shardID := id.New()
+	shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
 
-	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid1, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid2, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shardID, nodeCid3, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
 
-	carReader, err := api.CarForShard(t.Context(), shardID)
+	carReader, err := api.CarForShard(t.Context(), shard.ID())
 	require.NoError(t, err)
 
 	// Read in the entire CAR, so we can create an [io.ReaderAt] for the

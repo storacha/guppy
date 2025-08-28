@@ -70,6 +70,14 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
+	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, space.DID())
+	if err != nil {
+		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+	}
+	if node == nil {
+		return false, fmt.Errorf("node %s not found", nodeCID)
+	}
+
 	var shard *model.Shard
 	var closed bool
 
@@ -77,7 +85,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := a.roomInShard(ctx, s, nodeCID, space)
+		hasRoom, err := a.roomInShard(s, node, space)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -94,56 +102,32 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 
 	// If no such shard exists, create a new one
 	if shard == nil {
-		shard, err = a.Repo.CreateShard(ctx, uploadID)
+		shard, err = a.Repo.CreateShard(ctx, uploadID, uint64(len(noRootsHeader)))
 		if err != nil {
-			return false, fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, space.DID())
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, space.DID(), nodeEncodingLength(node)-node.Size())
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
 	return closed, nil
 }
 
-func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, space *spacesmodel.Space) (bool, error) {
-	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, space.DID())
-	if err != nil {
-		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
-	}
-	if node == nil {
-		return false, fmt.Errorf("node %s not found", nodeCID)
-	}
-	nodeSize := nodeEncodingLength(nodeCID, node.Size())
+func (a *API) roomInShard(shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
+	nodeSize := nodeEncodingLength(node)
 
-	currentSize, err := a.currentSizeOfShard(ctx, shard.ID())
-	if err != nil {
-		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
-	}
-
-	if currentSize+nodeSize > space.ShardSize() {
+	if shard.Size()+nodeSize > space.ShardSize() {
 		return false, nil // No room in the shard
 	}
 
 	return true, nil
 }
 
-func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
-	var totalSize uint64 = uint64(len(noRootsHeader))
-
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
-		totalSize += nodeEncodingLength(node.CID(), node.Size())
-		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
-	}
-
-	return totalSize, nil
-}
-
-func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
+func nodeEncodingLength(node dagsmodel.Node) uint64 {
+	cid := node.CID()
+	blockSize := node.Size()
 	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
 	vilen := uint64(varint.UvarintSize(uint64(pllen)))
 	return pllen + vilen
@@ -170,7 +154,7 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
 		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
 		cidReader := bytes.NewReader(node.CID().Bytes())
 		newReader := NewLazyReader(func() ([]byte, error) {
