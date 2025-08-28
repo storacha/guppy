@@ -17,6 +17,7 @@ import (
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 // Client is an interface for working with a Storacha space. It's typically
@@ -29,7 +30,7 @@ type Client interface {
 var _ Client = (*client.Client)(nil)
 
 type CarForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
-type IndexForUploadFunc func(ctx context.Context, uploadID id.UploadID) (io.Reader, error)
+type IndexForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error)
 
 // API provides methods to interact with Storacha.
 type API struct {
@@ -54,11 +55,11 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 		}
 
-		_, _, err = a.Client.SpaceBlobAdd(ctx, car, a.Space)
+		digest, _, err := a.Client.SpaceBlobAdd(ctx, car, a.Space)
 		if err != nil {
 			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), a.Space, err)
 		}
-		shard.Added()
+		shard.Added(digest)
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
 			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.ID(), err)
 		}
@@ -70,7 +71,11 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 var carCIDBuilder = cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}
 
 func (a API) AddIndexForUpload(ctx context.Context, uploadID id.UploadID) error {
-	indexReader, err := a.IndexForUpload(ctx, uploadID)
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
+	}
+	indexReader, err := a.IndexForUpload(ctx, upload)
 	indexBytes, err := io.ReadAll(indexReader)
 	if err != nil {
 		return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
