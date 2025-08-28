@@ -87,7 +87,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		}
 		s.Close()
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating scan: %w", err)
+			return false, fmt.Errorf("updating shard: %w", err)
 		}
 		closed = true
 	}

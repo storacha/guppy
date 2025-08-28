@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -34,7 +34,7 @@ func validShardState(state ShardState) bool {
 type Shard struct {
 	id       id.ShardID
 	uploadID id.UploadID
-	cid      cid.Cid
+	digest   multihash.Multihash
 	state    ShardState
 }
 
@@ -43,7 +43,7 @@ func NewShard(uploadID id.UploadID) (*Shard, error) {
 	s := &Shard{
 		id:       id.New(),
 		uploadID: uploadID,
-		cid:      cid.Undef,
+		digest:   multihash.Multihash{},
 		state:    ShardStateOpen,
 	}
 	if _, err := validateShard(s); err != nil {
@@ -82,7 +82,7 @@ func (s *Shard) Added() error {
 type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,
-	cid *cid.Cid,
+	digest *multihash.Multihash,
 	state *ShardState,
 ) error
 
@@ -91,7 +91,7 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 	err := scanner(
 		&shard.id,
 		&shard.uploadID,
-		&shard.cid,
+		&shard.digest,
 		&shard.state,
 	)
 	if err != nil {
@@ -101,14 +101,14 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 }
 
 // ShardWriter is a function type for writing a Shard to the database.
-type ShardWriter func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state ShardState) error
+type ShardWriter func(id id.ShardID, uploadID id.UploadID, digest multihash.Multihash, state ShardState) error
 
 // WriteShardToDatabase writes a Shard to the database using the provided writer function.
 func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 	return writer(
 		shard.id,
 		shard.uploadID,
-		shard.cid,
+		shard.digest,
 		shard.state,
 	)
 }
