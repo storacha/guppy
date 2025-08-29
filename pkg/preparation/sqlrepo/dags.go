@@ -16,10 +16,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-var _ dags.Repo = (*repo)(nil)
+var _ dags.Repo = (*Repo)(nil)
 
 // CreateLinks creates links in the repository for the given parent CID and link parameters.
-func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []model.LinkParams) error {
+func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []model.LinkParams) error {
 	links := make([]*model.Link, 0, len(linkParams))
 	for i, p := range linkParams {
 		link, err := model.NewLink(p, parent, uint64(i))
@@ -53,7 +53,7 @@ func (r *repo) CreateLinks(ctx context.Context, parent cid.Cid, linkParams []mod
 	return nil
 }
 
-func (r *repo) LinksForCID(ctx context.Context, c cid.Cid) ([]*model.Link, error) {
+func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid) ([]*model.Link, error) {
 	query := `SELECT name, t_size, hash, parent_id, ordering FROM links WHERE parent_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, c.Bytes())
 	if err != nil {
@@ -84,7 +84,7 @@ type sqlScanner interface {
 	Scan(dest ...any) error
 }
 
-func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
+func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cid *cid.Cid) error {
 		var nullErrorMessage sql.NullString
 		err := sqlScanner.Scan(fsEntryID, uploadID, util.TimestampScanner(createdAt), util.TimestampScanner(updatedAt), state, &nullErrorMessage, util.DbCid(cid), kind)
@@ -102,7 +102,7 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 
 // DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID
 // matching the given states, if given, or all if no states are provided.
-func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
+func (r *Repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE upload_id = $1`
 	if len(states) > 0 {
 		query += " AND state IN ("
@@ -134,7 +134,7 @@ func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.Upload
 }
 
 // DirectoryLinks retrieves link parameters for a given directory scan.
-func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
+func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
 	query := `
 		SELECT
 			fs_entries.path,
@@ -171,7 +171,7 @@ func (r *repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 	return links, nil
 }
 
-func (r *repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []byte, path string, sourceID id.SourceID, offset uint64) (model.Node, error) {
+func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, ufsData []byte, path string, sourceID id.SourceID, offset uint64) (model.Node, error) {
 	findQuery := `
 		SELECT
 			cid,
@@ -208,7 +208,7 @@ type RowScanner interface {
 	Scan(dest ...any) error
 }
 
-func (r *repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
+func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
 		return scanner.Scan(util.DbCid(cid), size, ufsdata, path, sourceID, offset)
 	})
@@ -218,7 +218,7 @@ func (r *repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	return node, err
 }
 
-func (r *repo) createNode(ctx context.Context, node model.Node) error {
+func (r *Repo) createNode(ctx context.Context, node model.Node) error {
 	insertQuery := `INSERT INTO nodes (cid, size, ufsdata, path, source_id, offset) VALUES ($1, $2, $3, $4, $5, $6)`
 	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error {
 		_, err := r.db.ExecContext(ctx, insertQuery, cid.Bytes(), size, ufsdata, path, sourceID, offset)
@@ -229,7 +229,7 @@ func (r *repo) createNode(ctx context.Context, node model.Node) error {
 // FindOrCreateRawNode finds or creates a raw node in the repository.
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
-func (r *repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
+func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
 	node, err := r.findNode(ctx, cid, size, nil, path, sourceID, offset)
 	if err != nil {
 		return nil, false, err
@@ -259,7 +259,7 @@ func (r *repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 // FindOrCreateUnixFSNode finds or creates a UnixFS node in the repository.
 // If a node with the same CID, size, and ufsdata already exists, it returns that node.
 // If not, it creates a new UnixFS node with the provided parameters.
-func (r *repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, ufsdata []byte) (*model.UnixFSNode, bool, error) {
+func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, ufsdata []byte) (*model.UnixFSNode, bool, error) {
 	node, err := r.findNode(ctx, cid, size, ufsdata, "", id.SourceID{}, 0)
 	if err != nil {
 		return nil, false, err
@@ -287,7 +287,7 @@ func (r *repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 }
 
 // GetChildScans finds scans for child nodes of a given directory scan's file system entry.
-func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
+func (r *Repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
 	query := `SELECT fs_entry_id, upload_id, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, directoryScans.FsEntryID())
 	if err != nil {
@@ -308,7 +308,7 @@ func (r *repo) GetChildScans(ctx context.Context, directoryScans *model.Director
 }
 
 // UpdateDAGScan updates a DAG scan in the repository.
-func (r *repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
+func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cidValue cid.Cid) error {
 		if cidValue == cid.Undef {
 			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: <cid.Undef>\n", fsEntryID)

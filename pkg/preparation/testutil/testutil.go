@@ -10,6 +10,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-ipld-prime"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
@@ -56,6 +57,7 @@ type MockClient struct {
 	T                        *testing.T
 	SpaceBlobAddInvocations  []spaceBlobAddInvocation
 	SpaceIndexAddInvocations []spaceIndexAddInvocation
+	UploadAddInvocations     []uploadAddInvocation
 }
 
 type spaceBlobAddInvocation struct {
@@ -66,6 +68,12 @@ type spaceBlobAddInvocation struct {
 type spaceIndexAddInvocation struct {
 	Space     did.DID
 	IndexLink ipld.Link
+}
+
+type uploadAddInvocation struct {
+	Space  did.DID
+	Root   ipld.Link
+	Shards []ipld.Link
 }
 
 var _ storacha.Client = (*MockClient)(nil)
@@ -90,4 +98,14 @@ func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, spa
 	})
 
 	return nil
+}
+
+func (m *MockClient) UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error) {
+	m.UploadAddInvocations = append(m.UploadAddInvocations, uploadAddInvocation{
+		Space:  space,
+		Root:   root,
+		Shards: shards,
+	})
+
+	return upload.AddOk{Root: root, Shards: shards}, nil
 }

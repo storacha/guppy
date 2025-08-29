@@ -13,10 +13,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-var _ configurations.Repo = (*repo)(nil)
+var _ configurations.Repo = (*Repo)(nil)
 
 // CreateConfiguration creates a new configuration in the repository with the given name and options.
-func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
+func (r *Repo) CreateConfiguration(ctx context.Context, name string, options ...configurationsmodel.ConfigurationOption) (*configurationsmodel.Configuration, error) {
 	configuration, err := configurationsmodel.NewConfiguration(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create configuration model: %w", err)
@@ -41,7 +41,7 @@ func (r *repo) CreateConfiguration(ctx context.Context, name string, options ...
 }
 
 // GetConfigurationByID retrieves a configuration by its unique ID from the repository.
-func (r *repo) GetConfigurationByID(ctx context.Context, configurationID id.ConfigurationID) (*configurationsmodel.Configuration, error) {
+func (r *Repo) GetConfigurationByID(ctx context.Context, configurationID id.ConfigurationID) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
@@ -54,7 +54,7 @@ func (r *repo) GetConfigurationByID(ctx context.Context, configurationID id.Conf
 }
 
 // GetConfigurationByUploadID retrieves the configuration associated with an upload.
-func (r *repo) GetConfigurationByUploadID(ctx context.Context, uploadID id.UploadID) (*configurationsmodel.Configuration, error) {
+func (r *Repo) GetConfigurationByUploadID(ctx context.Context, uploadID id.UploadID) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			c.id,
@@ -69,7 +69,7 @@ func (r *repo) GetConfigurationByUploadID(ctx context.Context, uploadID id.Uploa
 }
 
 // GetConfigurationByName retrieves a configuration by its name from the repository.
-func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*configurationsmodel.Configuration, error) {
+func (r *Repo) GetConfigurationByName(ctx context.Context, name string) (*configurationsmodel.Configuration, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
@@ -81,7 +81,7 @@ func (r *repo) GetConfigurationByName(ctx context.Context, name string) (*config
 	return r.getConfigurationFromRow(row)
 }
 
-func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Configuration, error) {
+func (r *Repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Configuration, error) {
 	configuration, err := configurationsmodel.ReadConfigurationFromDatabase(func(
 		id *id.ConfigurationID,
 		name *string,
@@ -102,7 +102,7 @@ func (r *repo) getConfigurationFromRow(row *sql.Row) (*configurationsmodel.Confi
 }
 
 // DeleteConfiguration deletes a configuration from the repository.
-func (r *repo) DeleteConfiguration(ctx context.Context, configurationID id.ConfigurationID) error {
+func (r *Repo) DeleteConfiguration(ctx context.Context, configurationID id.ConfigurationID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configurations WHERE id = ?`,
 		configurationID,
@@ -119,7 +119,7 @@ func (r *repo) DeleteConfiguration(ctx context.Context, configurationID id.Confi
 }
 
 // ListConfigurations lists all configurations in the repository.
-func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.Configuration, error) {
+func (r *Repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.Configuration, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, created_at, shard_size FROM configurations`,
 	)
@@ -145,7 +145,7 @@ func (r *repo) ListConfigurations(ctx context.Context) ([]*configurationsmodel.C
 }
 
 // AddSourceToConfiguration adds a source to a configuration in the repository.
-func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
+func (r *Repo) AddSourceToConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO configuration_sources (configuration_id, source_id) VALUES (?, ?)`,
 		configurationID, sourceID,
@@ -157,7 +157,7 @@ func (r *repo) AddSourceToConfiguration(ctx context.Context, configurationID id.
 }
 
 // RemoveSourceFromConfiguration removes a source from a configuration in the repository.
-func (r *repo) RemoveSourceFromConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
+func (r *Repo) RemoveSourceFromConfiguration(ctx context.Context, configurationID id.ConfigurationID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM configuration_sources WHERE configuration_id = ? AND source_id = ?`,
 		configurationID, sourceID,

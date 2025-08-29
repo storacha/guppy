@@ -141,10 +141,74 @@ func TestAddIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
-		require.Equal(t, expectedIndexBlob, client.SpaceBlobAddInvocations[0].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
+		require.Equal(t, expectedIndexBlob, client.SpaceBlobAddInvocations[0].BlobAdded)
 
 		require.Len(t, client.SpaceIndexAddInvocations, 1)
 		require.Equal(t, cidlink.Link{Cid: expectedIndexCID}, client.SpaceIndexAddInvocations[0].IndexLink)
+	})
+}
+
+func TestAddStorachaUploadForUpload(t *testing.T) {
+	t.Run("`upload/add`s the root and shards", func(t *testing.T) {
+		db := testutil.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := testutil.MockClient{T: t}
+
+		indexForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
+			return bytes.NewReader([]byte(fmt.Sprintf("INDEX OF UPLOAD: %s", upload.ID()))), nil
+		}
+
+		api := storacha.API{
+			Repo:           repo,
+			Client:         &client,
+			Space:          spaceDID,
+			IndexForUpload: indexForUpload,
+		}
+
+		configuration, err := repo.CreateConfiguration(t.Context(), "Test Config", configurationsmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.CreateUploads(t.Context(), configuration.ID(), []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		rootCID := testutil.RandomCID(t)
+
+		shard1Digest, err := multihash.Sum([]byte("CAR OF SHARD 1"), multihash.SHA2_256, -1)
+		require.NoError(t, err)
+		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		require.NoError(t, err)
+		shard1.Added(shard1Digest)
+		err = repo.UpdateShard(t.Context(), shard1)
+		require.NoError(t, err)
+
+		shard2Digest, err := multihash.Sum([]byte("CAR OF SHARD 2"), multihash.SHA2_256, -1)
+		require.NoError(t, err)
+		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		require.NoError(t, err)
+		shard2.Added(shard2Digest)
+		err = repo.UpdateShard(t.Context(), shard2)
+		require.NoError(t, err)
+
+		upload.Start()
+		upload.SetRootCID(rootCID)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		err = api.AddStorachaUploadForUpload(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		require.Len(t, client.UploadAddInvocations, 1)
+		require.Equal(t, spaceDID, client.UploadAddInvocations[0].Space)
+		require.Equal(t, cidlink.Link{Cid: rootCID}, client.UploadAddInvocations[0].Root)
+		require.ElementsMatch(t, []cidlink.Link{
+			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard1Digest)},
+			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard2Digest)},
+		}, client.UploadAddInvocations[0].Shards)
 	})
 }

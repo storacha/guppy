@@ -27,10 +27,10 @@ func Null[T any](v *T) sql.Null[T] {
 }
 
 // New creates a new Repo instance with the given database connection.
-func New(db *sql.DB) *repo {
-	return &repo{db: db}
+func New(db *sql.DB) *Repo {
+	return &Repo{db: db}
 }
 
-type repo struct {
+type Repo struct {
 	db *sql.DB
 }
