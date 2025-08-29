@@ -42,6 +42,7 @@ type API struct {
 }
 
 var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
+var _ uploads.AddIndexForUploadFunc = API{}.AddIndexForUpload
 
 func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
 	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
@@ -68,8 +69,6 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	return nil
 }
 
-var carCIDBuilder = cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}
-
 func (a API) AddIndexForUpload(ctx context.Context, uploadID id.UploadID) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
@@ -81,12 +80,12 @@ func (a API) AddIndexForUpload(ctx context.Context, uploadID id.UploadID) error 
 		return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
 	}
 
-	_, _, err = a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), a.Space)
+	indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), a.Space)
 	if err != nil {
 		return fmt.Errorf("failed to add index to space %s: %w", a.Space, err)
 	}
 
-	indexCID, err := carCIDBuilder.Sum(indexBytes)
+	indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
 	err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, a.Space)
 	if err != nil {
 		return fmt.Errorf("failed to add index link to space %s: %w", a.Space, err)

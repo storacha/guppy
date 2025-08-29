@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/delegation"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
@@ -30,8 +31,13 @@ func TestSpaceBlobAdd(t *testing.T) {
 
 	testBlob := bytes.NewReader([]byte("test"))
 
-	_, _, err = c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(putClient))
+	returnedDigest, _, err := c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(putClient))
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, [][]byte{[]byte("test")}, testutil.ReceivedBlobs(putClient))
+	digest, err := multihash.Sum([]byte("test"), multihash.SHA2_256, -1)
+	require.NoError(t, err)
+
+	require.Equal(t, digest, returnedDigest)
+	require.Equal(t, []byte("test"), testutil.ReceivedBlobs(putClient).Get(digest))
+	require.Equal(t, 1, testutil.ReceivedBlobs(putClient).Size())
 }
