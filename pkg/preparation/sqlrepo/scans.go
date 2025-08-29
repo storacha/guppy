@@ -16,10 +16,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-var _ scans.Repo = (*repo)(nil)
+var _ scans.Repo = (*Repo)(nil)
 
 // CreateScan creates a new scan in the repository with the given upload ID.
-func (r *repo) CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel.Scan, error) {
+func (r *Repo) CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel.Scan, error) {
 	scan, err := scanmodel.NewScan(uploadID)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func (r *repo) CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel
 	return scan, nil
 }
 
-func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Scan, error) {
+func (r *Repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Scan, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
@@ -120,7 +120,7 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 // ScansForUploadByStatus retrieves all scans for a given upload ID matching the
 // given states, if given, or all if no states are provided. Because an upload
 // normally has at most one scan, this will return at most one scan.
-func (r *repo) ScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.ScanState) ([]*model.Scan, error) {
+func (r *Repo) ScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.ScanState) ([]*model.Scan, error) {
 	query :=
 		`SELECT
 			id,
@@ -181,7 +181,7 @@ func (r *repo) ScansForUploadByStatus(ctx context.Context, uploadID id.UploadID,
 // FindOrCreateFile finds or creates a file entry in the repository with the given parameters.
 // If the file already exists, it returns the existing file and false.
 // If the file does not exist, it creates a new file entry and returns it along with true.
-func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.File, bool, error) {
+func (r *Repo) FindOrCreateFile(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.File, bool, error) {
 	if mode.IsDir() {
 		return nil, false, errors.New("cannot create a file with directory mode")
 	}
@@ -214,7 +214,7 @@ func (r *repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 // FindOrCreateDirectory finds or creates a directory entry in the repository with the given parameters.
 // If the directory already exists, it returns the existing directory and false.
 // If the directory does not exist, it creates a new directory entry and returns it along with true.
-func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.Directory, bool, error) {
+func (r *Repo) FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*scanmodel.Directory, bool, error) {
 	log.Debugf("Finding or creating directory: %s", path)
 	if !mode.IsDir() {
 		return nil, false, errors.New("cannot create a directory with file mode")
@@ -246,7 +246,7 @@ func (r *repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 }
 
 // CreateDirectoryChildren links a directory to its children in the repository.
-func (r *repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Directory, children []scanmodel.FSEntry) error {
+func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Directory, children []scanmodel.FSEntry) error {
 	insertQuery := `
 		INSERT INTO directory_children (directory_id, child_id)
 		VALUES ($1, $2)
@@ -263,7 +263,7 @@ func (r *repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 }
 
 // DirectoryChildren retrieves the children of a directory from the repository.
-func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
+func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
 	query := `
 		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id, fse.space_did
 		FROM directory_children dc
@@ -308,7 +308,7 @@ func (r *repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 }
 
 // UpdateScan updates the given scan in the repository.
-func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
+func (r *Repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 	query := `
 		UPDATE scans
 		SET upload_id = $2, root_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7
@@ -322,7 +322,7 @@ func (r *repo) UpdateScan(ctx context.Context, scan *scanmodel.Scan) error {
 }
 
 // GetFileByID retrieves a file by its unique ID from the repository.
-func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
+func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, path, last_modified, mode, size, checksum, source_id, space_did FROM fs_entries WHERE id = ?`, fileID,
 	)
@@ -341,7 +341,7 @@ func (r *repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	return nil, errors.New("found entry is not a file")
 }
 
-func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, error) {
+func (r *Repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, error) {
 	query := `
 		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
 		FROM fs_entries
@@ -391,7 +391,7 @@ func (r *repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 	return entry, err
 }
 
-func (r *repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error {
+func (r *Repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error {
 	insertQuery := `
 		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

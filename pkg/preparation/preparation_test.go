@@ -33,6 +33,7 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
@@ -44,6 +45,7 @@ import (
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,17 +58,72 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// spaceBlobAddClient is a [storacha.Client] that wraps a
-// [client.Client] to use a custom putClient.
-type spaceBlobAddClient struct {
+// putTrackingClient is a [storacha.putTrackingClient] that wraps a
+// [client.putTrackingClient] to use a custom putClient.
+type putTrackingClient struct {
 	*client.Client
 	putClient *http.Client
 }
 
-var _ storacha.Client = (*spaceBlobAddClient)(nil)
+var _ storacha.Client = (*putTrackingClient)(nil)
 
-func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+func (c *putTrackingClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
+}
+
+// prepareTestClient creates a new test [storacha.Client] that uses the given
+// [http.Client] as the client for PUT requests, and stores the index link from
+// the `space/index/add` invocation in the given [indexLink] pointer. The
+// returned function returns the blobs received by the PUT client, and the index
+// link.
+func prepareTestClient(t *testing.T, space principal.Signer, putClient *http.Client, indexLink *ipld.Link) *putTrackingClient {
+	client := &putTrackingClient{
+		Client: helpers.Must(ctestutil.Client(
+			ctestutil.WithSpaceBlobAdd(),
+			ctestutil.WithServerOptions(
+				server.WithServiceMethod(
+					spaceindexcap.Add.Can(),
+					server.Provide(
+						spaceindexcap.Add,
+						func(
+							ctx context.Context,
+							cap ucan.Capability[spaceindexcap.AddCaveats],
+							inv invocation.Invocation,
+							context server.InvocationContext,
+						) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
+							assert.Nil(t, *indexLink, "expected only one `space/index/add` invocation")
+							*indexLink = cap.Nb().Index
+							return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
+						},
+					),
+				),
+			),
+		)),
+		putClient: putClient,
+	}
+
+	// Delegate * on the space to the client
+	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+	proof, err := delegation.Delegate(space, client.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+	require.NoError(t, err)
+	err = client.AddProofs(proof)
+	require.NoError(t, err)
+
+	return client
+}
+
+func createUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, api preparation.API) *uploadsmodel.Upload {
+	_, err := api.FindOrCreateSpace(t.Context(), spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+	require.NoError(t, err)
+	source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
+	require.NoError(t, err)
+	err = repo.AddSourceToSpace(t.Context(), spaceDID, source.ID())
+	require.NoError(t, err)
+	uploads, err := api.CreateUploads(t.Context(), spaceDID)
+	require.NoError(t, err)
+	require.Len(t, uploads, 1, "expected exactly one upload to be created")
+	return uploads[0]
 }
 
 func TestExecuteUpload(t *testing.T) {
@@ -86,41 +143,8 @@ func TestExecuteUpload(t *testing.T) {
 		testFs := prepareFs(t, fsData)
 
 		putClient := ctestutil.NewPutClient()
-
 		var indexLink ipld.Link
-
-		c := &spaceBlobAddClient{
-			Client: helpers.Must(ctestutil.Client(
-				ctestutil.WithSpaceBlobAdd(),
-				ctestutil.WithServerOptions(
-					server.WithServiceMethod(
-						spaceindexcap.Add.Can(),
-						server.Provide(
-							spaceindexcap.Add,
-							func(
-								ctx context.Context,
-								cap ucan.Capability[spaceindexcap.AddCaveats],
-								inv invocation.Invocation,
-								context server.InvocationContext,
-							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
-								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
-								indexLink = cap.Nb().Index
-								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
-							},
-						),
-					),
-				),
-			)),
-			putClient: putClient,
-		}
-
-		// Delegate * on the space to the client
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
+		c := prepareTestClient(t, space, putClient, &indexLink)
 
 		api := preparation.NewAPI(
 			repo,
@@ -132,16 +156,7 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 		)
 
-		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
-		require.NoError(t, err)
-		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
-		require.NoError(t, err)
-		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
-		require.NoError(t, err)
-		uploads, err := api.CreateUploads(t.Context(), space.DID())
-		require.NoError(t, err)
-		require.Len(t, uploads, 1, "expected exactly one upload to be created")
-		upload := uploads[0]
+		upload := createUpload(t, repo, space.DID(), api)
 
 		rootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
@@ -192,39 +207,7 @@ func TestExecuteUpload(t *testing.T) {
 		}
 
 		var indexLink ipld.Link
-
-		c := &spaceBlobAddClient{
-			Client: helpers.Must(ctestutil.Client(
-				ctestutil.WithSpaceBlobAdd(),
-				ctestutil.WithServerOptions(
-					server.WithServiceMethod(
-						spaceindexcap.Add.Can(),
-						server.Provide(
-							spaceindexcap.Add,
-							func(
-								ctx context.Context,
-								cap ucan.Capability[spaceindexcap.AddCaveats],
-								inv invocation.Invocation,
-								context server.InvocationContext,
-							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
-								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
-								indexLink = cap.Nb().Index
-								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
-							},
-						),
-					),
-				),
-			)),
-			putClient: putClient,
-		}
-
-		// Delegate * on the space to the client
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
+		c := prepareTestClient(t, space, putClient, &indexLink)
 
 		api := preparation.NewAPI(
 			repo,
@@ -236,16 +219,7 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 		)
 
-		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
-		require.NoError(t, err)
-		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
-		require.NoError(t, err)
-		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
-		require.NoError(t, err)
-		uploads, err := api.CreateUploads(t.Context(), space.DID())
-		require.NoError(t, err)
-		require.Len(t, uploads, 1, "expected exactly one upload to be created")
-		upload := uploads[0]
+		upload := createUpload(t, repo, space.DID(), api)
 
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)

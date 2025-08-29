@@ -14,10 +14,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-var _ spaces.Repo = (*repo)(nil)
+var _ spaces.Repo = (*Repo)(nil)
 
 // FindOrCreateSpace finds an existing space or creates a new one in the repository with the given name and options.
-func (r *repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
+func (r *Repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, options ...spacesmodel.SpaceOption) (*spacesmodel.Space, error) {
 	space, err := r.GetSpaceByDID(ctx, did)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get space by DID: %w", err)
@@ -49,7 +49,7 @@ func (r *repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, 
 }
 
 // GetSpaceByDID retrieves a space by its unique DID from the repository.
-func (r *repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error) {
+func (r *Repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			did,
@@ -62,7 +62,7 @@ func (r *repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmode
 }
 
 // GetSpaceByUploadID retrieves the space associated with an upload.
-func (r *repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error) {
+func (r *Repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			s.did,
@@ -77,7 +77,7 @@ func (r *repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*s
 }
 
 // GetSpaceByName retrieves a space by its name from the repository.
-func (r *repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Space, error) {
+func (r *Repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			did,
@@ -89,7 +89,7 @@ func (r *repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Sp
 	return r.getSpaceFromRow(row)
 }
 
-func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
+func (r *Repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 	space, err := spacesmodel.ReadSpaceFromDatabase(func(
 		did *did.DID,
 		name *string,
@@ -110,7 +110,7 @@ func (r *repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 }
 
 // DeleteSpace deletes a space from the repository.
-func (r *repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
+func (r *Repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM spaces WHERE did = ?`,
 		util.DbDID(&spaceDID),
@@ -127,7 +127,7 @@ func (r *repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
 }
 
 // ListSpaces lists all spaces in the repository.
-func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
+func (r *Repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT did, name, created_at, shard_size FROM spaces`,
 	)
@@ -153,7 +153,7 @@ func (r *repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 }
 
 // AddSourceToSpace adds a source to a space in the repository.
-func (r *repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
+func (r *Repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO space_sources (space_did, source_id) VALUES (?, ?)`,
 		util.DbDID(&spaceDID), sourceID,
@@ -165,7 +165,7 @@ func (r *repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID 
 }
 
 // RemoveSourceFromSpace removes a source from a space in the repository.
-func (r *repo) RemoveSourceFromSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
+func (r *Repo) RemoveSourceFromSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
 	_, err := r.db.ExecContext(ctx,
 		`DELETE FROM space_sources WHERE space_did = ? AND source_id = ?`,
 		util.DbDID(&spaceDID), sourceID,
