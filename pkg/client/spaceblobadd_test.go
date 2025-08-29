@@ -18,7 +18,7 @@ func TestSpaceBlobAdd(t *testing.T) {
 
 	putClient := testutil.NewPutClient()
 
-	c, err := testutil.SpaceBlobAddClient()
+	c, err := testutil.Client(testutil.WithSpaceBlobAdd())
 	require.NoError(t, err)
 
 	// Delegate * on the space to the client

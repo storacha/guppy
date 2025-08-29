@@ -347,50 +347,53 @@ func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}, nil
 }
 
-// SpaceBlobAddClient creates an entire [client.Client] that's configured to
-// test [spaceblobcap.Add] invocations.
-func SpaceBlobAddClient() (*client.Client, error) {
+// WithSpaceBlobAdd creates an [Option] that adds `space/blob/add` support to
+// the server. NB: This takes over the receipts client entirely. Currently,
+// different options can't cooperate to share a receipts client. That's
+// solvable, but hasn't been necessary yet.
+func WithSpaceBlobAdd() Option {
 	receiptsTrans := receiptsTransport{
 		receipts: make(map[string]receipt.AnyReceipt),
 	}
 
-	connection := NewTestServerConnection(
-		server.WithServiceMethod(
-			spaceblobcap.Add.Can(),
-			server.Provide(
-				spaceblobcap.Add,
-				uhelpers.Must(SpaceBlobAddHandler(
-					func(rcpt receipt.AnyReceipt) {
-						receiptsTrans.receipts[rcpt.Ran().Root().Link().String()] = rcpt
+	return ComposeOptions(
+		WithServerOptions(
+			server.WithServiceMethod(
+				spaceblobcap.Add.Can(),
+				server.Provide(
+					spaceblobcap.Add,
+					uhelpers.Must(SpaceBlobAddHandler(
+						func(rcpt receipt.AnyReceipt) {
+							receiptsTrans.receipts[rcpt.Ran().Root().Link().String()] = rcpt
+						},
+					)),
+				),
+			),
+			server.WithServiceMethod(
+				ucancap.Conclude.Can(),
+				server.Provide(
+					ucancap.Conclude,
+					func(
+						ctx context.Context,
+						cap ucan.Capability[ucancap.ConcludeCaveats],
+						inv invocation.Invocation,
+						context server.InvocationContext,
+					) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
 					},
-				)),
+				),
 			),
 		),
-		server.WithServiceMethod(
-			ucancap.Conclude.Can(),
-			server.Provide(
-				ucancap.Conclude,
-				func(
-					ctx context.Context,
-					cap ucan.Capability[ucancap.ConcludeCaveats],
-					inv invocation.Invocation,
-					context server.InvocationContext,
-				) (result.Result[ucancap.ConcludeOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-					return result.Ok[ucancap.ConcludeOk, failure.IPLDBuilderFailure](ucancap.ConcludeOk{}), nil, nil
-				},
-			),
-		),
-	)
 
-	return client.NewClient(
-		client.WithConnection(connection),
-		client.WithReceiptsClient(
-			receiptclient.New(
-				helpers.Must(url.Parse("https://receipts.example/receipts")),
-				receiptclient.WithHTTPClient(
-					&http.Client{
-						Transport: &receiptsTrans,
-					},
+		WithClientOptions(
+			client.WithReceiptsClient(
+				receiptclient.New(
+					helpers.Must(url.Parse("https://receipts.example/receipts")),
+					receiptclient.WithHTTPClient(
+						&http.Client{
+							Transport: &receiptsTrans,
+						},
+					),
 				),
 			),
 		),

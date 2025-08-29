@@ -77,7 +77,7 @@ func TestExecuteUpload(t *testing.T) {
 		putClient := ctestutil.NewPutClient()
 
 		c := &spaceBlobAddClient{
-			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			Client:    helpers.Must(ctestutil.Client(ctestutil.WithSpaceBlobAdd())),
 			putClient: putClient,
 		}
 
@@ -157,7 +157,7 @@ func TestExecuteUpload(t *testing.T) {
 		}
 
 		c := &spaceBlobAddClient{
-			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			Client:    helpers.Must(ctestutil.Client(ctestutil.WithSpaceBlobAdd())),
 			putClient: putClient,
 		}
 
