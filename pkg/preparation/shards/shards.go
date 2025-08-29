@@ -14,11 +14,14 @@ import (
 	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
+	"github.com/storacha/go-libstoracha/blobindex"
 	configmodel "github.com/storacha/guppy/pkg/preparation/configurations/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var log = logging.Logger("preparation/shards")
@@ -59,6 +62,8 @@ type API struct {
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
+var _ storacha.CarForShardFunc = API{}.CarForShard
+var _ storacha.IndexForUploadFunc = API{}.IndexForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	config, err := a.Repo.GetConfigurationByUploadID(ctx, uploadID)
@@ -70,6 +75,14 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
+	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
+	if err != nil {
+		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+	}
+	if node == nil {
+		return false, fmt.Errorf("node %s not found", nodeCID)
+	}
+
 	var shard *model.Shard
 	var closed bool
 
@@ -77,7 +90,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := a.roomInShard(ctx, s, nodeCID, config)
+		hasRoom, err := a.roomInShard(ctx, s, node, config)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -87,63 +100,39 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		}
 		s.Close()
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating scan: %w", err)
+			return false, fmt.Errorf("updating shard: %w", err)
 		}
 		closed = true
 	}
 
 	// If no such shard exists, create a new one
 	if shard == nil {
-		shard, err = a.Repo.CreateShard(ctx, uploadID)
+		shard, err = a.Repo.CreateShard(ctx, uploadID, uint64(len(noRootsHeader)))
 		if err != nil {
-			return false, fmt.Errorf("failed to add node %s to shards for upload %s: %w", nodeCID, uploadID, err)
+			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID)
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, nodeEncodingLength(node)-node.Size())
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
 	return closed, nil
 }
 
-func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.Cid, config *configmodel.Configuration) (bool, error) {
-	node, err := a.Repo.FindNodeByCid(ctx, nodeCID)
-	if err != nil {
-		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
-	}
-	if node == nil {
-		return false, fmt.Errorf("node %s not found", nodeCID)
-	}
-	nodeSize := nodeEncodingLength(nodeCID, node.Size())
+func (a *API) roomInShard(ctx context.Context, shard *model.Shard, node dagsmodel.Node, config *configmodel.Configuration) (bool, error) {
+	nodeSize := nodeEncodingLength(node)
 
-	currentSize, err := a.currentSizeOfShard(ctx, shard.ID())
-	if err != nil {
-		return false, fmt.Errorf("failed to get current size of shard %s: %w", shard.ID(), err)
-	}
-
-	if currentSize+nodeSize > config.ShardSize() {
+	if shard.Size()+nodeSize > config.ShardSize() {
 		return false, nil // No room in the shard
 	}
 
 	return true, nil
 }
 
-func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
-	var totalSize uint64 = uint64(len(noRootsHeader))
-
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
-		totalSize += nodeEncodingLength(node.CID(), node.Size())
-		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
-	}
-
-	return totalSize, nil
-}
-
-func nodeEncodingLength(cid cid.Cid, blockSize uint64) uint64 {
+func nodeEncodingLength(node dagsmodel.Node) uint64 {
+	cid := node.CID()
+	blockSize := node.Size()
 	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
 	vilen := uint64(varint.UvarintSize(uint64(pllen)))
 	return pllen + vilen
@@ -168,9 +157,9 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
-func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
 		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
 		cidReader := bytes.NewReader(node.CID().Bytes())
 		newReader := NewLazyReader(func() ([]byte, error) {
@@ -185,7 +174,7 @@ func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, er
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
+		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
 	return io.MultiReader(readers...), nil
@@ -230,4 +219,43 @@ func (lr *LazyReader) Read(p []byte) (n int, err error) {
 		return 0, err
 	}
 	return lr.r.Read(p)
+}
+
+func (a API) IndexForUpload(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
+	if upload.RootCID() == cid.Undef {
+		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
+	}
+
+	index := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, 0)
+
+	shards, err := a.Repo.ShardsForUploadByStatus(ctx, upload.ID(), model.ShardStateAdded)
+	if err != nil {
+		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
+	}
+
+	for _, s := range shards {
+		if s.Digest() == nil || len(s.Digest()) == 0 {
+			return nil, fmt.Errorf("added shard %s has no digest set", s.ID())
+		}
+
+		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
+			position := blobindex.Position{
+				Offset: shardOffset,
+				Length: node.Size(),
+			}
+			index.SetSlice(s.Digest(), node.CID().Hash(), position)
+
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", s.ID(), err)
+		}
+	}
+
+	indexReader, err := blobindex.Archive(index)
+	if err != nil {
+		return nil, fmt.Errorf("archiving index for upload %s: %w", upload.ID(), err)
+	}
+
+	return indexReader, nil
 }
