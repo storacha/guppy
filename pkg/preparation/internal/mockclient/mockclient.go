@@ -42,7 +42,8 @@ func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space 
 		BlobAdded: contentBytes,
 	})
 
-	return []byte{}, nil, nil
+	digest, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
+	return digest, nil, nil
 }
 
 func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error {

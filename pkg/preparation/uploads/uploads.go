@@ -22,12 +22,14 @@ type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
+type AddIndexForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
 	Repo                        Repo
 	ExecuteScansForUpload       ExecuteScansForUploadFunc
 	ExecuteDagScansForUpload    ExecuteDagScansForUploadFunc
 	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
+	AddIndexForUpload           AddIndexForUploadFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if an existing open shard was closed,
@@ -109,7 +111,7 @@ func (e executor) execute(ctx context.Context) (cid.Cid, error) {
 	eg.Go(func() error { return e.runStartWorker(ctx, uploadAvailable, scansAvailable) })
 	eg.Go(func() error { return e.runScanWorker(ctx, scansAvailable, dagScansAvailable) })
 	eg.Go(func() error { return e.runDAGScanWorker(ctx, dagScansAvailable, closedShardsAvailable) })
-	eg.Go(func() error { return e.runSpaceBlobAddWorker(ctx, closedShardsAvailable) })
+	eg.Go(func() error { return e.runStorachaWorker(ctx, closedShardsAvailable) })
 
 	// Kick them all off. There may be work available in the DB from a previous
 	// attempt.
@@ -284,9 +286,8 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagScansAvailable <-cha
 	)
 }
 
-// runSpaceBlobAddWorker runs the worker that scans files and directories into blocks,
-// and buckets them into shards.
-func (e *executor) runSpaceBlobAddWorker(ctx context.Context, blobWork <-chan struct{}) error {
+// runStorachaWorker runs the worker that adds shards and indexes to Storacha.
+func (e *executor) runStorachaWorker(ctx context.Context, blobWork <-chan struct{}) error {
 	return Worker(
 		ctx,
 		blobWork,
@@ -302,6 +303,13 @@ func (e *executor) runSpaceBlobAddWorker(ctx context.Context, blobWork <-chan st
 		},
 
 		// finalize
-		nil,
+		func() error {
+			err := e.api.AddIndexForUpload(ctx, e.upload.ID())
+			if err != nil {
+				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", e.upload.ID(), err)
+			}
+
+			return nil
+		},
 	)
 }

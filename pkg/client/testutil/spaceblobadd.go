@@ -12,6 +12,7 @@ import (
 	"github.com/ipld/go-ipld-prime/fluent/qp"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/bytemap"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
 	httpcap "github.com/storacha/go-libstoracha/capabilities/http"
@@ -34,9 +35,12 @@ import (
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	carresp "github.com/storacha/go-ucanto/transport/car/response"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/pkg/client"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
+
+const storageURLPrefix = "https://storage.example/store/"
 
 func invokeAllocate(
 	service ucan.Signer,
@@ -66,7 +70,15 @@ func executeAllocate(
 	storageProvider ucan.Signer,
 	blobSize uint64,
 ) (receipt.AnyReceipt, error) {
-	putBlobURL, err := url.Parse("https://storage.example/store/" + allocateInv.Root().Link().String())
+	var err error
+
+	cap := allocateInv.Capabilities()[0]
+	allocateMatch, err := blobcap.Allocate.Match(validator.NewSource(cap, allocateInv))
+	if err != nil {
+		return nil, fmt.Errorf("expected allocate capability, got %T", cap)
+	}
+
+	putBlobURL, err := url.Parse(storageURLPrefix + allocateMatch.Value().Nb().Blob.Digest.B58String())
 	if err != nil {
 		return nil, fmt.Errorf("parsing put blob URL: %w", err)
 	}
@@ -244,11 +256,15 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 			blobDigest,
 			blobSize,
 			inv)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invoking allocate: %w", err)
+		}
 		// TK: allocateInv.Attach(inv.Root())
-		// require.NoError(t, err)
 
 		allocateRcpt, err := executeAllocate(allocateInv, storageProvider, blobSize)
-		// require.NoError(t, err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("executing allocate: %w", err)
+		}
 		rcptIssued(allocateRcpt)
 
 		httpPutInv, err := invokePut(
@@ -257,7 +273,9 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 			blobSize,
 			allocateRcpt.Root().Link(),
 		)
-		// require.NoError(t, err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invoking http put: %w", err)
+		}
 		// TK: httpPutInv.Attach(allocateRcpt.Root())
 
 		acceptInv, err := invokeAccept(
@@ -268,7 +286,9 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 			blobSize,
 			httpPutInv.Root().Link(),
 		)
-		// require.NoError(t, err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invoking accept: %w", err)
+		}
 
 		acceptRcpt, err := executeAccept(
 			acceptInv,
@@ -276,7 +296,9 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 			spaceDID,
 			blobDigest,
 		)
-		// require.NoError(t, err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("executing accept: %w", err)
+		}
 
 		rcptIssued(acceptRcpt)
 
@@ -288,6 +310,9 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 				Receipt: allocateRcpt.Root().Link(),
 			},
 		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invoking conclude: %w", err)
+		}
 		concludeInv.Attach(allocateRcpt.Root())
 
 		forks := []fx.Effect{
@@ -400,36 +425,45 @@ func WithSpaceBlobAdd() Option {
 	)
 }
 
+type BlobMap = bytemap.ByteMap[multihash.Multihash, []byte]
+
 type BlobReceiver interface {
-	ReceivedBlobs() [][]byte
+	ReceivedBlobs() BlobMap
 }
 
 // blobPutTransport is an [http.RoundTripper] (an [http.Client] transport) that
 // accepts blob PUTs and remembers what was received.
 type blobPutTransport struct {
-	receivedBlobs [][]byte
+	receivedBlobs BlobMap
 }
 
 var _ http.RoundTripper = (*blobPutTransport)(nil)
 var _ BlobReceiver = (*blobPutTransport)(nil)
 
 func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	url := req.URL.String()
+	if len(url) < len(storageURLPrefix) || url[:len(storageURLPrefix)] != storageURLPrefix {
+		return nil, fmt.Errorf("unexpected PUT URL: %s", req.URL)
+	}
+	digestString := url[len(storageURLPrefix):]
+	digest, err := multihash.FromB58String(digestString)
+
 	blob, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading blob from request: %w", err)
 	}
-	r.receivedBlobs = append(r.receivedBlobs, blob)
+	r.receivedBlobs.Set(digest, blob)
 
 	return &http.Response{
 		StatusCode: 200,
 	}, nil
 }
 
-func (r *blobPutTransport) ReceivedBlobs() [][]byte {
+func (r *blobPutTransport) ReceivedBlobs() BlobMap {
 	return r.receivedBlobs
 }
 
-func ReceivedBlobs(putClient *http.Client) [][]byte {
+func ReceivedBlobs(putClient *http.Client) BlobMap {
 	transport, ok := putClient.Transport.(BlobReceiver)
 	if !ok {
 		panic("The client isn't tracking PUTs. Create a client with NewPutClient() to use ReceivedBlobs().")
@@ -441,6 +475,8 @@ func ReceivedBlobs(putClient *http.Client) [][]byte {
 // request, without making an actual network request.
 func NewPutClient() *http.Client {
 	return &http.Client{
-		Transport: &blobPutTransport{},
+		Transport: &blobPutTransport{
+			receivedBlobs: bytemap.NewByteMap[multihash.Multihash, []byte](-1),
+		},
 	}
 }
