@@ -249,7 +249,9 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		require.NoError(t, err)
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		require.NoError(t, err)
 
 		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node1.CID(), 1)
 		require.NoError(t, err)
