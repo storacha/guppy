@@ -201,9 +201,10 @@ func TestExecuteUpload(t *testing.T) {
 
 		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
+		require.NotEmpty(t, returnedRootCid, "expected non-empty root CID")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, putBlobs.Size(), 6, "expected 5 shards + 1 index to be added")
+		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added")
 		require.NotNil(t, indexLink, "expected `space/index/add` to be called")
 		indexCIDLink, ok := indexLink.(cidlink.Link)
 		require.True(t, ok, "expected index link to be a CID link")
@@ -290,6 +291,7 @@ func TestExecuteUpload(t *testing.T) {
 		// The second time, it should succeedfs
 		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err, "expected upload to succeed on retry")
+		require.NotEmpty(t, returnedRootCid, "expected non-empty root CID")
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")

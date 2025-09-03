@@ -3,7 +3,6 @@ package scans
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
-	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
+	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var log = logging.Logger("preparation/scans")
@@ -25,74 +24,43 @@ type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.F
 // SourceAccessorFunc is a function type that retrieves the file system for a given source ID.
 type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, error)
 
-// UploadLookupFunc is a function type that retrieves the upload for a given upload ID.
-type UploadLookupFunc func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
-
 // API is a dependency container for executing scans on a repository.
 type API struct {
 	Repo           Repo
-	UploadLookup   UploadLookupFunc
 	SourceAccessor SourceAccessorFunc
 	WalkerFn       WalkerFunc
 }
 
-var _ uploads.ExecuteScansForUploadFunc = API{}.ExecuteScansForUpload
+var _ uploads.ExecuteScanFunc = API{}.ExecuteScan
 
-func (a API) ExecuteScansForUpload(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
-	scans, err := a.Repo.ScansForUploadByStatus(ctx, uploadID, model.ScanStatePending, model.ScanStateRunning)
-	if err != nil {
-		return fmt.Errorf("getting scans for upload %s: %w", uploadID, err)
-	}
-
-	for _, scan := range scans {
-		log.Infof("Executing scan %s for upload %s", scan.ID(), uploadID)
-		if err := a.ExecuteScan(ctx, scan, fsEntryCb); err != nil {
-			return fmt.Errorf("executing scan %s: %w", scan.ID(), err)
+func (a API) ExecuteScan(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if upload.State() == uploadmodel.UploadStatePending {
+		err = upload.Start()
+		if err != nil {
+			return fmt.Errorf("starting upload: %w", err)
 		}
 	}
+	if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
+		return fmt.Errorf("updating upload: %w", err)
+	}
 
-	return nil
-}
+	fsEntry, err := a.executeScan(ctx, upload, fsEntryCb)
+	if err != nil {
+		return fmt.Errorf("executing upload scan: %w", err)
+	}
 
-// ExecuteScan executes a scan on the given source, creating files and
-// directories in the repository.
-// TODO: This is now only exported for testing purposes. It can be made private,
-// and the tests adjusted to use [ExecuteScansForUpload] instead.
-func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
-	err := scan.Start()
-	if err != nil {
-		return fmt.Errorf("starting scan: %w", err)
+	if err := upload.SetRootFSEntryID(fsEntry.ID()); err != nil {
+		return fmt.Errorf("completing upload scan: %w", err)
 	}
-	if err := a.Repo.UpdateScan(ctx, scan); err != nil {
-		return fmt.Errorf("updating scan: %w", err)
-	}
-	fsEntry, err := a.executeScan(ctx, scan, fsEntryCb)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			if err := scan.Cancel(); err != nil {
-				return fmt.Errorf("canceling scan: %w", err)
-			}
-		} else {
-			if err := scan.Fail(err.Error()); err != nil {
-				return fmt.Errorf("failing scan: %w", err)
-			}
-		}
-	} else {
-		if err := scan.Complete(fsEntry.ID()); err != nil {
-			return fmt.Errorf("completing scan: %w", err)
-		}
-	}
-	if err := a.Repo.UpdateScan(context.WithoutCancel(ctx), scan); err != nil {
-		return fmt.Errorf("updating scan after execute: %w", err)
+
+	if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
+		return fmt.Errorf("updating upload: %w", err)
 	}
 	return nil
 }
 
-func (a API) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) (model.FSEntry, error) {
-	upload, err := a.UploadLookup(ctx, scan.UploadID())
-	if err != nil {
-		return nil, fmt.Errorf("looking up upload: %w", err)
-	}
+func (a API) executeScan(ctx context.Context, upload *uploadmodel.Upload, fsEntryCb func(model.FSEntry) error) (model.FSEntry, error) {
 	fsys, err := a.SourceAccessor(ctx, upload.SourceID())
 	if err != nil {
 		return nil, fmt.Errorf("accessing source: %w", err)

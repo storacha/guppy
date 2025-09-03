@@ -7,7 +7,6 @@ PRAGMA journal_mode = WAL;
 -- DROP TABLE IF EXISTS spaces CASCADE;
 -- DROP TABLE IF EXISTS space_sources;
 -- DROP TABLE IF EXISTS uploads CASCADE;
--- DROP TABLE IF EXISTS scans CASCADE;
 -- DROP TABLE IF EXISTS fs_entries CASCADE;
 -- DROP TABLE IF EXISTS directory_children;
 -- DROP TABLE IF EXISTS dag_scans CASCADE;
@@ -52,18 +51,6 @@ CREATE TABLE IF NOT EXISTS uploads (
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id),
   FOREIGN KEY (root_cid, space_did) REFERENCES nodes(cid, space_did)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS scans (
-  id BLOB PRIMARY KEY,
-  upload_id BLOB NOT NULL,
-  root_id BLOB,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  state TEXT NOT NULL,
-  error_message TEXT,
-  FOREIGN KEY (upload_id) REFERENCES uploads(id),
-  FOREIGN KEY (root_id) REFERENCES fs_entries(id)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS fs_entries (

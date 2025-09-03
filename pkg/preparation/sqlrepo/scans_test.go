@@ -1,7 +1,6 @@
 package sqlrepo_test
 
 import (
-	"context"
 	"io/fs"
 	"testing"
 	"time"
@@ -13,39 +12,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
-
-func TestCreateScan(t *testing.T) {
-	t.Run("with an upload ID", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
-		uploadID := id.New()
-
-		scan, err := repo.CreateScan(t.Context(), uploadID)
-		require.NoError(t, err)
-
-		readScan, err := repo.GetScanByID(t.Context(), scan.ID())
-
-		require.NoError(t, err)
-		require.Equal(t, scan, readScan)
-	})
-
-	t.Run("with a nil upload ID", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
-		_, err := repo.CreateScan(t.Context(), id.Nil)
-		require.ErrorContains(t, err, "update id cannot be empty")
-	})
-
-	t.Run("when the DB fails", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
-		uploadID := id.New()
-
-		// Simulate a DB failure by canceling the context before the operation.
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-
-		_, err := repo.CreateScan(ctx, uploadID)
-		require.ErrorContains(t, err, "context canceled")
-	})
-}
 
 func TestFindOrCreateFile(t *testing.T) {
 	t.Run("finds a matching file entry, or creates a new one", func(t *testing.T) {

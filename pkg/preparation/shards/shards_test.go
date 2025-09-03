@@ -31,7 +31,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	db := testdb.CreateTestDB(t)
 	repo := sqlrepo.New(db)
 	api := shards.API{Repo: repo}
-	space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Config", spacesmodel.WithShardSize(1<<16))
+	space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 	source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 	require.NoError(t, err)
