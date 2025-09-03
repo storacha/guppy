@@ -91,7 +91,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := a.roomInShard(s, node, space)
+		hasRoom, err := roomInShard(s, node, space)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -121,7 +121,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 	return closed, nil
 }
 
-func (a *API) roomInShard(shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
+func roomInShard(shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
 	nodeSize := nodeEncodingLength(node)
 
 	if shard.Size()+nodeSize > space.ShardSize() {
