@@ -7,11 +7,11 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"golang.org/x/sync/errgroup"
 )
 
 var log = logging.Logger("preparation/uploads")
@@ -94,7 +94,7 @@ func signal(work chan<- struct{}) {
 func (e executor) execute(ctx context.Context) (cid.Cid, error) {
 	log.Debugf("Executing upload %s in state %s", e.upload.ID(), e.upload.State())
 
-	eg, ctx := errgroup.WithContext(ctx)
+	eg, ctx := bettererrgroup.WithContext(ctx)
 
 	var (
 		scansAvailable        = make(chan struct{}, 1)
