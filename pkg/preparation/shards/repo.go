@@ -16,9 +16,8 @@ type Repo interface {
 	CreateShard(ctx context.Context, uploadID id.UploadID, size uint64) (*model.Shard, error)
 	UpdateShard(ctx context.Context, shard *model.Shard) error
 	ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error)
-
-	GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error)
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64) error
 	FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
+	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 }

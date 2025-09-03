@@ -15,6 +15,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-libstoracha/blobindex"
+	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -66,17 +67,18 @@ var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.CarForShardFunc = API{}.CarForShard
 var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
-	space, err := a.Repo.GetSpaceByUploadID(ctx, uploadID)
+func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error) {
+	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get space for upload %s: %w", uploadID, err)
+		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
+
 	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
-	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, space.DID())
+	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}
@@ -114,7 +116,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, no
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, space.DID(), nodeEncodingLength(node)-node.Size())
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}

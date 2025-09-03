@@ -120,7 +120,6 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 	storachaAPI := storacha.API{
 		Repo:             repo,
 		Client:           client,
-		Space:            space,
 		CarForShard:      shardsAPI.CarForShard,
 		IndexesForUpload: shardsAPI.IndexesForUpload,
 	}
@@ -172,5 +171,5 @@ func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmod
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
-	return a.Uploads.ExecuteUpload(ctx, upload)
+	return a.Uploads.ExecuteUpload(ctx, upload.ID(), upload.SpaceDID())
 }

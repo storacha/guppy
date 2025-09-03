@@ -61,21 +61,6 @@ func (r *Repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmode
 	return r.getSpaceFromRow(row)
 }
 
-// GetSpaceByUploadID retrieves the space associated with an upload.
-func (r *Repo) GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT
-			s.did,
-			s.name,
-			s.created_at,
-			s.shard_size
-		FROM spaces s
-		INNER JOIN uploads u ON u.space_did = s.did
-		WHERE u.id = ?`, uploadID,
-	)
-	return r.getSpaceFromRow(row)
-}
-
 // GetSpaceByName retrieves a space by its name from the repository.
 func (r *Repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Space, error) {
 	row := r.db.QueryRowContext(ctx,
