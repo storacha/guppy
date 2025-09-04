@@ -44,11 +44,12 @@ func newUploadAndScansAPI(t *testing.T) (*uploadmodel.Upload, scans.API) {
 	scansAPI := scans.API{
 		Repo: repo,
 		SourceAccessor: func(ctx context.Context, sourceID id.SourceID) (fs.FS, error) {
-			return nil, nil
+			memFS := afero.NewMemMapFs()
+			err := memFS.Chtimes(".", time.Now(), time.Now())
+			require.NoError(t, err)
+			return afero.NewIOFS(memFS), nil
 		},
-		WalkerFn: func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error) {
-			return nil, nil
-		},
+		WalkerFn: walker.WalkDir,
 	}
 
 	return upload, scansAPI
@@ -91,7 +92,6 @@ func TestExecuteScan(t *testing.T) {
 		upload, err = scansAPI.Repo.GetUploadByID(t.Context(), upload.ID())
 		require.NoError(t, err)
 
-		require.NoError(t, upload.Error())
 		require.Equal(t, rootEntry.ID(), upload.RootFSEntryID())
 	})
 

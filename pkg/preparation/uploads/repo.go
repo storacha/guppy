@@ -14,8 +14,6 @@ import (
 type Repo interface {
 	// GetUploadByID retrieves an upload by its unique ID.
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadmodel.Upload, error)
-	// GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-	GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
 	// CreateUploads creates uploads for a given space
 	CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*uploadmodel.Upload, error)
 	// UpdateUpload updates the state of an upload in the repository.

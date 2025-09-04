@@ -35,14 +35,8 @@ var _ uploads.ExecuteScanFunc = API{}.ExecuteScan
 
 func (a API) ExecuteScan(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
-	if upload.State() == uploadmodel.UploadStatePending {
-		err = upload.Start()
-		if err != nil {
-			return fmt.Errorf("starting upload: %w", err)
-		}
-	}
-	if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
-		return fmt.Errorf("updating upload: %w", err)
+	if err != nil {
+		return fmt.Errorf("getting upload by ID: %w", err)
 	}
 
 	fsEntry, err := a.executeScan(ctx, upload, fsEntryCb)

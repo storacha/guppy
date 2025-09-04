@@ -7,7 +7,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
-	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +32,6 @@ func TestCreateUploads(t *testing.T) {
 		require.Equal(t, space.DID(), upload.SpaceDID())
 		require.Equal(t, sourceIDs[i], upload.SourceID())
 		require.NotEmpty(t, upload.CreatedAt())
-		require.Equal(t, model.UploadStatePending, upload.State())
 		require.Empty(t, upload.RootFSEntryID())
 	}
 }

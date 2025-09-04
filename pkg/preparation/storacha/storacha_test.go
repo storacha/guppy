@@ -210,7 +210,6 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
 
-		upload.Start()
 		upload.SetRootCID(rootLink.(cidlink.Link).Cid)
 		err = repo.UpdateUpload(t.Context(), upload)
 		require.NoError(t, err)
