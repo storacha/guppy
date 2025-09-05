@@ -244,30 +244,30 @@ func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceI
 }
 
 // NodeWriter is a function type for writing a Node to the database.
-type NodeWriter func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error
+type NodeWriter func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error
 
 // WriteNodeToDatabase writes a Node to the database using the provided writer function.
 func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 	switch n := node.(type) {
 	case *UnixFSNode:
-		return writer(n.cid, n.size, n.spaceDID, n.ufsdata, "", id.Nil, 0)
+		return writer(n.cid, n.size, n.spaceDID, n.ufsdata, nil, id.Nil, nil)
 	case *RawNode:
-		return writer(n.cid, n.size, n.spaceDID, nil, n.path, n.sourceID, n.offset)
+		return writer(n.cid, n.size, n.spaceDID, nil, &n.path, n.sourceID, &n.offset)
 	default:
 		return fmt.Errorf("unsupported node type: %T", node)
 	}
 }
 
 // NodeScanner is a function type for scanning a Node from the database.
-type NodeScanner func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error
+type NodeScanner func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error
 
 // ReadNodeFromDatabase reads a Node from the database using the provided scanner function.
 func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 	var node node
 	var ufsdata []byte
-	var path string
+	var path *string
 	var sourceID id.SourceID
-	var offset uint64
+	var offset *uint64
 	if err := scanner(&node.cid, &node.size, &node.spaceDID, &ufsdata, &path, &sourceID, &offset); err != nil {
 		return nil, err
 	}
@@ -284,9 +284,9 @@ func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 	case cid.Raw:
 		rawNode := &RawNode{
 			node:     node,
-			path:     path,
+			path:     *path,
 			sourceID: sourceID,
-			offset:   offset,
+			offset:   *offset,
 		}
 		if err := validateRawNode(rawNode); err != nil {
 			return nil, err

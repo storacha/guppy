@@ -142,11 +142,11 @@ func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File,
 func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id.SourceID, string, error) {
 	file, err := a.getFileByID(ctx, fileID)
 	if err != nil {
-		return nil, id.SourceID{}, "", err
+		return nil, id.Nil, "", err
 	}
 	fsFile, err := a.openFile(ctx, file)
 	if err != nil {
-		return nil, id.SourceID{}, "", err
+		return nil, id.Nil, "", err
 	}
 	return fsFile, file.SourceID(), file.Path(), nil
 }
