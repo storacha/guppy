@@ -159,8 +159,11 @@ func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Directo
 	}
 	log.Debugf("Building UnixFS directory with %d links", len(pbLinks))
 	l, _, err := builder.BuildUnixFSDirectory(pbLinks, visitor.LinkSystem())
+	if err != nil {
+		return cid.Undef, fmt.Errorf("building UnixFS directory: %w", err)
+	}
 	log.Debugf("Built UnixFS directory with CID: %s", l.(cidlink.Link).Cid)
-	return l.(cidlink.Link).Cid, err
+	return l.(cidlink.Link).Cid, nil
 }
 
 // handleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
