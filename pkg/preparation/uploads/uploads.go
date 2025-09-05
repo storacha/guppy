@@ -23,6 +23,7 @@ type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, n
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
+type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
 
 type API struct {
 	Repo                        Repo
@@ -30,6 +31,7 @@ type API struct {
 	ExecuteDagScansForUpload    ExecuteDagScansForUploadFunc
 	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
 	AddIndexesForUpload         AddIndexesForUploadFunc
+	AddStorachaUploadForUpload  AddStorachaUploadForUploadFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if an existing open shard was closed,
@@ -307,6 +309,11 @@ func (e *executor) runStorachaWorker(ctx context.Context, blobWork <-chan struct
 			err := e.api.AddIndexesForUpload(ctx, e.upload.ID())
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", e.upload.ID(), err)
+			}
+
+			err = e.api.AddStorachaUploadForUpload(ctx, e.upload.ID())
+			if err != nil {
+				return fmt.Errorf("`upload/add`ing upload %s: %w", e.upload.ID(), err)
 			}
 
 			return nil

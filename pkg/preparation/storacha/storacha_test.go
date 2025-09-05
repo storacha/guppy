@@ -160,3 +160,73 @@ func TestAddIndexesForUpload(t *testing.T) {
 		}
 	})
 }
+
+func TestAddStorachaUploadForUpload(t *testing.T) {
+	t.Run("`upload/add`s the root and shards", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := mockclient.MockClient{T: t}
+
+		indexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
+			return []io.Reader{}, nil
+		}
+
+		api := storacha.API{
+			Repo:             repo,
+			Client:           &client,
+			Space:            spaceDID,
+			IndexesForUpload: indexesForUpload,
+		}
+
+		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		rootLink := testutil.RandomCID(t)
+
+		shard1Digest, err := multihash.Sum([]byte("CAR OF SHARD 1"), multihash.SHA2_256, -1)
+		require.NoError(t, err)
+		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		require.NoError(t, err)
+		err = shard1.Close()
+		require.NoError(t, err)
+		err = shard1.Added(shard1Digest)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard1)
+		require.NoError(t, err)
+
+		shard2Digest, err := multihash.Sum([]byte("CAR OF SHARD 2"), multihash.SHA2_256, -1)
+		require.NoError(t, err)
+		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		require.NoError(t, err)
+		err = shard2.Close()
+		require.NoError(t, err)
+		err = shard2.Added(shard2Digest)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard2)
+		require.NoError(t, err)
+
+		upload.Start()
+		upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		err = api.AddStorachaUploadForUpload(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		require.Len(t, client.UploadAddInvocations, 1)
+		require.Equal(t, spaceDID, client.UploadAddInvocations[0].Space)
+		require.Equal(t, rootLink, client.UploadAddInvocations[0].Root)
+		require.ElementsMatch(t, []cidlink.Link{
+			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard1Digest)},
+			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard2Digest)},
+		}, client.UploadAddInvocations[0].Shards)
+	})
+}

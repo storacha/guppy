@@ -11,6 +11,7 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
@@ -25,6 +26,7 @@ import (
 type Client interface {
 	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
 	SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error
+	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
 }
 
 var _ Client = (*client.Client)(nil)
@@ -43,6 +45,7 @@ type API struct {
 
 var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
 var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
+var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
 func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
 	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
@@ -94,6 +97,31 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID) erro
 		if err != nil {
 			return fmt.Errorf("failed to add index link to space %s: %w", a.Space, err)
 		}
+	}
+
+	return nil
+}
+
+func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID) error {
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
+	}
+
+	shards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateAdded)
+	if err != nil {
+		return fmt.Errorf("failed to get shards for upload %s: %w", uploadID, err)
+	}
+
+	var shardLinks []ipld.Link
+	for _, shard := range shards {
+		shardCID := cid.NewCidV1(uint64(multicodec.Car), shard.Digest())
+		shardLinks = append(shardLinks, cidlink.Link{Cid: shardCID})
+	}
+
+	_, err = a.Client.UploadAdd(ctx, a.Space, cidlink.Link{Cid: upload.RootCID()}, shardLinks)
+	if err != nil {
+		return fmt.Errorf("failed to add upload %s to space %s: %w", uploadID, a.Space, err)
 	}
 
 	return nil
