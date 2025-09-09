@@ -107,7 +107,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 	})
 }
 
-func TestAddIndexForUpload(t *testing.T) {
+func TestAddIndexesForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s an index CAR", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
@@ -115,15 +115,18 @@ func TestAddIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		indexForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
-			return bytes.NewReader([]byte(fmt.Sprintf("INDEX OF UPLOAD: %s", upload.ID()))), nil
+		IndexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
+			return []io.Reader{
+				bytes.NewReader([]byte(fmt.Sprintf("INDEX 1 OF UPLOAD: %s", upload.ID()))),
+				bytes.NewReader([]byte(fmt.Sprintf("INDEX 2 OF UPLOAD: %s", upload.ID()))),
+			}, nil
 		}
 
 		api := storacha.API{
-			Repo:           repo,
-			Client:         &client,
-			Space:          spaceDID,
-			IndexForUpload: indexForUpload,
+			Repo:             repo,
+			Client:           &client,
+			Space:            spaceDID,
+			IndexesForUpload: IndexesForUpload,
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -135,18 +138,25 @@ func TestAddIndexForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
-		err = api.AddIndexForUpload(t.Context(), upload.ID())
+		err = api.AddIndexesForUpload(t.Context(), upload.ID())
 		require.NoError(t, err)
 
-		expectedIndexBlob := fmt.Appendf(nil, "INDEX OF UPLOAD: %s", upload.ID())
-		expectedIndexCID, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(expectedIndexBlob)
-		require.NoError(t, err)
+		expectedIndexBlobs := [][]byte{
+			fmt.Appendf(nil, "INDEX 1 OF UPLOAD: %s", upload.ID()),
+			fmt.Appendf(nil, "INDEX 2 OF UPLOAD: %s", upload.ID()),
+		}
 
-		require.Len(t, client.SpaceBlobAddInvocations, 1)
-		require.Equal(t, expectedIndexBlob, client.SpaceBlobAddInvocations[0].BlobAdded)
-		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
+		require.Len(t, client.SpaceBlobAddInvocations, len(expectedIndexBlobs))
+		require.Len(t, client.SpaceIndexAddInvocations, len(expectedIndexBlobs))
 
-		require.Len(t, client.SpaceIndexAddInvocations, 1)
-		require.Equal(t, cidlink.Link{Cid: expectedIndexCID}, client.SpaceIndexAddInvocations[0].IndexLink)
+		for i, blob := range expectedIndexBlobs {
+			require.Equal(t, blob, client.SpaceBlobAddInvocations[i].BlobAdded)
+			require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[i].Space)
+
+			cid, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(blob)
+			require.NoError(t, err)
+
+			require.Equal(t, cidlink.Link{Cid: cid}, client.SpaceIndexAddInvocations[i].IndexLink)
+		}
 	})
 }

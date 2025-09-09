@@ -240,8 +240,9 @@ func TestIndexForUpload(t *testing.T) {
 	t.Run("returns a reader of an index of the upload", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		api := shards.API{
-			Repo:       repo,
-			NodeReader: stubNodeReader{},
+			Repo:             repo,
+			NodeReader:       stubNodeReader{},
+			MaxNodesPerIndex: 5,
 		}
 
 		spaceDID, err := did.Parse("did:storacha:space:example")
@@ -256,17 +257,33 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		node2, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 200, spaceDID, "dir/file2", id.New(), 0)
 		require.NoError(t, err)
-		node3, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 300, spaceDID, "dir/dir2/file3", id.New(), 0)
+		node3, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 300, spaceDID, "dir/file3", id.New(), 0)
+		require.NoError(t, err)
+		node4, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 400, spaceDID, "dir/file4", id.New(), 0)
+		require.NoError(t, err)
+		node5, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 500, spaceDID, "dir/file5", id.New(), 0)
+		require.NoError(t, err)
+		node6, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 600, spaceDID, "dir/file6", id.New(), 0)
 		require.NoError(t, err)
 
 		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		require.NoError(t, err)
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		require.NoError(t, err)
+		shard3, err := repo.CreateShard(t.Context(), upload.ID(), 30)
+		require.NoError(t, err)
 
 		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node1.CID(), spaceDID, 1)
 		require.NoError(t, err)
 		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node2.CID(), spaceDID, 2)
 		require.NoError(t, err)
 		err = repo.AddNodeToShard(t.Context(), shard2.ID(), node3.CID(), spaceDID, 3)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node4.CID(), spaceDID, 4)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node5.CID(), spaceDID, 5)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node6.CID(), spaceDID, 6)
 		require.NoError(t, err)
 
 		err = shard1.Close()
@@ -285,24 +302,49 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		err = shard2.Close()
 
-		rootCID := testutil.RandomCID(t).(cidlink.Link).Cid
-		err = upload.SetRootCID(rootCID)
+		err = shard3.Close()
+		digest3, err := multihash.Encode([]byte("shard3 digest"), multihash.IDENTITY)
+		err = shard3.Added(digest3)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard3)
+		require.NoError(t, err)
+		err = shard3.Close()
+
+		rootLink := testutil.RandomCID(t)
+		err = upload.SetRootCID(rootLink.(cidlink.Link).Cid)
 		require.NoError(t, err)
 		err = repo.UpdateUpload(t.Context(), upload)
 		require.NoError(t, err)
 
-		indexReader, err := api.IndexForUpload(t.Context(), upload)
-		index, err := blobindex.Extract(indexReader)
+		indexReaders, err := api.IndexesForUpload(t.Context(), upload)
 		require.NoError(t, err)
+		indexes := make([]blobindex.ShardedDagIndexView, 0, 2)
+		for _, indexReader := range indexReaders {
+			index, err := blobindex.Extract(indexReader)
+			require.NoError(t, err)
+			indexes = append(indexes, index)
+		}
 
-		require.Equal(t, cidlink.Link{Cid: rootCID}, index.Content())
-		require.Equal(t, 2, index.Shards().Size(), "index should have two shards")
+		require.Len(t, indexes, 2, "should return two indexes")
+		index1 := indexes[0]
+		index2 := indexes[1]
 
-		require.Equal(t, 2, index.Shards().Get(digest1).Size(), "first shard should have two slices")
-		require.Equal(t, blobindex.Position{Offset: 10 + 1, Length: 100}, index.Shards().Get(digest1).Get(node1.CID().Hash()))
-		require.Equal(t, blobindex.Position{Offset: 10 + 1 + 100 + 2, Length: 200}, index.Shards().Get(digest1).Get(node2.CID().Hash()))
-		require.Equal(t, 1, index.Shards().Get(digest2).Size(), "second shard should have one slice")
-		require.Equal(t, blobindex.Position{Offset: 20 + 3, Length: 300}, index.Shards().Get(digest2).Get(node3.CID().Hash()))
+		require.Equal(t, rootLink, index1.Content())
+		require.Equal(t, 2, index1.Shards().Size(), "first index should have two shards")
+
+		require.Equal(t, 2, index1.Shards().Get(digest1).Size(), "first shard should have two slices")
+		require.Equal(t, blobindex.Position{Offset: 10 + 1, Length: 100}, index1.Shards().Get(digest1).Get(node1.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 10 + 1 + 100 + 2, Length: 200}, index1.Shards().Get(digest1).Get(node2.CID().Hash()))
+		require.Equal(t, 1, index1.Shards().Get(digest2).Size(), "second shard should have one slice")
+		require.Equal(t, blobindex.Position{Offset: 20 + 3, Length: 300}, index1.Shards().Get(digest2).Get(node3.CID().Hash()))
+
+		require.Equal(t, rootLink, index2.Content())
+		require.Equal(t, 1, index2.Shards().Size(), "second index should have one shard")
+
+		require.Equal(t, 3, index2.Shards().Get(digest3).Size(), "shard should have three slices")
+		require.Equal(t, blobindex.Position{Offset: 30 + 4, Length: 400}, index2.Shards().Get(digest3).Get(node4.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 30 + 4 + 400 + 5, Length: 500}, index2.Shards().Get(digest3).Get(node5.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 30 + 4 + 400 + 5 + 500 + 6, Length: 600}, index2.Shards().Get(digest3).Get(node6.CID().Hash()))
 	})
 
 	t.Run("for an upload with no root CID, returns an error", func(t *testing.T) {
@@ -320,7 +362,7 @@ func TestIndexForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
-		indexReader, err := api.IndexForUpload(t.Context(), upload)
+		indexReader, err := api.IndexesForUpload(t.Context(), upload)
 		require.ErrorContains(t, err, "no root CID set yet on upload")
 		require.Nil(t, indexReader)
 	})

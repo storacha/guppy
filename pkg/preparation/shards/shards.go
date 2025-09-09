@@ -56,14 +56,15 @@ type NodeDataGetter interface {
 
 // API provides methods to interact with the Shards in the repository.
 type API struct {
-	Repo       Repo
-	NodeReader NodeDataGetter
+	Repo             Repo
+	NodeReader       NodeDataGetter
+	MaxNodesPerIndex int
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.CarForShardFunc = API{}.CarForShard
-var _ storacha.IndexForUploadFunc = API{}.IndexForUpload
+var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	space, err := a.Repo.GetSpaceByUploadID(ctx, uploadID)
@@ -221,41 +222,73 @@ func (lr *LazyReader) Read(p []byte) (n int, err error) {
 	return lr.r.Read(p)
 }
 
-func (a API) IndexForUpload(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error) {
+func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
 	if upload.RootCID() == cid.Undef {
 		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
 	}
-
-	index := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, 0)
 
 	shards, err := a.Repo.ShardsForUploadByStatus(ctx, upload.ID(), model.ShardStateAdded)
 	if err != nil {
 		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
 	}
 
+	var indexes []blobindex.ShardedDagIndexView
+	// Keep track of how many slices are in the current index, rather than sum
+	// them constantly.
+	currentIndexSliceCount := 0
+
+	currentIndex := func() blobindex.ShardedDagIndexView {
+		return indexes[len(indexes)-1]
+	}
+
+	startNewIndex := func() {
+		nextIndex := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
+		indexes = append(indexes, nextIndex)
+		currentIndexSliceCount = 0
+	}
+
+	startNewIndex()
+
 	for _, s := range shards {
-		if s.Digest() == nil || len(s.Digest()) == 0 {
-			return nil, fmt.Errorf("added shard %s has no digest set", s.ID())
-		}
+		shardSlices := blobindex.NewMultihashMap[blobindex.Position](-1)
 
 		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
 			position := blobindex.Position{
 				Offset: shardOffset,
 				Length: node.Size(),
 			}
-			index.SetSlice(s.Digest(), node.CID().Hash(), position)
+			shardSlices.Set(node.CID().Hash(), position)
 
 			return nil
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", s.ID(), err)
 		}
+
+		if shardSlices.Size() > a.MaxNodesPerIndex {
+			return nil, fmt.Errorf("shard %s has %d nodes, exceeding max of %d", s.ID(), shardSlices.Size(), a.MaxNodesPerIndex)
+		}
+
+		if currentIndexSliceCount+shardSlices.Size() > a.MaxNodesPerIndex {
+			startNewIndex()
+		}
+
+		if s.Digest() == nil || len(s.Digest()) == 0 {
+			return nil, fmt.Errorf("added shard %s has no digest set", s.ID())
+		}
+
+		currentIndex().Shards().Set(s.Digest(), shardSlices)
+		currentIndexSliceCount += shardSlices.Size()
 	}
 
-	indexReader, err := blobindex.Archive(index)
-	if err != nil {
-		return nil, fmt.Errorf("archiving index for upload %s: %w", upload.ID(), err)
+	indexReaders := make([]io.Reader, 0, len(indexes))
+	for _, index := range indexes {
+		indexReader, err := blobindex.Archive(index)
+		if err != nil {
+			return nil, fmt.Errorf("archiving index for upload %s: %w", upload.ID(), err)
+		}
+		indexReaders = append(indexReaders, indexReader)
 	}
 
-	return indexReader, nil
+	return indexReaders, nil
 }

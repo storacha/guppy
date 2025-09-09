@@ -30,19 +30,19 @@ type Client interface {
 var _ Client = (*client.Client)(nil)
 
 type CarForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
-type IndexForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) (io.Reader, error)
+type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
 
 // API provides methods to interact with Storacha.
 type API struct {
-	Repo           Repo
-	Client         Client
-	Space          did.DID
-	CarForShard    CarForShardFunc
-	IndexForUpload IndexForUploadFunc
+	Repo             Repo
+	Client           Client
+	Space            did.DID
+	CarForShard      CarForShardFunc
+	IndexesForUpload IndexesForUploadFunc
 }
 
 var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
-var _ uploads.AddIndexForUploadFunc = API{}.AddIndexForUpload
+var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 
 func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
 	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
@@ -69,26 +69,31 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	return nil
 }
 
-func (a API) AddIndexForUpload(ctx context.Context, uploadID id.UploadID) error {
+func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
 	}
-	indexReader, err := a.IndexForUpload(ctx, upload)
-	indexBytes, err := io.ReadAll(indexReader)
+	indexReaders, err := a.IndexesForUpload(ctx, upload)
 	if err != nil {
-		return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
+		return fmt.Errorf("failed to get index for upload %s: %w", uploadID, err)
 	}
+	for _, indexReader := range indexReaders {
+		indexBytes, err := io.ReadAll(indexReader)
+		if err != nil {
+			return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
+		}
 
-	indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), a.Space)
-	if err != nil {
-		return fmt.Errorf("failed to add index to space %s: %w", a.Space, err)
-	}
+		indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), a.Space)
+		if err != nil {
+			return fmt.Errorf("failed to add index to space %s: %w", a.Space, err)
+		}
 
-	indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
-	err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, a.Space)
-	if err != nil {
-		return fmt.Errorf("failed to add index link to space %s: %w", a.Space, err)
+		indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
+		err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, a.Space)
+		if err != nil {
+			return fmt.Errorf("failed to add index link to space %s: %w", a.Space, err)
+		}
 	}
 
 	return nil
