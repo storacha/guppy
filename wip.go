@@ -11,9 +11,8 @@ import (
 
 	"fmt"
 
-	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/preparation"
-	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/urfave/cli/v2"
 	_ "modernc.org/sqlite"
@@ -24,15 +23,29 @@ func init() {
 		Name:   "large-upload",
 		Usage:  "WIP - Upload a large amount of data to the service",
 		Action: largeUpload,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "space",
+				Value: "",
+				Usage: "DID of space to upload to.",
+			},
+		},
 	})
 }
 
 func largeUpload(cCtx *cli.Context) error {
+	spaceDID := cmdutil.MustParseDID(cCtx.String("space"))
+	root := cCtx.Args().First()
+	if root == "" {
+		return fmt.Errorf("command requires a root path argument")
+	}
+
 	db, err := sql.Open("sqlite", "guppy.db")
 	if err != nil {
 		return fmt.Errorf("command failed to open in-memory SQLite database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	_, err = db.ExecContext(cCtx.Context, sqlrepo.Schema)
 	if err != nil {
@@ -41,22 +54,14 @@ func largeUpload(cCtx *cli.Context) error {
 
 	repo := sqlrepo.New(db)
 
-	spaceDID, err := did.Parse("did:example:replace-this-with-an-argument")
-	if err != nil {
-		return fmt.Errorf("command failed to parse space DID: %w", err)
-	}
-
-	// TODO: Replace with a real client.
-	var client shards.SpaceBlobAdder
-
-	api := preparation.NewAPI(repo, client, spaceDID)
+	api := preparation.NewAPI(repo, cmdutil.MustGetClient(), spaceDID)
 
 	_, err = api.FindOrCreateSpace(cCtx.Context, spaceDID, "Large Upload Space")
 	if err != nil {
 		return fmt.Errorf("command failed to create space: %w", err)
 	}
 
-	source, err := api.CreateSource(cCtx.Context, "Large Upload Source", ".")
+	source, err := api.CreateSource(cCtx.Context, "Large Upload Source", root)
 	if err != nil {
 		return fmt.Errorf("command failed to create source: %w", err)
 	}

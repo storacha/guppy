@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   path TEXT,
   source_id BLOB,
   OFFSET INTEGER,
+  PRIMARY KEY(cid, space_did),
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (space_did) REFERENCES spaces(did),
   CONSTRAINT unix_fs_or_raw_node CHECK (
