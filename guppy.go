@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/internal/config"
 	"github.com/storacha/guppy/internal/upload"
 	"github.com/storacha/guppy/pkg/didmailto"
 	"github.com/urfave/cli/v2"
@@ -22,6 +23,7 @@ import (
 var log = logging.Logger("guppy/main")
 
 var commands = []*cli.Command{
+	config.ConfigCommand(),
 	{
 		Name:   "whoami",
 		Usage:  "Print information about the current agent.",
