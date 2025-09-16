@@ -272,7 +272,12 @@ func TestExecuteUpload(t *testing.T) {
 		require.Nil(t, rootLink, "expected `upload/add` not to have been called yet")
 		require.Nil(t, shardLinks, "expected `upload/add` not to have been called yet")
 
-		// The second time, it should succeedfs
+		// Now, retry.
+
+		upload, err = api.GetUploadByID(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		// The second time, it should succeed
 		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err, "expected upload to succeed on retry")
 		require.NotEmpty(t, returnedRootCid, "expected non-empty root CID")
