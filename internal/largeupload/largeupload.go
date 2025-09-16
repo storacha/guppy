@@ -25,6 +25,7 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/urfave/cli/v2"
 	_ "modernc.org/sqlite"
@@ -112,6 +113,8 @@ func (t nullTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 func Demo(cCtx *cli.Context) error {
+	resumeUploadID := cCtx.String("resume")
+
 	repo, _, err := makeRepo(cCtx.Context)
 	if err != nil {
 		return err
@@ -184,9 +187,25 @@ func Demo(cCtx *cli.Context) error {
 	}))
 
 	var upload *uploadsmodel.Upload
-	upload, err = makeUpload(cCtx.Context, repo, api, spaceDID, ".")
-	if err != nil {
-		return err
+	if resumeUploadID != "" {
+		id, err := id.Parse(resumeUploadID)
+		if err != nil {
+			return fmt.Errorf("parsing upload ID: %w", err)
+		}
+
+		upload, err = api.GetUploadByID(cCtx.Context, id)
+		if err != nil {
+			return fmt.Errorf("getting upload by ID: %w", err)
+		}
+		if upload == nil {
+			return fmt.Errorf("no upload found with ID %s", resumeUploadID)
+		}
+		fmt.Println("Resuming upload", upload.ID())
+	} else {
+		upload, err = makeUpload(cCtx.Context, repo, api, spaceDID, ".")
+		if err != nil {
+			return err
+		}
 	}
 
 	_, err = tea.NewProgram(newUploadModel(cCtx.Context, repo, api, upload)).Run()

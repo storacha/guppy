@@ -30,6 +30,13 @@ func init() {
 		&cli.Command{
 			Name:   "large-upload-demo",
 			Action: largeupload.Demo,
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:  "resume",
+					Value: "",
+					Usage: "An existing upload ID to resume.",
+				},
+			},
 		},
 	)
 }
