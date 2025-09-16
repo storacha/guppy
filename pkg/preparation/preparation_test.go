@@ -24,7 +24,6 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
 	"github.com/storacha/go-libstoracha/blobindex"
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
@@ -40,13 +39,11 @@ import (
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/pkg/client"
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/storacha"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,19 +55,6 @@ func randomBytes(n int) []byte {
 		b[i] = byte(rand.Intn(256))
 	}
 	return b
-}
-
-// putTrackingClient is a [storacha.putTrackingClient] that wraps a
-// [client.putTrackingClient] to use a custom putClient.
-type putTrackingClient struct {
-	*client.Client
-	putClient *http.Client
-}
-
-var _ storacha.Client = (*putTrackingClient)(nil)
-
-func (c *putTrackingClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
-	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
 }
 
 // prepareTestClient creates a new test [storacha.Client] that uses the given
@@ -86,8 +70,8 @@ func prepareTestClient(
 	indexLink *ipld.Link,
 	rootLink *ipld.Link,
 	shardLinks *[]ipld.Link,
-) *putTrackingClient {
-	client := &putTrackingClient{
+) *ctestutil.ClientWithCustomPut {
+	client := &ctestutil.ClientWithCustomPut{
 		Client: helpers.Must(ctestutil.Client(
 			ctestutil.WithSpaceBlobAdd(),
 
@@ -135,7 +119,7 @@ func prepareTestClient(
 				),
 			),
 		)),
-		putClient: putClient,
+		PutClient: putClient,
 	}
 
 	// Delegate * on the space to the client
