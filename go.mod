@@ -23,6 +23,8 @@ require (
 	modernc.org/sqlite v1.38.0
 )
 
+require github.com/wordgen/wordlists/eff v0.3.0
+
 require (
 	github.com/alecthomas/units v0.0.0-20240927000941-0f3dac36c52b // indirect
 	github.com/crackcomm/go-gitignore v0.0.0-20241020182519-7843d2ba8fdf // indirect
