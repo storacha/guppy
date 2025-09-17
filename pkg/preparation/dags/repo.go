@@ -19,4 +19,5 @@ type Repo interface {
 	GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error)
 	DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error)
 	DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error)
+	DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
 }

@@ -2,6 +2,7 @@ package uploads
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ipfs/go-cid"
@@ -10,6 +11,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -23,6 +25,7 @@ type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool
 type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type RemoveBadNodesFunc func(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
 
 type API struct {
 	Repo                        Repo
@@ -31,6 +34,7 @@ type API struct {
 	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
 	AddIndexesForUpload         AddIndexesForUploadFunc
 	AddStorachaUploadForUpload  AddStorachaUploadForUploadFunc
+	RemoveBadNodes              RemoveBadNodesFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if an existing open shard was closed,
@@ -221,6 +225,38 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 		func() error {
 			err := api.SpaceBlobAddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
+				log.Debug("Error adding shards for upload ", uploadID, ": ", err)
+				var badNodesErr types.ErrBadNodes
+				if errors.As(err, &badNodesErr) {
+					upload, err := api.Repo.GetUploadByID(ctx, uploadID)
+					if err != nil {
+						return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, err)
+					}
+
+					var cids []cid.Cid
+					for _, e := range badNodesErr.Errs() {
+						cids = append(cids, e.CID())
+					}
+					log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
+					err = api.RemoveBadNodes(ctx, upload.SpaceDID(), cids)
+					if err != nil {
+						return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
+					}
+
+					err = upload.Invalidate()
+					if err != nil {
+						return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
+					}
+
+					err = api.Repo.UpdateUpload(ctx, upload)
+					if err != nil {
+						return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
+					}
+
+					// Bubble the error to fail this attempt entirely. We're now ready for
+					// a retry.
+					return badNodesErr
+				}
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
 

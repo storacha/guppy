@@ -36,6 +36,11 @@ func init() {
 					Value: "",
 					Usage: "An existing upload ID to resume.",
 				},
+				&cli.StringFlag{
+					Name:  "alter-files",
+					Value: "",
+					Usage: "Change the files on the \"filesystem\" between runs to simulate file changes.",
+				},
 			},
 		},
 	)

@@ -2,8 +2,8 @@ package mockclient
 
 import (
 	"context"
+	"fmt"
 	"io"
-	"testing"
 
 	"github.com/ipld/go-ipld-prime"
 	"github.com/multiformats/go-multihash"
@@ -12,12 +12,10 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
-	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
 type MockClient struct {
-	T                        *testing.T
 	SpaceBlobAddInvocations  []spaceBlobAddInvocation
 	SpaceIndexAddInvocations []spaceIndexAddInvocation
 	UploadAddInvocations     []uploadAddInvocation
@@ -43,7 +41,9 @@ var _ storacha.Client = (*MockClient)(nil)
 
 func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	contentBytes, err := io.ReadAll(content)
-	require.NoError(m.T, err, "reading content for SpaceBlobAdd")
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading content for SpaceBlobAdd: %w", err)
+	}
 
 	m.SpaceBlobAddInvocations = append(m.SpaceBlobAddInvocations, spaceBlobAddInvocation{
 		Space:     space,

@@ -20,6 +20,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -168,7 +169,8 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 		newReader := NewLazyReader(func() ([]byte, error) {
 			data, err := a.NodeReader.GetData(ctx, node)
 			if err != nil {
-				return nil, fmt.Errorf("getting data for node %s: %w", node.CID(), err)
+				log.Debug("Error getting data for node ", node.CID(), ": ", err)
+				return nil, a.makeErrBadNodes(ctx, shardID)
 			}
 			return data, nil
 		})
@@ -176,11 +178,42 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 		readers = append(readers, lengthReader, cidReader, newReader)
 		return nil
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
 	return io.MultiReader(readers...), nil
+}
+
+// makeErrBadNodes attempts to read data from all nodes in the given shard, and
+// returns an [ErrBadNodes] for every one that fails. This is a relatively
+// expensive check, so it should only be used once we know that we're failing.
+// By communicating upstream all failing nodes from the shard, we can handle
+// them all at once, and avoid having to restart the upload again for each bad
+// node.
+func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
+	// Collect the nodes first, because we can't read data for each node while
+	// holding the lock on the database that ForEachNode has. This means holding a
+	// bunch of nodes in memory, but it's limited to the size of a shard.
+	var nodes []dagsmodel.Node
+	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
+		nodes = append(nodes, node)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+	}
+
+	var errs []types.ErrBadNode
+	for _, node := range nodes {
+		_, err := a.NodeReader.GetData(ctx, node)
+		if err != nil {
+			errs = append(errs, types.NewErrBadNode(node.CID(), err))
+		}
+	}
+
+	return types.NewErrBadNodes(errs)
 }
 
 func lengthVarint(size uint64) []byte {

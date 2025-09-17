@@ -124,8 +124,8 @@ CREATE TABLE IF NOT EXISTS links (
   parent_id BLOB NOT NULL,
   space_did BLOB NOT NULL,
   ordering INTEGER NOT NULL,
-  FOREIGN KEY (parent_id, space_did) REFERENCES nodes(cid, space_did),
-  FOREIGN KEY (hash, space_did) REFERENCES nodes(cid, space_did),
+  FOREIGN KEY (parent_id, space_did) REFERENCES nodes(cid, space_did) ON DELETE CASCADE,
+  FOREIGN KEY (hash, space_did) REFERENCES nodes(cid, space_did) ON DELETE CASCADE,
   FOREIGN KEY (space_did) REFERENCES spaces(did),
   PRIMARY KEY (
     name,
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS nodes_in_shards (
   shard_id BLOB NOT NULL,
   -- Offset of the node in the shard
   shard_offset INTEGER NOT NULL,
-  FOREIGN KEY (node_cid, space_did) REFERENCES nodes(cid, space_did),
+  FOREIGN KEY (node_cid, space_did) REFERENCES nodes(cid, space_did) ON DELETE CASCADE,
   FOREIGN KEY (shard_id) REFERENCES shards(id),
   PRIMARY KEY (node_cid, space_did, shard_id)
 ) STRICT;

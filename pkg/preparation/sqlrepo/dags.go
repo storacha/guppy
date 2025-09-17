@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -336,4 +337,58 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 		)
 		return err
 	})
+}
+
+func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error {
+	if len(nodeCIDs) == 0 {
+		return nil
+	}
+
+	var dbCids []any
+	for _, c := range nodeCIDs {
+		dbCids = append(dbCids, util.DbCid(&c))
+	}
+
+	placeholders := strings.Repeat("?,", len(nodeCIDs)-1) + "?"
+
+	// Clear node from uploads and dag scans first due to foreign key constraints.
+	// Note that `ON DELETE SET NULL` won't work for us here, as it'll also
+	// attempt to set the `space_did` to `NULL`, since it's part of the foreign
+	// key.
+
+	_, err := r.db.ExecContext(ctx,
+		fmt.Sprintf(`
+		UPDATE dag_scans
+		SET cid = NULL
+		WHERE cid IN (%s)
+		  AND space_did = ?`, placeholders),
+		append(dbCids, util.DbDID(&spaceDID))...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to clear nodes from dag_scans for space %s: %w", spaceDID, err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		fmt.Sprintf(`
+		UPDATE uploads
+		SET root_cid = NULL
+		WHERE root_cid IN (%s)
+		  AND space_did = ?`, placeholders),
+		append(dbCids, util.DbDID(&spaceDID))...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to clear nodes from uploads for space %s: %w", spaceDID, err)
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		fmt.Sprintf(`
+		DELETE FROM nodes
+		WHERE cid IN (%s)
+		  AND space_did = ?`, placeholders),
+		append(dbCids, util.DbDID(&spaceDID))...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete node for space %s: %w", spaceDID, err)
+	}
+	return nil
 }

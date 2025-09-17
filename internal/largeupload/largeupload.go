@@ -3,9 +3,11 @@ package largeupload
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +27,7 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/urfave/cli/v2"
@@ -74,6 +77,33 @@ func makeRepo(ctx context.Context) (*sqlrepo.Repo, func() error, error) {
 	return repo, db.Close, nil
 }
 
+func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, upload *uploadsmodel.Upload) error {
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, upload)).Run()
+	if err != nil {
+		return fmt.Errorf("command failed to run upload UI: %w", err)
+	}
+	if um, ok := m.(uploadModel); ok && um.err != nil {
+		var errBadNodes types.ErrBadNodes
+		if errors.As(um.err, &errBadNodes) {
+			var sb strings.Builder
+			sb.WriteString("Upload failed due to out-of-date scan:\n")
+			for i, ebn := range errBadNodes.Errs() {
+				if i >= 3 {
+					sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
+					break
+				}
+				sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+			}
+			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
+
+			fmt.Print(sb.String())
+		} else {
+			return fmt.Errorf("upload failed: %w", um.err)
+		}
+	}
+	return nil
+}
+
 func Action(cCtx *cli.Context) error {
 	spaceDID := cmdutil.MustParseDID(cCtx.String("space"))
 	root := cCtx.Args().First()
@@ -96,10 +126,7 @@ func Action(cCtx *cli.Context) error {
 		return err
 	}
 
-	_, err = tea.NewProgram(newUploadModel(cCtx.Context, repo, api, upload)).Run()
-	if err != nil {
-		return fmt.Errorf("command failed to run upload UI: %w", err)
-	}
+	err = runUploadUI(cCtx.Context, repo, api, upload)
 	return err
 }
 
@@ -114,6 +141,7 @@ func (t nullTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 func Demo(cCtx *cli.Context) error {
 	resumeUploadID := cCtx.String("resume")
+	alterFiles := cCtx.Bool("alter-files")
 
 	repo, _, err := makeRepo(cCtx.Context)
 	if err != nil {
@@ -183,6 +211,10 @@ func Demo(cCtx *cli.Context) error {
 		PutClient: &http.Client{Transport: nullTransport{}},
 	}
 	api := preparation.NewAPI(repo, customPutClient, spaceDID, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+		if alterFiles {
+			return fakefs.New(1), nil
+		}
+
 		return fakefs.New(0), nil
 	}))
 
@@ -208,10 +240,6 @@ func Demo(cCtx *cli.Context) error {
 		}
 	}
 
-	_, err = tea.NewProgram(newUploadModel(cCtx.Context, repo, api, upload)).Run()
-	if err != nil {
-		return fmt.Errorf("command failed to run upload UI: %w", err)
-	}
-
+	err = runUploadUI(cCtx.Context, repo, api, upload)
 	return err
 }

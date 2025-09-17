@@ -31,7 +31,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
-		client := mockclient.MockClient{T: t}
+		client := mockclient.MockClient{}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 			return bytes.NewReader(fmt.Appendf(nil, "CAR OF SHARD: %s", shardID)), nil
@@ -112,7 +112,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
-		client := mockclient.MockClient{T: t}
+		client := mockclient.MockClient{}
 
 		IndexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
 			return []io.Reader{
@@ -165,7 +165,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
-		client := mockclient.MockClient{T: t}
+		client := mockclient.MockClient{}
 
 		indexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
 			return []io.Reader{}, nil

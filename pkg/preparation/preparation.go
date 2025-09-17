@@ -133,6 +133,7 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 		SpaceBlobAddShardsForUpload: storachaAPI.SpaceBlobAddShardsForUpload,
 		AddIndexesForUpload:         storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload:  storachaAPI.AddStorachaUploadForUpload,
+		RemoveBadNodes:              dagsAPI.RemoveBadNodes,
 	}
 
 	return API{
