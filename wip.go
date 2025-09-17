@@ -31,15 +31,17 @@ func init() {
 			Name:   "large-upload-demo",
 			Action: largeupload.Demo,
 			Flags: []cli.Flag{
-				&cli.StringFlag{
+				&cli.BoolFlag{
 					Name:  "resume",
-					Value: "",
-					Usage: "An existing upload ID to resume.",
+					Usage: "Resume a previously interrupted upload.",
 				},
-				&cli.StringFlag{
-					Name:  "alter-files",
-					Value: "",
-					Usage: "Change the files on the \"filesystem\" between runs to simulate file changes.",
+				&cli.BoolFlag{
+					Name:  "alter-metadata",
+					Usage: "Cause an error during DAG generation by changing the modification time in a file on the \"filesystem\" between file opens.",
+				},
+				&cli.BoolFlag{
+					Name:  "alter-data",
+					Usage: "Cause an error during shard generation by changing the data in a file on the \"filesystem\" between file opens.",
 				},
 			},
 		},
