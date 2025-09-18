@@ -21,8 +21,6 @@ const (
 	DAGScanStateAwaitingChildren DAGScanState = "awaiting_children"
 	// DAGScanStatePending indicates that the file system entry is pending scan and has not started yet.
 	DAGScanStatePending DAGScanState = "pending"
-	// DAGScanStateRunning indicates that the file system entry is currently running.
-	DAGScanStateRunning DAGScanState = "running"
 	// DAGScanStateCompleted indicates that the file system entry has completed successfully.
 	DAGScanStateCompleted DAGScanState = "completed"
 	// DAGScanStateFailed indicates that the file system entry has failed.
@@ -33,7 +31,7 @@ const (
 
 func validDAGScanState(state DAGScanState) bool {
 	switch state {
-	case DAGScanStateAwaitingChildren, DAGScanStatePending, DAGScanStateRunning, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
+	case DAGScanStateAwaitingChildren, DAGScanStatePending, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
 		return true
 	default:
 		return false
@@ -54,11 +52,8 @@ type DAGScan interface {
 	State() DAGScanState
 	HasCID() bool
 	CID() cid.Cid
-	Start() error
-	Restart() error
 	Complete(cid cid.Cid) error
 	Fail(errorMessage string) error
-	Cancel() error
 	isDAGScan()
 }
 
@@ -142,43 +137,13 @@ func (d *dagScan) Fail(errorMessage string) error {
 }
 
 func (d *dagScan) Complete(cid cid.Cid) error {
-	if d.state != DAGScanStateRunning {
+	if d.state != DAGScanStatePending {
 		return fmt.Errorf("cannot complete dag scan in state %s", d.state)
 	}
 	d.state = DAGScanStateCompleted
 	d.errorMessage = nil
 	d.updatedAt = time.Now()
 	d.cid = cid
-	return nil
-}
-
-func (d *dagScan) Cancel() error {
-	if TerminatedState(d.state) {
-		return fmt.Errorf("cannot cancel dag scan in state %s", d.state)
-	}
-	d.state = DAGScanStateCanceled
-	d.errorMessage = nil
-	d.updatedAt = time.Now()
-	return nil
-}
-
-func (d *dagScan) Start() error {
-	if d.state != DAGScanStatePending {
-		return fmt.Errorf("cannot start dag scan in state %s", d.state)
-	}
-	d.state = DAGScanStateRunning
-	d.errorMessage = nil
-	d.updatedAt = time.Now()
-	return nil
-}
-
-func (d *dagScan) Restart() error {
-	if d.state != DAGScanStateRunning && d.state != DAGScanStateCanceled {
-		return fmt.Errorf("cannot restart dag scan in state %s", d.state)
-	}
-	d.state = DAGScanStatePending
-	d.errorMessage = nil
-	d.updatedAt = time.Now()
 	return nil
 }
 
