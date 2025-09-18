@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ipfs/go-cid"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 type ErrEmpty struct {
@@ -65,4 +66,26 @@ func (e ErrBadNodes) Unwrap() []error {
 
 func (e ErrBadNodes) Errs() []ErrBadNode {
 	return e.errs
+}
+
+// ErrBadFSEntry indicates that a DAG scan cannot be read or is otherwise invalid.
+type ErrBadFSEntry struct {
+	fsEntryID id.FSEntryID
+	err       error
+}
+
+func NewErrBadFSEntry(fsEntryID id.FSEntryID, err error) ErrBadFSEntry {
+	return ErrBadFSEntry{fsEntryID: fsEntryID, err: err}
+}
+
+func (e ErrBadFSEntry) Error() string {
+	return fmt.Sprintf("bad DAG scan %s: %s", e.fsEntryID, e.err)
+}
+
+func (e ErrBadFSEntry) Unwrap() error {
+	return e.err
+}
+
+func (e ErrBadFSEntry) FsEntryID() id.FSEntryID {
+	return e.fsEntryID
 }

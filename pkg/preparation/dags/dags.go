@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
@@ -85,16 +86,7 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 
 // executeDAGScan executes a dag scan on the given fs entry, creating a unix fs dag for the given file or directory.
 func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) error {
-	err := dagScan.Start()
-	if err != nil {
-		log.Debug("Failed to start dag scan:", err)
-		return fmt.Errorf("starting dag scan: %w", err)
-	}
-	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-		log.Debugf("Failed to update dag scan %s: %v", dagScan.FsEntryID(), err)
-		return fmt.Errorf("updating dag scan: %w", err)
-	}
-
+	var err error
 	var cid cid.Cid
 	switch ds := dagScan.(type) {
 	case *model.FileDAGScan:
@@ -107,20 +99,17 @@ func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB f
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			if err := dagScan.Cancel(); err != nil {
-				return fmt.Errorf("canceling dag scan: %w", err)
-			}
-		} else {
-			if err := dagScan.Fail(err.Error()); err != nil {
-				return fmt.Errorf("failing dag scan: %w", err)
-			}
+			return fmt.Errorf("executing dag scan: %w", err)
 		}
-	} else {
-		log.Debugf("Completing DAG scan for %s with CID:", dagScan.FsEntryID(), cid)
-		if err := dagScan.Complete(cid); err != nil {
-			return fmt.Errorf("completing dag scan: %w", err)
-		}
+
+		return types.NewErrBadFSEntry(dagScan.FsEntryID(), err)
 	}
+
+	log.Debugf("Completing DAG scan for %s with CID:", dagScan.FsEntryID(), cid)
+	if err := dagScan.Complete(cid); err != nil {
+		return fmt.Errorf("completing dag scan: %w", err)
+	}
+
 	// Update the scan in the repository after completion or failure.
 	log.Debugf("Updating dag scan %s after execution", dagScan.FsEntryID())
 	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {

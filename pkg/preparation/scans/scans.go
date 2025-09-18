@@ -7,6 +7,7 @@ import (
 	"io/fs"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
@@ -32,6 +33,7 @@ type API struct {
 }
 
 var _ uploads.ExecuteScanFunc = API{}.ExecuteScan
+var _ uploads.RemoveBadFSEntryFunc = API{}.RemoveBadFSEntry
 
 func (a API) ExecuteScan(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
@@ -111,4 +113,8 @@ func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id
 		return nil, id.Nil, "", err
 	}
 	return fsFile, file.SourceID(), file.Path(), nil
+}
+
+func (a API) RemoveBadFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
+	return a.Repo.DeleteFSEntry(ctx, spaceDID, fsEntryID)
 }
