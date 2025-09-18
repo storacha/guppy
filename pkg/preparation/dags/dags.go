@@ -45,7 +45,7 @@ var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
-		dagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending, model.DAGScanStateAwaitingChildren)
+		dagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending)
 		if err != nil {
 			return fmt.Errorf("getting dag scans for upload %s: %w", uploadID, err)
 		}
@@ -62,18 +62,6 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 					return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 				}
 				executions++
-			case model.DAGScanStateAwaitingChildren:
-				log.Debugf("Handling awaiting children for dag scan %s in state %s", dagScan.FsEntryID(), dagScan.State())
-				if err := a.handleAwaitingChildren(ctx, dagScan); err != nil {
-					return fmt.Errorf("handling awaiting children for dag scan %s: %w", dagScan.FsEntryID(), err)
-				}
-				// if the scan is now in a state where it can be executed, execute it
-				if dagScan.State() == model.DAGScanStatePending {
-					if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
-						return fmt.Errorf("executing dag scan %s after handling awaiting children: %w", dagScan.FsEntryID(), err)
-					}
-					executions++
-				}
 			default:
 				return fmt.Errorf("unexpected dag scan state %s for scan %s", dagScan.State(), dagScan.FsEntryID())
 			}
@@ -137,6 +125,15 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 }
 
 func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.DirectoryDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {
+	hasIncompleteChildren, err := a.Repo.HasIncompleteChildren(ctx, dagScan)
+	if err != nil {
+		return cid.Undef, fmt.Errorf("looking for incomplete children: %w", err)
+	}
+	if hasIncompleteChildren {
+		log.Debugf("Directory DAG scan %s has incomplete children, skipping on this pass", dagScan.FsEntryID())
+		return cid.Undef, nil
+	}
+
 	log.Debugf("Executing directory DAG scan for fsEntryID %s", dagScan.FsEntryID())
 	childLinks, err := a.Repo.DirectoryLinks(ctx, dagScan)
 	if err != nil {
@@ -155,49 +152,6 @@ func (a API) executeDirectoryDAGScan(ctx context.Context, dagScan *model.Directo
 	}
 	log.Debugf("Built UnixFS directory with CID: %s", l.(cidlink.Link).Cid)
 	return l.(cidlink.Link).Cid, nil
-}
-
-// handleAwaitingChildren checks if all child scans of a directory scan are completed and marks the parent scan pending if so.
-func (a API) handleAwaitingChildren(ctx context.Context, dagScan model.DAGScan) error {
-	if dagScan.State() != model.DAGScanStateAwaitingChildren {
-		return fmt.Errorf("DAG scan is not in awaiting children state: %s", dagScan.State())
-	}
-	switch ds := dagScan.(type) {
-	case *model.DirectoryDAGScan:
-		childScans, err := a.Repo.GetChildScans(ctx, ds)
-		if err != nil {
-			return fmt.Errorf("getting child scans: %w", err)
-		}
-		completeScans := make([]model.DAGScan, 0, len(childScans))
-		for _, childScan := range childScans {
-			if childScan.State() == model.DAGScanStateCompleted {
-				completeScans = append(completeScans, childScan)
-			}
-			if childScan.State() == model.DAGScanStateFailed {
-				if err := dagScan.Fail(fmt.Sprintf("child scan failed: %s", childScan.Error())); err != nil {
-					return fmt.Errorf("marking scan as failed: %w", err)
-				}
-				if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-					return fmt.Errorf("updating scan after failure: %w", err)
-				}
-				return nil
-			}
-		}
-		if len(completeScans) == len(childScans) {
-			if err := ds.ChildrenCompleted(); err != nil {
-				return fmt.Errorf("marking children as completed: %w", err)
-			}
-			if err := a.Repo.UpdateDAGScan(ctx, ds); err != nil {
-				return fmt.Errorf("updating directory scan after children completed: %w", err)
-			}
-			return nil // All children completed successfully, mark the scan as pending
-		}
-		return nil // Still awaiting children, nothing to do
-	case *model.FileDAGScan:
-		return fmt.Errorf("DAG scan is not a directory scan: %T", ds)
-	default:
-		return fmt.Errorf("unrecognized DAG scan type: %T", dagScan)
-	}
 }
 
 func toLinks(linkParams []model.LinkParams) ([]dagpb.PBLink, error) {

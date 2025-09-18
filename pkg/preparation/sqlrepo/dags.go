@@ -293,25 +293,31 @@ func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 	return newNode, true, nil
 }
 
-// GetChildScans finds scans for child nodes of a given directory scan's file system entry.
-func (r *Repo) GetChildScans(ctx context.Context, directoryScans *model.DirectoryDAGScan) ([]model.DAGScan, error) {
-	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ?`
-	rows, err := r.db.QueryContext(ctx, query, directoryScans.FsEntryID())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	scanner := r.dagScanScanner(rows)
-	var dagScans []model.DAGScan
-	for rows.Next() {
-		ds, err := model.ReadDAGScanFromDatabase(scanner)
-		if err != nil {
-			return nil, err
-		}
-		dagScans = append(dagScans, ds)
-	}
+// HasIncompleteChildren returns whether the given directory scan has at least
+// one child scan that is not completed.
+func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error) {
+	var dummy int
+	err := r.db.QueryRowContext(ctx,
+		`
+			SELECT 1
+			FROM dag_scans
+			JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id
+			WHERE directory_children.directory_id = X'0874d43f68d443adbfc176020eab51cf'
+			  AND dag_scans.state != 'completed'
+			LIMIT 1
+		`,
+		directoryScans.FsEntryID()).Scan(&dummy)
 
-	return dagScans, rows.Err()
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// No incomplete children found
+			return false, nil
+		}
+		// Actual error
+		return false, err
+	}
+	// Found at least one incomplete child
+	return true, nil
 }
 
 // UpdateDAGScan updates a DAG scan in the repository.

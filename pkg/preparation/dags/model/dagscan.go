@@ -17,8 +17,6 @@ var log = logging.Logger("preparation/dags/model/dagscan")
 type DAGScanState string
 
 const (
-	// DAGScanStateAwaitingChildren indicates that a directory entry is awaiting children to be processed.
-	DAGScanStateAwaitingChildren DAGScanState = "awaiting_children"
 	// DAGScanStatePending indicates that the file system entry is pending scan and has not started yet.
 	DAGScanStatePending DAGScanState = "pending"
 	// DAGScanStateCompleted indicates that the file system entry has completed successfully.
@@ -31,7 +29,7 @@ const (
 
 func validDAGScanState(state DAGScanState) bool {
 	switch state {
-	case DAGScanStateAwaitingChildren, DAGScanStatePending, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
+	case DAGScanStatePending, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
 		return true
 	default:
 		return false
@@ -159,15 +157,6 @@ type DirectoryDAGScan struct {
 
 func (d *DirectoryDAGScan) isDAGScan() {}
 
-func (d *DirectoryDAGScan) ChildrenCompleted() error {
-	if d.state != DAGScanStateAwaitingChildren {
-		return fmt.Errorf("cannot finish children in state %s", d.state)
-	}
-	d.state = DAGScanStatePending
-	d.updatedAt = time.Now()
-	return nil
-}
-
 // NewFileDAGScan creates a new FileDAGScan with the given fsEntryID.
 func NewFileDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID) (*FileDAGScan, error) {
 	fds := &FileDAGScan{
@@ -195,7 +184,7 @@ func NewDirectoryDAGScan(fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID 
 			spaceDID:  spaceDID,
 			createdAt: time.Now(),
 			updatedAt: time.Now(),
-			state:     DAGScanStateAwaitingChildren,
+			state:     DAGScanStatePending,
 		},
 	}
 	if _, err := validateDAGScan(&dds.dagScan); err != nil {
