@@ -78,8 +78,6 @@ CREATE TABLE IF NOT EXISTS dag_scans (
   upload_id BLOB NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  error_message TEXT,
-  state TEXT NOT NULL,
   cid BLOB,
   space_did BLOB NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('file', 'directory')),

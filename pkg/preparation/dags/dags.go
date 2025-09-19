@@ -45,7 +45,7 @@ var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
-		dagScans, err := a.Repo.DAGScansForUploadByStatus(ctx, uploadID, model.DAGScanStatePending)
+		dagScans, err := a.Repo.IncompleteDAGScansForUpload(ctx, uploadID)
 		if err != nil {
 			return fmt.Errorf("getting dag scans for upload %s: %w", uploadID, err)
 		}
@@ -55,16 +55,15 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 		}
 		executions := 0
 		for _, dagScan := range dagScans {
-			switch dagScan.State() {
-			case model.DAGScanStatePending:
-				log.Debugf("Executing dag scan %s in state %s", dagScan.FsEntryID(), dagScan.State())
-				if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
-					return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
-				}
-				executions++
-			default:
-				return fmt.Errorf("unexpected dag scan state %s for scan %s", dagScan.State(), dagScan.FsEntryID())
+			if dagScan.CID().Defined() {
+				return fmt.Errorf("tried to execute completed dag scan %s (cid %s)", dagScan.FsEntryID(), dagScan.CID())
 			}
+
+			log.Debugf("Executing dag scan %s", dagScan.FsEntryID())
+			if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
+				return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
+			}
+			executions++
 		}
 		if executions == 0 {
 			return nil // No scans executed, only awaiting children handled and no pending scans left
