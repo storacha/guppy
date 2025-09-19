@@ -89,37 +89,70 @@ type sqlScanner interface {
 }
 
 func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
-	return func(kind *string, fsEntryID *id.FSEntryID, uploadID *id.UploadID, spaceDID *did.DID, createdAt *time.Time, updatedAt *time.Time, errorMessage **string, state *model.DAGScanState, cid *cid.Cid) error {
-		var nullErrorMessage sql.NullString
-		err := sqlScanner.Scan(fsEntryID, uploadID, util.DbDID(spaceDID), util.TimestampScanner(createdAt), util.TimestampScanner(updatedAt), state, &nullErrorMessage, util.DbCid(cid), kind)
+	return func(
+		kind *string,
+		fsEntryID *id.FSEntryID,
+		uploadID *id.UploadID,
+		spaceDID *did.DID,
+		createdAt *time.Time,
+		updatedAt *time.Time,
+		cid *cid.Cid,
+	) error {
+		err := sqlScanner.Scan(
+			fsEntryID,
+			uploadID,
+			util.DbDID(spaceDID),
+			util.TimestampScanner(createdAt),
+			util.TimestampScanner(updatedAt),
+			util.DbCid(cid),
+			kind,
+		)
 		if err != nil {
 			return fmt.Errorf("scanning dag scan: %w", err)
-		}
-		if nullErrorMessage.Valid {
-			*errorMessage = &nullErrorMessage.String
-		} else {
-			*errorMessage = nil
 		}
 		return nil
 	}
 }
 
-// DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID
-// matching the given states, if given, or all if no states are provided.
-func (r *Repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
-	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE upload_id = $1`
-	if len(states) > 0 {
-		query += " AND state IN ("
-		for i, state := range states {
-			if i > 0 {
-				query += ", "
-			}
-			query += "'" + string(state) + "'"
+func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`
+			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+			FROM dag_scans
+			WHERE upload_id = $1
+			AND cid IS NULL
+		`,
+		uploadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var dagScans []model.DAGScan
+	for rows.Next() {
+		ds, err := model.ReadDAGScanFromDatabase(r.dagScanScanner(rows))
+		if err != nil {
+			return nil, err
 		}
-		query += ")"
+		dagScans = append(dagScans, ds)
 	}
 
-	rows, err := r.db.QueryContext(ctx, query, uploadID)
+	return dagScans, rows.Err()
+}
+
+func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`
+			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+			FROM dag_scans
+			WHERE upload_id = $1
+			AND cid IS NOT NULL
+		`,
+		uploadID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +336,7 @@ func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.
 			FROM dag_scans
 			JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id
 			WHERE directory_children.directory_id = X'0874d43f68d443adbfc176020eab51cf'
-			  AND dag_scans.state != 'completed'
+			  AND dag_scans.cid IS NULL
 			LIMIT 1
 		`,
 		directoryScans.FsEntryID()).Scan(&dummy)
@@ -322,22 +355,28 @@ func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.
 
 // UpdateDAGScan updates a DAG scan in the repository.
 func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
-	return model.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state model.DAGScanState, cidValue cid.Cid) error {
+	return model.WriteDAGScanToDatabase(dagScan, func(
+		kind string,
+		fsEntryID id.FSEntryID,
+		uploadID id.UploadID,
+		spaceDID did.DID,
+		createdAt time.Time,
+		updatedAt time.Time,
+		cidValue cid.Cid,
+	) error {
 		if cidValue == cid.Undef {
 			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: <cid.Undef>\n", fsEntryID)
 		} else {
 			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: %v\n", fsEntryID, cidValue)
 		}
 		_, err := r.db.ExecContext(ctx,
-			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, error_message = ?, state = ?, cid = ? WHERE fs_entry_id = ?`,
+			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ? WHERE fs_entry_id = ?`,
 			kind,
 			fsEntryID,
 			uploadID,
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
-			errorMessage,
-			state,
 			util.DbCid(&cidValue),
 			fsEntryID,
 		)

@@ -17,7 +17,8 @@ type Repo interface {
 	CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID, links []model.LinkParams) error
 	LinksForCID(ctx context.Context, cid cid.Cid, spaceDID did.DID) ([]*model.Link, error)
 	HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error)
-	DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error)
+	IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error)
+	CompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error)
 	DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error)
 	DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
 }
