@@ -166,7 +166,11 @@ func TestExecuteUpload(t *testing.T) {
 		space, err := signer.Generate()
 		require.NoError(t, err)
 
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		db := testdb.CreateTestDB(t)
+		// Enable foreign keys for this high-level test.
+		_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;")
+		require.NoError(t, err, "failed to enable foreign keys")
+		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
 			"a":           randomBytes(1 << 16),
@@ -227,7 +231,11 @@ func TestExecuteUpload(t *testing.T) {
 		space, err := signer.Generate()
 		require.NoError(t, err)
 
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		db := testdb.CreateTestDB(t)
+		// Enable foreign keys for this high-level test.
+		_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;")
+		require.NoError(t, err, "failed to enable foreign keys")
+		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
 			"a":           randomBytes(1 << 16),

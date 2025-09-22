@@ -213,7 +213,7 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 
 	for rows.Next() {
 		var shardOffset uint64
-		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
 			return rows.Scan(util.DbCid(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset, &shardOffset)
 		})
 		if errors.Is(err, sql.ErrNoRows) {

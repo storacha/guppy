@@ -108,12 +108,28 @@ CREATE TABLE IF NOT EXISTS nodes (
   space_did BLOB NOT NULL,
   size INTEGER NOT NULL,
   ufsdata BLOB,
-  path TEXT NOT NULL,
-  source_id BLOB NOT NULL,
-  OFFSET INTEGER NOT NULL,
+  path TEXT,
+  source_id BLOB,
+  OFFSET INTEGER,
+  PRIMARY KEY(cid, space_did),
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (space_did) REFERENCES spaces(did),
-  PRIMARY KEY (cid, space_did)
+  CONSTRAINT unix_fs_or_raw_node CHECK (
+    (
+      -- UnixFS node
+      ufsdata IS NOT NULL
+      AND path IS NULL
+      AND OFFSET IS NULL
+      AND source_id IS NULL
+    )
+    OR (
+      -- Raw node
+      path IS NOT NULL
+      AND OFFSET IS NOT NULL
+      AND source_id IS NOT NULL
+      AND ufsdata IS NULL
+    )
+  )
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS links (
@@ -126,7 +142,14 @@ CREATE TABLE IF NOT EXISTS links (
   FOREIGN KEY (parent_id, space_did) REFERENCES nodes(cid, space_did),
   FOREIGN KEY (hash, space_did) REFERENCES nodes(cid, space_did),
   FOREIGN KEY (space_did) REFERENCES spaces(did),
-  PRIMARY KEY (name, t_size, hash, parent_id, space_did, ordering)
+  PRIMARY KEY (
+    name,
+    t_size,
+    hash,
+    parent_id,
+    space_did,
+    ordering
+  )
 ) STRICT;
 
 -- The fact that a node has been assigned to a shard.

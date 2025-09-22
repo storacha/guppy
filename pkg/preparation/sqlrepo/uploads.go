@@ -82,7 +82,7 @@ func (r *Repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID)
 	var sourceID id.SourceID
 	err := row.Scan(&sourceID)
 	if err != nil {
-		return id.SourceID{}, err
+		return id.Nil, err
 	}
 	return sourceID, nil
 }

@@ -174,7 +174,7 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 	return links, nil
 }
 
-func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID did.DID, ufsData []byte, path string, sourceID id.SourceID, offset uint64) (model.Node, error) {
+func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID did.DID, ufsData []byte, path *string, sourceID id.SourceID, offset *uint64) (model.Node, error) {
 	findQuery := `
 		SELECT
 			cid,
@@ -215,7 +215,7 @@ type RowScanner interface {
 }
 
 func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
-	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
+	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
 		return scanner.Scan(util.DbCid(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -226,7 +226,7 @@ func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 
 func (r *Repo) createNode(ctx context.Context, node model.Node) error {
 	insertQuery := `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path string, sourceID id.SourceID, offset uint64) error {
+	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
 		_, err := r.db.ExecContext(ctx, insertQuery, cid.Bytes(), size, util.DbDID(&spaceDID), ufsdata, path, sourceID, offset)
 		return err
 	}, node)
@@ -236,7 +236,7 @@ func (r *Repo) createNode(ctx context.Context, node model.Node) error {
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
 func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
-	node, err := r.findNode(ctx, cid, size, spaceDID, nil, path, sourceID, offset)
+	node, err := r.findNode(ctx, cid, size, spaceDID, nil, &path, sourceID, &offset)
 	if err != nil {
 		return nil, false, err
 	}
@@ -266,7 +266,7 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 // If a node with the same CID, size, and ufsdata already exists, it returns that node.
 // If not, it creates a new UnixFS node with the provided parameters.
 func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte) (*model.UnixFSNode, bool, error) {
-	node, err := r.findNode(ctx, cid, size, spaceDID, ufsdata, "", id.SourceID{}, 0)
+	node, err := r.findNode(ctx, cid, size, spaceDID, ufsdata, nil, id.Nil, nil)
 	if err != nil {
 		return nil, false, err
 	}

@@ -161,7 +161,8 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 		switch concludeRcpt.Ran().Link() {
 		case allocateTask.Link():
-			switch allocateTask.Capabilities()[0].Can() {
+			ability := allocateTask.Capabilities()[0].Can()
+			switch ability {
 			case blobcap.AllocateAbility:
 				allocateRcpt, err = receipt.Rebind[blobcap.AllocateOk, fdm.FailureModel](concludeRcpt, blobcap.AllocateOkType(), fdm.FailureType(), captypes.Converters...)
 				if err != nil {
@@ -173,12 +174,13 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 					return nil, nil, fmt.Errorf("bad allocate receipt in conclude fx: %w", err)
 				}
 			default:
-				return nil, nil, fmt.Errorf("unexpected capability in allocate task: %s", allocateTask.Capabilities()[0].Can())
+				return nil, nil, fmt.Errorf("unexpected capability in allocate task: %s", ability)
 			}
 		case putTask.Link():
 			putRcpt = concludeRcpt
 		case acceptTask.Link():
-			switch allocateTask.Capabilities()[0].Can() {
+			ability := acceptTask.Capabilities()[0].Can()
+			switch ability {
 			case blobcap.AcceptAbility:
 				acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, fdm.FailureModel](concludeRcpt, blobcap.AcceptOkType(), fdm.FailureType(), captypes.Converters...)
 				if err != nil {
@@ -190,7 +192,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 					return nil, nil, fmt.Errorf("bad accept receipt in conclude fx: %w", err)
 				}
 			default:
-				return nil, nil, fmt.Errorf("unexpected capability in accept task: %s", acceptTask.Capabilities()[0].Can())
+				return nil, nil, fmt.Errorf("unexpected capability in accept task: %s", ability)
 			}
 		default:
 			fmt.Printf("[WARN] ignoring receipt for unexpected task: %s\n", concludeRcpt.Ran().Link())

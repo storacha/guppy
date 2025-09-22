@@ -19,6 +19,9 @@ func New() ID {
 }
 
 func (id ID) Value() (driver.Value, error) {
+	if id == Nil {
+		return nil, nil
+	}
 	return id[:], nil
 }
 
