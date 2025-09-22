@@ -106,7 +106,7 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 			return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
 		}
 		return f, nil
-	}, false)
+	}, true)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create node reader: %v", err))
 	}
@@ -133,6 +133,7 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 		SpaceBlobAddShardsForUpload: storachaAPI.SpaceBlobAddShardsForUpload,
 		AddIndexesForUpload:         storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload:  storachaAPI.AddStorachaUploadForUpload,
+		RemoveBadNodes:              dagsAPI.RemoveBadNodes,
 	}
 
 	return API{

@@ -3,9 +3,14 @@ package largeupload
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +30,7 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/urfave/cli/v2"
@@ -74,6 +80,33 @@ func makeRepo(ctx context.Context) (*sqlrepo.Repo, func() error, error) {
 	return repo, db.Close, nil
 }
 
+func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, upload *uploadsmodel.Upload) error {
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, upload)).Run()
+	if err != nil {
+		return fmt.Errorf("command failed to run upload UI: %w", err)
+	}
+	if um, ok := m.(uploadModel); ok && um.err != nil {
+		var errBadNodes types.ErrBadNodes
+		if errors.As(um.err, &errBadNodes) {
+			var sb strings.Builder
+			sb.WriteString("\nUpload failed due to out-of-date scan:\n")
+			for i, ebn := range errBadNodes.Errs() {
+				if i >= 3 {
+					sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
+					break
+				}
+				sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+			}
+			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
+
+			fmt.Print(sb.String())
+		} else {
+			return fmt.Errorf("upload failed: %w", um.err)
+		}
+	}
+	return nil
+}
+
 func Action(cCtx *cli.Context) error {
 	spaceDID := cmdutil.MustParseDID(cCtx.String("space"))
 	root := cCtx.Args().First()
@@ -96,10 +129,7 @@ func Action(cCtx *cli.Context) error {
 		return err
 	}
 
-	_, err = tea.NewProgram(newUploadModel(cCtx.Context, repo, api, upload)).Run()
-	if err != nil {
-		return fmt.Errorf("command failed to run upload UI: %w", err)
-	}
+	err = runUploadUI(cCtx.Context, repo, api, upload)
 	return err
 }
 
@@ -112,8 +142,177 @@ func (t nullTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		Body:       http.NoBody,
 	}, nil
 }
+
+type changingFS struct {
+	fs.FS
+	changingFile  string
+	count         int
+	changeModTime bool
+	changeData    bool
+}
+
+type seekerFile interface {
+	fs.File
+	io.Seeker
+}
+
+type changingFile struct {
+	seekerFile
+	fs.FileInfo
+	parent changingFS
+}
+
+type changingDir struct {
+	changingFile
+	fs fs.FS
+}
+
+func (fsys *changingFS) Open(name string) (fs.File, error) {
+	f, err := fsys.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	sf, ok := f.(seekerFile)
+	if !ok {
+		return nil, fmt.Errorf("file %s is not seekable", name)
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	cf := changingFile{
+		seekerFile: sf,
+		FileInfo:   info,
+		parent:     *fsys,
+	}
+
+	if name == fsys.changingFile {
+		defer func() { fsys.count++ }()
+		return cf, nil
+	}
+
+	if name == path.Dir(fsys.changingFile) {
+		subFS, err := fs.Sub(fsys, name)
+		if err != nil {
+			return nil, err
+		}
+		return changingDir{
+			changingFile: cf,
+			fs:           subFS,
+		}, nil
+	}
+
+	return f, nil
+}
+
+func (f changingFile) Read(b []byte) (int, error) {
+	n, err := f.seekerFile.Read(b)
+	if err != nil && err != io.EOF {
+		return n, err
+	}
+
+	if f.parent.changeData && n > 0 {
+		// Just change the first byte.
+		b[0] = (b[0] + byte(f.parent.count))
+	}
+
+	return n, err
+}
+
+func (f changingFile) Stat() (fs.FileInfo, error) {
+	return f, nil
+}
+
+func (d changingDir) ReadDir(n int) ([]fs.DirEntry, error) {
+	entries, err := d.seekerFile.(fs.ReadDirFile).ReadDir(n)
+	if err != nil {
+		return nil, err
+	}
+
+	var changingDEs []fs.DirEntry
+	for _, entry := range entries {
+		f, err := d.fs.Open(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		info, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		f.Close()
+		changingDEs = append(changingDEs, fs.FileInfoToDirEntry(info))
+
+	}
+	return changingDEs, nil
+}
+
+func (f changingFile) ModTime() time.Time {
+	original := f.FileInfo.ModTime()
+	if f.parent.changeModTime {
+		newTime := original.Add(time.Duration(f.parent.count) * time.Minute)
+		return newTime
+	}
+
+	return original
+}
+
+func newChangingFS(fsys fs.FS, changeModTime, changeData bool) (fs.FS, error) {
+	var secondDir string
+	root, err := fsys.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rootEntries, err := root.(fs.ReadDirFile).ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	for range 2 {
+		for _, entry := range rootEntries {
+			if entry.IsDir() {
+				secondDir = entry.Name()
+				break
+			}
+		}
+	}
+	if secondDir == "" {
+		return nil, fmt.Errorf("no directories found in root")
+	}
+
+	var lastDirFirstFile string
+	lastDirF, err := fsys.Open(secondDir)
+	if err != nil {
+		return nil, err
+	}
+	defer lastDirF.Close()
+	lastDirEntries, err := lastDirF.(fs.ReadDirFile).ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range lastDirEntries {
+		if !entry.IsDir() {
+			lastDirFirstFile = entry.Name()
+			break
+		}
+	}
+	if lastDirFirstFile == "" {
+		return nil, fmt.Errorf("no files found in last directory %s", secondDir)
+	}
+
+	return &changingFS{
+		FS:            fsys,
+		changingFile:  path.Join(secondDir, lastDirFirstFile),
+		changeModTime: changeModTime,
+		changeData:    changeData,
+	}, nil
+}
+
 func Demo(cCtx *cli.Context) error {
-	resumeUploadID := cCtx.String("resume")
+	resumeUpload := cCtx.Bool("resume")
+	alterMetadata := cCtx.Bool("alter-metadata")
+	alterData := cCtx.Bool("alter-data")
 
 	repo, _, err := makeRepo(cCtx.Context)
 	if err != nil {
@@ -182,15 +381,24 @@ func Demo(cCtx *cli.Context) error {
 		Client:    baseClient,
 		PutClient: &http.Client{Transport: nullTransport{}},
 	}
+	fsys, err := newChangingFS(fakefs.New(0), alterMetadata, alterData)
+	if err != nil {
+		return fmt.Errorf("creating changing FS: %w", err)
+	}
 	api := preparation.NewAPI(repo, customPutClient, spaceDID, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
-		return fakefs.New(0), nil
+		return fsys, nil
 	}))
 
 	var upload *uploadsmodel.Upload
-	if resumeUploadID != "" {
-		id, err := id.Parse(resumeUploadID)
+	if resumeUpload {
+		idBytes, err := os.ReadFile("last-upload-id.txt")
 		if err != nil {
-			return fmt.Errorf("parsing upload ID: %w", err)
+			return fmt.Errorf("reading last upload ID file: %w", err)
+		}
+
+		id, err := id.Parse(string(idBytes))
+		if err != nil {
+			return fmt.Errorf("parsing upload ID from file: %w", err)
 		}
 
 		upload, err = api.GetUploadByID(cCtx.Context, id)
@@ -198,7 +406,7 @@ func Demo(cCtx *cli.Context) error {
 			return fmt.Errorf("getting upload by ID: %w", err)
 		}
 		if upload == nil {
-			return fmt.Errorf("no upload found with ID %s", resumeUploadID)
+			return fmt.Errorf("no upload found with ID %s", id)
 		}
 		fmt.Println("Resuming upload", upload.ID())
 	} else {
@@ -206,12 +414,14 @@ func Demo(cCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
+
+		// Write upload ID to file for easy pasting into resume flag
+		err = os.WriteFile("last-upload-id.txt", []byte(upload.ID().String()), 0644)
+		if err != nil {
+			return fmt.Errorf("writing upload ID to file: %w", err)
+		}
 	}
 
-	_, err = tea.NewProgram(newUploadModel(cCtx.Context, repo, api, upload)).Run()
-	if err != nil {
-		return fmt.Errorf("command failed to run upload UI: %w", err)
-	}
-
+	err = runUploadUI(cCtx.Context, repo, api, upload)
 	return err
 }

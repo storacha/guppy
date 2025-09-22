@@ -11,6 +11,7 @@ import (
 	"github.com/ipfs/go-unixfsnode/data/builder"
 	dagpb "github.com/ipld/go-codec-dagpb"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -38,6 +39,7 @@ type API struct {
 type FileAccessorFunc func(ctx context.Context, fsEntryID id.FSEntryID) (fs.File, id.SourceID, string, error)
 
 var _ uploads.ExecuteDagScansForUploadFunc = API{}.ExecuteDagScansForUpload
+var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
@@ -219,4 +221,8 @@ func toLinks(linkParams []model.LinkParams) ([]dagpb.PBLink, error) {
 		links = append(links, link)
 	}
 	return links, nil
+}
+
+func (a API) RemoveBadNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error {
+	return a.Repo.DeleteNodes(ctx, spaceDID, nodeCIDs)
 }

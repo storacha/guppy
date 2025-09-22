@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"io/fs"
+	"slices"
 	"testing"
 
 	blocks "github.com/ipfs/go-block-format"
@@ -23,6 +25,7 @@ import (
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -153,9 +156,16 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 	return foundNodeCids
 }
 
-type stubNodeReader struct{}
+type stubNodeReader struct {
+	// If set, always returns an error when trying to read these node.
+	errorNodes []cid.Cid
+}
 
 func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error) {
+	if slices.Contains(s.errorNodes, node.CID()) {
+		return nil, fmt.Errorf("stub error reading node %s: %w", node.CID(), fs.ErrInvalid)
+	}
+
 	rawNode := node.(*dagsmodel.RawNode)
 	data := fmt.Appendf(nil, "BLOCK DATA: %s", rawNode.Path())
 	if rawNode.Size() != uint64(len(data)) {
@@ -167,73 +177,120 @@ func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byt
 }
 
 func TestCarForShard(t *testing.T) {
-	db := testdb.CreateTestDB(t)
-	repo := sqlrepo.New(db)
-	api := shards.API{
-		Repo:       repo,
-		NodeReader: stubNodeReader{},
-	}
+	t.Run("returns a CAR reader for the shard", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
 
-	spaceDID, err := did.Parse("did:storacha:space:example")
-	require.NoError(t, err)
+		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-	nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
-	nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
-	nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 21, spaceDID, "dir/file1", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 21, spaceDID, "dir/file2", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
+		require.NoError(t, err)
 
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 21, spaceDID, "dir/file1", id.New(), 0)
-	require.NoError(t, err)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 21, spaceDID, "dir/file2", id.New(), 0)
-	require.NoError(t, err)
-	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
-	require.NoError(t, err)
+		shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
 
-	shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID, 0 /* irrelevant */)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID, 0 /* irrelevant */)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID, 0 /* irrelevant */)
+		require.NoError(t, err)
 
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID, 0 /* irrelevant */)
-	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID, 0 /* irrelevant */)
-	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID, 0 /* irrelevant */)
-	require.NoError(t, err)
+		api := shards.API{
+			Repo:       repo,
+			NodeReader: stubNodeReader{},
+		}
 
-	carReader, err := api.CarForShard(t.Context(), shard.ID())
-	require.NoError(t, err)
+		carReader, err := api.CarForShard(t.Context(), shard.ID())
+		require.NoError(t, err)
 
-	// Read in the entire CAR, so we can create an [io.ReaderAt] for the
-	// blockstore. In the future, the reader we create could be an [io.ReaderAt]
-	// itself, as it technically knows enough information to jump around. However,
-	// that's complex, and in our use case, we're going to end up reading the
-	// whole thing anyway to store it in Storacha.
-	carBytes, err := io.ReadAll(carReader)
-	require.NoError(t, err)
-	bufferedCarReader := bytes.NewReader(carBytes)
+		// Read in the entire CAR, so we can create an [io.ReaderAt] for the
+		// blockstore. In the future, the reader we create could be an [io.ReaderAt]
+		// itself, as it technically knows enough information to jump around. However,
+		// that's complex, and in our use case, we're going to end up reading the
+		// whole thing anyway to store it in Storacha.
+		carBytes, err := io.ReadAll(carReader)
+		require.NoError(t, err)
+		bufferedCarReader := bytes.NewReader(carBytes)
 
-	// Try to read the CAR bytes as a CAR.
-	bs, err := blockstore.NewReadOnly(bufferedCarReader, nil)
-	require.NoError(t, err)
+		// Try to read the CAR bytes as a CAR.
+		bs, err := blockstore.NewReadOnly(bufferedCarReader, nil)
+		require.NoError(t, err)
 
-	cidsCh, err := bs.AllKeysChan(t.Context())
-	require.NoError(t, err)
-	var cids []cid.Cid
-	for cid := range cidsCh {
-		cids = append(cids, cid)
-	}
-	require.Equal(t, []cid.Cid{nodeCid1, nodeCid2, nodeCid3}, cids)
+		cidsCh, err := bs.AllKeysChan(t.Context())
+		require.NoError(t, err)
+		var cids []cid.Cid
+		for cid := range cidsCh {
+			cids = append(cids, cid)
+		}
+		require.Equal(t, []cid.Cid{nodeCid1, nodeCid2, nodeCid3}, cids)
 
-	var b blocks.Block
+		var b blocks.Block
 
-	b, err = bs.Get(t.Context(), nodeCid1)
-	require.NoError(t, err)
-	require.Equal(t, []byte("BLOCK DATA: dir/file1"), b.RawData())
+		b, err = bs.Get(t.Context(), nodeCid1)
+		require.NoError(t, err)
+		require.Equal(t, []byte("BLOCK DATA: dir/file1"), b.RawData())
 
-	b, err = bs.Get(t.Context(), nodeCid2)
-	require.NoError(t, err)
-	require.Equal(t, []byte("BLOCK DATA: dir/file2"), b.RawData())
+		b, err = bs.Get(t.Context(), nodeCid2)
+		require.NoError(t, err)
+		require.Equal(t, []byte("BLOCK DATA: dir/file2"), b.RawData())
 
-	b, err = bs.Get(t.Context(), nodeCid3)
-	require.NoError(t, err)
-	require.Equal(t, []byte("BLOCK DATA: dir/dir2/file3"), b.RawData())
+		b, err = bs.Get(t.Context(), nodeCid3)
+		require.NoError(t, err)
+		require.Equal(t, []byte("BLOCK DATA: dir/dir2/file3"), b.RawData())
+	})
+
+	t.Run("upon encountering an error reading a node", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+
+		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCid4 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 21, spaceDID, "dir/file1", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 21, spaceDID, "dir/file2", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 21, spaceDID, "dir/file3", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid4, 21, spaceDID, "dir/file4", id.New(), 0)
+		require.NoError(t, err)
+
+		shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
+
+		for _, nodeCid := range []cid.Cid{nodeCid1, nodeCid2, nodeCid3, nodeCid4} {
+			err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid, spaceDID, 0 /* irrelevant */)
+			require.NoError(t, err)
+		}
+
+		api := shards.API{
+			Repo: repo,
+			NodeReader: stubNodeReader{
+				errorNodes: []cid.Cid{nodeCid2, nodeCid4},
+			},
+		}
+
+		carReader, err := api.CarForShard(t.Context(), shard.ID())
+		require.NoError(t, err)
+
+		_, err = io.ReadAll(carReader)
+		var errBadNodes types.ErrBadNodes
+		require.ErrorAs(t, err, &errBadNodes)
+		require.Len(t, errBadNodes.Errs(), 2)
+		require.Equal(t, nodeCid2, errBadNodes.Errs()[0].CID(), "the first error should be for the first bad node encountered")
+		require.Equal(t, nodeCid4, errBadNodes.Errs()[1].CID(), "the second error should be for the second bad node encountered")
+	})
 }
 
 func TestIndexForUpload(t *testing.T) {

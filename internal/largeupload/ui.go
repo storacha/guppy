@@ -20,11 +20,13 @@ import (
 )
 
 type uploadModel struct {
+	// Configuration
 	ctx    context.Context
 	repo   *sqlrepo.Repo
 	api    preparation.API
 	upload *uploadsmodel.Upload
 
+	// State
 	recentAddedShards  []*shardsmodel.Shard
 	addedShardsSize    uint64
 	recentClosedShards []*shardsmodel.Shard
@@ -35,7 +37,11 @@ type uploadModel struct {
 	shardedFiles       []sqlrepo.FileInfo
 	rootCID            cid.Cid
 
+	// Bubbles
 	spinner spinner.Model
+
+	// Output
+	err error
 }
 
 func (m uploadModel) Init() tea.Cmd {
@@ -85,7 +91,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, checkStats(m.ctx, m.repo, m.upload.ID())
 
 	case error:
-		fmt.Println("Error:", msg)
+		m.err = msg
 		return m, tea.Quit
 
 	default:

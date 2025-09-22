@@ -67,6 +67,15 @@ func (u *Upload) SetRootCID(rootCID cid.Cid) error {
 	return nil
 }
 
+// Invalidate clears the root CID and root FSEntryID of the upload, meaning that
+// it needs to be scanned again.
+func (u *Upload) Invalidate() error {
+	u.rootCID = cid.Undef
+	u.rootFSEntryID = nil
+	u.updatedAt = time.Now()
+	return nil
+}
+
 func validateUpload(upload *Upload) error {
 	if upload.id == id.Nil {
 		return types.ErrEmpty{Field: "upload ID"}
