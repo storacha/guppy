@@ -2,9 +2,12 @@ package sqlrepo
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -15,23 +18,31 @@ import (
 
 var _ shards.Repo = (*repo)(nil)
 
-func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Shard, error) {
-	shard, err := model.NewShard(uploadID)
+func (r *repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint64) (*model.Shard, error) {
+	shard, err := model.NewShard(uploadID, size)
 	if err != nil {
 		return nil, err
 	}
 
-	err = model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
+	err = model.WriteShardToDatabase(shard, func(
+		id id.ShardID,
+		uploadID id.UploadID,
+		size uint64,
+		digest multihash.Multihash,
+		state model.ShardState,
+	) error {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO shards (
 				id,
 				upload_id,
-				cid,
+				size,
+				digest,
 				state
-			) VALUES (?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?)`,
 			id,
 			uploadID,
-			util.DbCid(&cid),
+			size,
+			digest,
 			state,
 		)
 		return err
@@ -48,7 +59,8 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 		SELECT
 			id,
 			upload_id,
-			cid,
+			size,
+			digest,
 			state
 		FROM shards
 		WHERE upload_id = ?
@@ -66,10 +78,11 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 		shard, err := model.ReadShardFromDatabase(func(
 			id *id.ShardID,
 			uploadID *id.UploadID,
-			cid *cid.Cid,
+			size *uint64,
+			digest *multihash.Multihash,
 			state *model.ShardState,
 		) error {
-			return rows.Scan(id, uploadID, util.DbCid(cid), state)
+			return rows.Scan(id, uploadID, size, util.DbBytes(digest), state)
 		})
 		if err != nil {
 			return nil, err
@@ -82,21 +95,77 @@ func (r *repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID
 	return shards, nil
 }
 
-func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID) error {
-	_, err := r.db.ExecContext(ctx, `
+func (r *repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			id,
+			upload_id,
+			size,
+			digest,
+			state
+		FROM shards
+		WHERE id = ?`,
+		shardID,
+	)
+
+	shard, err := model.ReadShardFromDatabase(func(
+		id *id.ShardID,
+		uploadID *id.UploadID,
+		size *uint64,
+		digest *multihash.Multihash,
+		state *model.ShardState,
+	) error {
+		return row.Scan(id, uploadID, size, util.DbBytes(digest), state)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return shard, nil
+}
+
+// AddNodeToShard adds a node to a shard in the repository. Note: the [offset]
+// is NOT the absolute offset within the shard, but the offset into the *new*
+// bytes in the shard CAR where the node data begins--in other words, the length
+// of the length varint + the length of the CID bytes. The node's block will be
+// indexed as appearing at `shard.size + offset`, running for `node.size` bytes,
+// and then the shard size will be increased by `offset + node.size`.
+func (r *repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO nodes_in_shards (
 			node_cid,
 			space_did,
-			shard_id
-		) VALUES (?, ?, ?)`,
+			shard_id,
+			shard_offset
+		)
+		SELECT ?, ?, s.id, s.size + ?
+		FROM shards s
+		WHERE s.id = ?`,
 		nodeCID.Bytes(),
 		util.DbDID(&spaceDID),
+		offset,
 		shardID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add node %s to shard %s: %w", nodeCID, shardID, err)
 	}
-	return nil
+
+	_, err = tx.ExecContext(ctx, `
+    UPDATE shards 
+    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?)
+    WHERE id = ?`,
+		offset, util.DbCid(&nodeCID), shardID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *repo) FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
@@ -121,7 +190,7 @@ func (r *repo) FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
-func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(dagsmodel.Node) error) error {
+func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			nodes.cid,
@@ -130,7 +199,8 @@ func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(d
 			nodes.ufsdata,
 			nodes.path,
 			nodes.source_id,
-			nodes.offset
+			nodes.offset,
+			nodes_in_shards.shard_offset
 		FROM nodes_in_shards
 		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
 		WHERE shard_id = ?`,
@@ -142,12 +212,18 @@ func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(d
 	defer rows.Close()
 
 	for rows.Next() {
-		nd, err := r.getNodeFromRow(rows)
+		var shardOffset uint64
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path *string, sourceID *id.SourceID, offset *uint64) error {
+			return rows.Scan(util.DbCid(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset, &shardOffset)
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)
 		}
-		if err := yield(nd); err != nil {
-			return fmt.Errorf("failed to yield node CID %s for shard %s: %w", nd.CID(), shardID, err)
+		if err := yield(node, shardOffset); err != nil {
+			return fmt.Errorf("failed to yield node CID %s for shard %s: %w", node.CID(), shardID, err)
 		}
 	}
 
@@ -156,17 +232,25 @@ func (r *repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(d
 
 // UpdateShard updates a DAG scan in the repository.
 func (r *repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
-	return model.WriteShardToDatabase(shard, func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state model.ShardState) error {
+	return model.WriteShardToDatabase(shard, func(
+		id id.ShardID,
+		uploadID id.UploadID,
+		size uint64,
+		digest multihash.Multihash,
+		state model.ShardState,
+	) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE shards
 			SET id = ?,
 			    upload_id = ?,
-			    cid = ?,
+			    size = ?,
+			    digest = ?,
 			    state = ?
 			WHERE id = ?`,
 			id,
 			uploadID,
-			util.DbCid(&cid),
+			size,
+			digest,
 			state,
 			id,
 		)

@@ -25,6 +25,9 @@ import (
 
 var log = logging.Logger("preparation")
 
+// By back-of-the-napkin math, this represents about 1MB max per index
+const defaultMaxNodesPerIndex = 26000
+
 type Repo interface {
 	spaces.Repo
 	uploads.Repo
@@ -34,7 +37,7 @@ type Repo interface {
 	shards.Repo
 }
 
-type SpaceBlobAdder = storacha.SpaceBlobAdder
+type StorachaClient = storacha.Client
 
 type API struct {
 	Spaces  spaces.API
@@ -49,11 +52,13 @@ type Option func(cfg *config) error
 
 type config struct {
 	getLocalFSForPathFn func(path string) (fs.FS, error)
+	maxNodesPerIndex    int
 }
 
-func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) API {
+func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
+		maxNodesPerIndex:    defaultMaxNodesPerIndex,
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
@@ -111,15 +116,17 @@ func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) 
 	}
 
 	shardsAPI := shards.API{
-		Repo:       repo,
-		NodeReader: nr,
+		Repo:             repo,
+		NodeReader:       nr,
+		MaxNodesPerIndex: cfg.maxNodesPerIndex,
 	}
 
 	storachaAPI := storacha.API{
-		Repo:        repo,
-		Client:      client,
-		Space:       space,
-		CarForShard: shardsAPI.CarForShard,
+		Repo:             repo,
+		Client:           client,
+		Space:            space,
+		CarForShard:      shardsAPI.CarForShard,
+		IndexesForUpload: shardsAPI.IndexesForUpload,
 	}
 
 	uploadsAPI = uploads.API{
@@ -129,6 +136,7 @@ func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) 
 		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
 		CloseUploadShards:           shardsAPI.CloseUploadShards,
 		SpaceBlobAddShardsForUpload: storachaAPI.SpaceBlobAddShardsForUpload,
+		AddIndexesForUpload:         storachaAPI.AddIndexesForUpload,
 	}
 
 	return API{
@@ -143,6 +151,13 @@ func NewAPI(repo Repo, client SpaceBlobAdder, space did.DID, options ...Option) 
 func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error)) Option {
 	return func(cfg *config) error {
 		cfg.getLocalFSForPathFn = getLocalFSForPathFn
+		return nil
+	}
+}
+
+func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
+	return func(cfg *config) error {
+		cfg.maxNodesPerIndex = maxNodesPerIndex
 		return nil
 	}
 }

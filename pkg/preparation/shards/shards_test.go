@@ -12,6 +12,8 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/ipld/go-car/v2/blockstore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -56,6 +58,11 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.Len(t, openShards, 1)
 	firstShard := openShards[0]
 
+	// The CAR header is 18 bytes
+	// The varint length prefix for a ~1<<14 block is 3 bytes
+	// The CIDv1 is 36 bytes
+	require.Equal(t, uint64(18+3+36+(1<<14)), firstShard.Size())
+
 	foundNodeCids := nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1.(cidlink.Link).Cid}, foundNodeCids)
 
@@ -73,6 +80,9 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
 	require.Equal(t, firstShard.ID(), openShards[0].ID())
+	firstShard = openShards[0] // with fresh data from DB
+
+	require.Equal(t, uint64(18+3+36+(1<<14)+3+36+(1<<14)), firstShard.Size())
 
 	foundNodeCids = nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1.(cidlink.Link).Cid, nodeCid2.(cidlink.Link).Cid}, foundNodeCids)
@@ -101,6 +111,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	secondShard := openShards[0]
 	require.NotEqual(t, firstShard.ID(), secondShard.ID())
 
+	require.Equal(t, uint64(18+3+36+(1<<15)), secondShard.Size())
 	foundNodeCids = nodesInShard(t.Context(), t, db, secondShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid3.(cidlink.Link).Cid}, foundNodeCids)
 
@@ -163,7 +174,6 @@ func TestCarForShard(t *testing.T) {
 		NodeReader: stubNodeReader{},
 	}
 
-	uploadID := id.New()
 	spaceDID, err := did.Parse("did:storacha:space:example")
 	require.NoError(t, err)
 
@@ -178,16 +188,16 @@ func TestCarForShard(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
 	require.NoError(t, err)
 
-	shard, err := repo.CreateShard(t.Context(), uploadID)
+	shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
 
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
-	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID, 0 /* irrelevant */)
 	require.NoError(t, err)
 
-	carReader, err := api.CarForShard(t.Context(), shard)
+	carReader, err := api.CarForShard(t.Context(), shard.ID())
 	require.NoError(t, err)
 
 	// Read in the entire CAR, so we can create an [io.ReaderAt] for the
@@ -224,4 +234,136 @@ func TestCarForShard(t *testing.T) {
 	b, err = bs.Get(t.Context(), nodeCid3)
 	require.NoError(t, err)
 	require.Equal(t, []byte("BLOCK DATA: dir/dir2/file3"), b.RawData())
+}
+
+func TestIndexForUpload(t *testing.T) {
+	t.Run("returns a reader of an index of the upload", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:             repo,
+			NodeReader:       stubNodeReader{},
+			MaxNodesPerIndex: 5,
+		}
+
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+
+		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		node1, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 100, spaceDID, "dir/file1", id.New(), 0)
+		require.NoError(t, err)
+		node2, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 200, spaceDID, "dir/file2", id.New(), 0)
+		require.NoError(t, err)
+		node3, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 300, spaceDID, "dir/file3", id.New(), 0)
+		require.NoError(t, err)
+		node4, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 400, spaceDID, "dir/file4", id.New(), 0)
+		require.NoError(t, err)
+		node5, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 500, spaceDID, "dir/file5", id.New(), 0)
+		require.NoError(t, err)
+		node6, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, 600, spaceDID, "dir/file6", id.New(), 0)
+		require.NoError(t, err)
+
+		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		require.NoError(t, err)
+		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		require.NoError(t, err)
+		shard3, err := repo.CreateShard(t.Context(), upload.ID(), 30)
+		require.NoError(t, err)
+
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node1.CID(), spaceDID, 1)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node2.CID(), spaceDID, 2)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard2.ID(), node3.CID(), spaceDID, 3)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node4.CID(), spaceDID, 4)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node5.CID(), spaceDID, 5)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), node6.CID(), spaceDID, 6)
+		require.NoError(t, err)
+
+		err = shard1.Close()
+		digest1, err := multihash.Encode([]byte("shard1 digest"), multihash.IDENTITY)
+		err = shard1.Added(digest1)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard1)
+		require.NoError(t, err)
+		err = shard1.Close()
+
+		err = shard2.Close()
+		digest2, err := multihash.Encode([]byte("shard2 digest"), multihash.IDENTITY)
+		err = shard2.Added(digest2)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard2)
+		require.NoError(t, err)
+		err = shard2.Close()
+
+		err = shard3.Close()
+		digest3, err := multihash.Encode([]byte("shard3 digest"), multihash.IDENTITY)
+		err = shard3.Added(digest3)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard3)
+		require.NoError(t, err)
+		err = shard3.Close()
+
+		rootLink := testutil.RandomCID(t)
+		err = upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		indexReaders, err := api.IndexesForUpload(t.Context(), upload)
+		require.NoError(t, err)
+		indexes := make([]blobindex.ShardedDagIndexView, 0, 2)
+		for _, indexReader := range indexReaders {
+			index, err := blobindex.Extract(indexReader)
+			require.NoError(t, err)
+			indexes = append(indexes, index)
+		}
+
+		require.Len(t, indexes, 2, "should return two indexes")
+		index1 := indexes[0]
+		index2 := indexes[1]
+
+		require.Equal(t, rootLink, index1.Content())
+		require.Equal(t, 2, index1.Shards().Size(), "first index should have two shards")
+
+		require.Equal(t, 2, index1.Shards().Get(digest1).Size(), "first shard should have two slices")
+		require.Equal(t, blobindex.Position{Offset: 10 + 1, Length: 100}, index1.Shards().Get(digest1).Get(node1.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 10 + 1 + 100 + 2, Length: 200}, index1.Shards().Get(digest1).Get(node2.CID().Hash()))
+		require.Equal(t, 1, index1.Shards().Get(digest2).Size(), "second shard should have one slice")
+		require.Equal(t, blobindex.Position{Offset: 20 + 3, Length: 300}, index1.Shards().Get(digest2).Get(node3.CID().Hash()))
+
+		require.Equal(t, rootLink, index2.Content())
+		require.Equal(t, 1, index2.Shards().Size(), "second index should have one shard")
+
+		require.Equal(t, 3, index2.Shards().Get(digest3).Size(), "shard should have three slices")
+		require.Equal(t, blobindex.Position{Offset: 30 + 4, Length: 400}, index2.Shards().Get(digest3).Get(node4.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 30 + 4 + 400 + 5, Length: 500}, index2.Shards().Get(digest3).Get(node5.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 30 + 4 + 400 + 5 + 500 + 6, Length: 600}, index2.Shards().Get(digest3).Get(node6.CID().Hash()))
+	})
+
+	t.Run("for an upload with no root CID, returns an error", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:       repo,
+			NodeReader: stubNodeReader{},
+		}
+
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+
+		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		indexReader, err := api.IndexesForUpload(t.Context(), upload)
+		require.ErrorContains(t, err, "no root CID set yet on upload")
+		require.Nil(t, indexReader)
+	})
 }

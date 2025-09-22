@@ -20,11 +20,23 @@ import (
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
 	"github.com/ipld/go-car/v2/blockstore"
+	"github.com/ipld/go-ipld-prime"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
+	"github.com/storacha/go-libstoracha/blobindex"
+	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/go-ucanto/core/receipt/fx"
+	"github.com/storacha/go-ucanto/core/result"
+	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
@@ -44,14 +56,14 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// spaceBlobAddClient is a [storacha.SpaceBlobAdder] that wraps a
+// spaceBlobAddClient is a [storacha.Client] that wraps a
 // [client.Client] to use a custom putClient.
 type spaceBlobAddClient struct {
 	*client.Client
 	putClient *http.Client
 }
 
-var _ storacha.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
+var _ storacha.Client = (*spaceBlobAddClient)(nil)
 
 func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
@@ -59,9 +71,8 @@ func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader
 
 func TestExecuteUpload(t *testing.T) {
 	t.Run("uploads", func(t *testing.T) {
-		// In case something goes wrong. This should never take this long.
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		t.Cleanup(cancel)
+		space, err := signer.Generate()
+		require.NoError(t, err)
 
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 
@@ -76,44 +87,70 @@ func TestExecuteUpload(t *testing.T) {
 
 		putClient := ctestutil.NewPutClient()
 
+		var indexLink ipld.Link
+
 		c := &spaceBlobAddClient{
-			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			Client: helpers.Must(ctestutil.Client(
+				ctestutil.WithSpaceBlobAdd(),
+				ctestutil.WithServerOptions(
+					server.WithServiceMethod(
+						spaceindexcap.Add.Can(),
+						server.Provide(
+							spaceindexcap.Add,
+							func(
+								ctx context.Context,
+								cap ucan.Capability[spaceindexcap.AddCaveats],
+								inv invocation.Invocation,
+								context server.InvocationContext,
+							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
+								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
+								indexLink = cap.Nb().Index
+								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
+							},
+						),
+					),
+				),
+			)),
 			putClient: putClient,
 		}
 
-		// Use the client's issuer as the space DID to avoid any concerns about
-		// authorization.
-		spaceDID := c.Issuer().DID()
+		// Delegate * on the space to the client
+		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+		require.NoError(t, err)
+		err = c.AddProofs(proof)
+		require.NoError(t, err)
 
 		api := preparation.NewAPI(
 			repo,
 			c,
-			spaceDID,
+			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil
 			}),
 		)
 
-		_, err := api.FindOrCreateSpace(ctx, spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
 		require.NoError(t, err)
-		source, err := api.CreateSource(ctx, "Large Upload Source", ".")
+		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
 		require.NoError(t, err)
-		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
 		require.NoError(t, err)
-		uploads, err := api.CreateUploads(ctx, spaceDID)
+		uploads, err := api.CreateUploads(t.Context(), space.DID())
 		require.NoError(t, err)
 		require.Len(t, uploads, 1, "expected exactly one upload to be created")
 		upload := uploads[0]
 
-		rootCid, err := api.ExecuteUpload(ctx, upload)
+		rootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		fmt.Printf("Received %d blobs\n", len(putBlobs))
-		require.Len(t, putBlobs, 5, "expected exactly 5 blobs to be added")
+		require.Equal(t, putBlobs.Size(), 6, "expected 5 shards + 1 index to be added")
+		require.NotNil(t, indexLink, "expected `space/index/add` to be called")
 
-		foundData := filesData(ctx, t, rootCid, putBlobs)
+		foundData := filesData(t.Context(), t, rootCid, indexLink, putBlobs)
 
 		// Don't do this directly in the assertion, because if it fails, we don't want
 		// to try to print all of that data.
@@ -126,10 +163,8 @@ func TestExecuteUpload(t *testing.T) {
 	})
 
 	t.Run("after an error, can be retried safely", func(t *testing.T) {
-		// In case something goes wrong. This should never take this long.
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		t.Cleanup(cancel)
-		// ctx := t.Context()
+		space, err := signer.Generate()
+		require.NoError(t, err)
 
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 
@@ -156,51 +191,77 @@ func TestExecuteUpload(t *testing.T) {
 			},
 		}
 
+		var indexLink ipld.Link
+
 		c := &spaceBlobAddClient{
-			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			Client: helpers.Must(ctestutil.Client(
+				ctestutil.WithSpaceBlobAdd(),
+				ctestutil.WithServerOptions(
+					server.WithServiceMethod(
+						spaceindexcap.Add.Can(),
+						server.Provide(
+							spaceindexcap.Add,
+							func(
+								ctx context.Context,
+								cap ucan.Capability[spaceindexcap.AddCaveats],
+								inv invocation.Invocation,
+								context server.InvocationContext,
+							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
+								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
+								indexLink = cap.Nb().Index
+								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
+							},
+						),
+					),
+				),
+			)),
 			putClient: putClient,
 		}
 
-		// Use the client's issuer as the space DID to avoid any concerns about
-		// authorization.
-		spaceDID := c.Issuer().DID()
+		// Delegate * on the space to the client
+		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+		require.NoError(t, err)
+		err = c.AddProofs(proof)
+		require.NoError(t, err)
 
 		api := preparation.NewAPI(
 			repo,
 			c,
-			spaceDID,
+			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil
 			}),
 		)
 
-		_, err := api.FindOrCreateSpace(ctx, spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
 		require.NoError(t, err)
-		source, err := api.CreateSource(ctx, "Large Upload Source", ".")
+		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
 		require.NoError(t, err)
-		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
 		require.NoError(t, err)
-		uploads, err := api.CreateUploads(ctx, spaceDID)
+		uploads, err := api.CreateUploads(t.Context(), space.DID())
 		require.NoError(t, err)
 		require.Len(t, uploads, 1, "expected exactly one upload to be created")
 		upload := uploads[0]
 
 		// The first time, it should hit an error (on the third PUT)
-		_, err = api.ExecuteUpload(ctx, upload)
+		_, err = api.ExecuteUpload(t.Context(), upload)
 		require.ErrorIs(t, err, assert.AnError, "expected error on third PUT request")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Len(t, putBlobs, 2, "expected only 2 blobs to be added so far")
+		require.Equal(t, 2, putBlobs.Size(), "expected only 2 shards to be added so far")
 
 		// The second time, it should succeedfs
-		rootCid, err := api.ExecuteUpload(ctx, upload)
+		rootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err, "expected upload to succeed on retry")
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
-		require.Len(t, putBlobs, 5, "expected only 5 blobs to be added in the end")
+		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
 
-		foundData := filesData(ctx, t, rootCid, putBlobs)
+		foundData := filesData(t.Context(), t, rootCid, indexLink, putBlobs)
 
 		// Don't do this directly in the assertion, because if it fails, we don't want
 		// to try to print all of that data.
@@ -238,19 +299,9 @@ func prepareFs(t *testing.T, files map[string][]byte) afero.IOFS {
 	return memIOFS
 }
 
-func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, putBlobs [][]byte) map[string][]byte {
-	t.Helper()
-
-	blobBlockstores := make([]blockstore.Blockstore, 0, len(putBlobs))
-	for _, blob := range putBlobs {
-		bs, err := blockstore.NewReadOnly(bytes.NewReader(blob), nil)
-		require.NoError(t, err)
-		blobBlockstores = append(blobBlockstores, bs)
-	}
-
-	bs := &compositeBlockstore{
-		blockstores: blobBlockstores,
-	}
+func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, indexLink ipld.Link, shards ctestutil.BlobMap) map[string][]byte {
+	bs, err := newIndexAndShardsBlockstore(indexLink, shards)
+	require.NoError(t, err)
 
 	blockserv := blockservice.New(bs, nil)
 	dagserv := merkledag.NewDAGService(blockserv)
@@ -274,6 +325,85 @@ func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, putBlobs [][]
 	require.NoError(t, err)
 
 	return foundData
+}
+
+// indexAndShardsBlockstore is a [blockstore.Blockstore] that combines multiple
+// blockstores into one. It doesn't actually implement the entire interface, and
+// is only suitable for testing purposes.
+type indexAndShardsBlockstore struct {
+	index  blobindex.ShardedDagIndex
+	shards ctestutil.BlobMap
+}
+
+var _ blockstore.Blockstore = (*indexAndShardsBlockstore)(nil)
+
+func newIndexAndShardsBlockstore(indexLink ipld.Link, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
+	indexCidLink, ok := indexLink.(cidlink.Link)
+	if !ok {
+		return nil, fmt.Errorf("expected index link to be a cidlink.Link, got %T", indexLink)
+	}
+
+	if indexCidLink.Prefix().Codec != uint64(multicodec.Car) {
+		return nil, fmt.Errorf("expected index link CID to have codec 0x%x (CAR), got 0x%x", multicodec.Car, indexCidLink.Cid.Prefix().Codec)
+	}
+
+	indexDigest := indexCidLink.Hash()
+	if !shards.Has(indexDigest) {
+		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCidLink.Cid, indexDigest.B58String())
+	}
+
+	index, err := blobindex.Extract(bytes.NewReader(shards.Get(indexDigest)))
+	if err != nil {
+		return nil, fmt.Errorf("extracting index from CAR: %w", err)
+	}
+
+	return &indexAndShardsBlockstore{
+		index:  index,
+		shards: shards,
+	}, nil
+}
+
+func (c *indexAndShardsBlockstore) Get(ctx context.Context, key cid.Cid) (blocks.Block, error) {
+	for shardDigest, sliceMap := range c.index.Shards().Iterator() {
+		for sliceDigest, position := range sliceMap.Iterator() {
+			if bytes.Equal(key.Hash(), sliceDigest) {
+				if !c.shards.Has(shardDigest) {
+					return nil, fmt.Errorf("shard with digest %s not found in provided shards", shardDigest.B58String())
+				}
+				shardBlob := c.shards.Get(shardDigest)
+				return blocks.NewBlockWithCid(shardBlob[position.Offset:position.Offset+position.Length], key)
+			}
+		}
+	}
+	return nil, format.ErrNotFound{Cid: key}
+}
+
+func (c *indexAndShardsBlockstore) DeleteBlock(context.Context, cid.Cid) error {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) Has(context.Context, cid.Cid) (bool, error) {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) GetSize(context.Context, cid.Cid) (int, error) {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) Put(context.Context, blocks.Block) error {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) PutMany(context.Context, []blocks.Block) error {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) AllKeysChan(ctx context.Context) (<-chan cid.Cid, error) {
+	panic("not implemented")
+}
+
+func (c *indexAndShardsBlockstore) HashOnRead(enabled bool) {
+	panic("not implemented")
 }
 
 // compositeBlockstore is a [blockstore.Blockstore] that combines multiple
@@ -341,7 +471,7 @@ func (e *errorableTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return e.wrapped.RoundTrip(req)
 }
 
-func (e *errorableTransport) ReceivedBlobs() [][]byte {
+func (e *errorableTransport) ReceivedBlobs() ctestutil.BlobMap {
 	if receiver, ok := e.wrapped.(ctestutil.BlobReceiver); ok {
 		return receiver.ReceivedBlobs()
 	}

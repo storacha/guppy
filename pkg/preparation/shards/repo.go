@@ -13,11 +13,12 @@ import (
 
 // Repo defines the interface for interacting with DAG scans, nodes, and links in the repository.
 type Repo interface {
-	CreateShard(ctx context.Context, uploadID id.UploadID) (*model.Shard, error)
+	CreateShard(ctx context.Context, uploadID id.UploadID, size uint64) (*model.Shard, error)
 	UpdateShard(ctx context.Context, shard *model.Shard) error
 	ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error)
+
 	GetSpaceByUploadID(ctx context.Context, uploadID id.UploadID) (*spacesmodel.Space, error)
-	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID) error
+	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64) error
 	FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
-	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(dagsmodel.Node) error) error
+	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
 }

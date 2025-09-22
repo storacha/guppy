@@ -2,9 +2,8 @@ package model
 
 import (
 	"fmt"
-	"io"
 
-	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -34,16 +33,18 @@ func validShardState(state ShardState) bool {
 type Shard struct {
 	id       id.ShardID
 	uploadID id.UploadID
-	cid      cid.Cid
+	size     uint64
+	digest   multihash.Multihash
 	state    ShardState
 }
 
-// NewShard creates a new Shard with the given fsEntryID.
-func NewShard(uploadID id.UploadID) (*Shard, error) {
+// NewShard creates a new Shard with the given initial size.
+func NewShard(uploadID id.UploadID, size uint64) (*Shard, error) {
 	s := &Shard{
 		id:       id.New(),
 		uploadID: uploadID,
-		cid:      cid.Undef,
+		size:     size,
+		digest:   multihash.Multihash{},
 		state:    ShardStateOpen,
 	}
 	if _, err := validateShard(s); err != nil {
@@ -71,18 +72,20 @@ func (s *Shard) Close() error {
 	return nil
 }
 
-func (s *Shard) Added() error {
+func (s *Shard) Added(dig multihash.Multihash) error {
 	if s.state != ShardStateClosed {
 		return fmt.Errorf("cannot add shard in state %s", s.state)
 	}
 	s.state = ShardStateAdded
+	s.digest = dig
 	return nil
 }
 
 type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,
-	cid *cid.Cid,
+	size *uint64,
+	digest *multihash.Multihash,
 	state *ShardState,
 ) error
 
@@ -91,7 +94,8 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 	err := scanner(
 		&shard.id,
 		&shard.uploadID,
-		&shard.cid,
+		&shard.size,
+		&shard.digest,
 		&shard.state,
 	)
 	if err != nil {
@@ -101,14 +105,21 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 }
 
 // ShardWriter is a function type for writing a Shard to the database.
-type ShardWriter func(id id.ShardID, uploadID id.UploadID, cid cid.Cid, state ShardState) error
+type ShardWriter func(
+	id id.ShardID,
+	uploadID id.UploadID,
+	size uint64,
+	digest multihash.Multihash,
+	state ShardState,
+) error
 
 // WriteShardToDatabase writes a Shard to the database using the provided writer function.
 func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 	return writer(
 		shard.id,
 		shard.uploadID,
-		shard.cid,
+		shard.size,
+		shard.digest,
 		shard.state,
 	)
 }
@@ -121,6 +132,10 @@ func (s *Shard) State() ShardState {
 	return s.state
 }
 
-func (s *Shard) Bytes() io.Reader {
-	return nil // TK: Replace with actual byte reader
+func (s *Shard) Size() uint64 {
+	return s.size
+}
+
+func (s *Shard) Digest() multihash.Multihash {
+	return s.digest
 }
