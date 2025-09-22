@@ -38,7 +38,6 @@ type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload)
 type API struct {
 	Repo             Repo
 	Client           Client
-	Space            did.DID
 	CarForShard      CarForShardFunc
 	IndexesForUpload IndexesForUploadFunc
 }
@@ -47,7 +46,7 @@ var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUploa
 var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
-func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
+func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
 	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
@@ -59,9 +58,9 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 		}
 
-		digest, _, err := a.Client.SpaceBlobAdd(ctx, car, a.Space)
+		digest, _, err := a.Client.SpaceBlobAdd(ctx, car, spaceDID)
 		if err != nil {
-			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), a.Space, err)
+			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 		}
 		shard.Added(digest)
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
@@ -72,7 +71,7 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	return nil
 }
 
-func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID) error {
+func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
@@ -87,22 +86,22 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID) erro
 			return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
 		}
 
-		indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), a.Space)
+		indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
 		if err != nil {
-			return fmt.Errorf("failed to add index to space %s: %w", a.Space, err)
+			return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
 		}
 
 		indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
-		err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, a.Space)
+		err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, spaceDID)
 		if err != nil {
-			return fmt.Errorf("failed to add index link to space %s: %w", a.Space, err)
+			return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)
 		}
 	}
 
 	return nil
 }
 
-func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID) error {
+func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
@@ -119,9 +118,9 @@ func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadI
 		shardLinks = append(shardLinks, cidlink.Link{Cid: shardCID})
 	}
 
-	_, err = a.Client.UploadAdd(ctx, a.Space, cidlink.Link{Cid: upload.RootCID()}, shardLinks)
+	_, err = a.Client.UploadAdd(ctx, spaceDID, cidlink.Link{Cid: upload.RootCID()}, shardLinks)
 	if err != nil {
-		return fmt.Errorf("failed to add upload %s to space %s: %w", uploadID, a.Space, err)
+		return fmt.Errorf("failed to add upload %s to space %s: %w", uploadID, spaceDID, err)
 	}
 
 	return nil

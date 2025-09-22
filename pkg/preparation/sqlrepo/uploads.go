@@ -27,8 +27,6 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			source_id,
 			created_at,
 			updated_at,
-			state,
-			error_message,
 			root_fs_entry_id,
 			root_cid
 		FROM uploads
@@ -41,30 +39,20 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		sourceID *id.SourceID,
 		createdAt,
 		updatedAt *time.Time,
-		state *model.UploadState,
-		errorMessage **string,
 		rootFSEntryID **id.FSEntryID,
 		rootCID *cid.Cid,
 	) error {
-		var nullErrorMessage sql.NullString
 		err := row.Scan(
 			id,
 			util.DbDID(spaceDID),
 			sourceID,
 			util.TimestampScanner(createdAt),
 			util.TimestampScanner(updatedAt),
-			state,
-			&nullErrorMessage,
 			rootFSEntryID,
 			util.DbCid(rootCID),
 		)
 		if err != nil {
 			return err
-		}
-		if nullErrorMessage.Valid {
-			*errorMessage = &nullErrorMessage.String
-		} else {
-			*errorMessage = nil
 		}
 		return nil
 	})
@@ -72,19 +60,6 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		return nil, nil
 	}
 	return upload, err
-}
-
-// GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-func (r *Repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT source_id FROM uploads WHERE id = ?`, uploadID,
-	)
-	var sourceID id.SourceID
-	err := row.Scan(&sourceID)
-	if err != nil {
-		return id.Nil, err
-	}
-	return sourceID, nil
 }
 
 // CreateUploads creates uploads for a given space and source IDs.
@@ -103,11 +78,9 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 				source_id,
 				created_at,
 				updated_at,
-				state,
-				error_message,
 				root_fs_entry_id,
 				root_cid
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			) VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 		err = model.WriteUploadToDatabase(func(
 			id id.UploadID,
@@ -115,8 +88,6 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 			sourceID id.SourceID,
 			createdAt,
 			updatedAt time.Time,
-			state model.UploadState,
-			errorMessage *string,
 			rootFSEntryID *id.FSEntryID,
 			rootCID cid.Cid,
 		) error {
@@ -127,8 +98,6 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 				sourceID,
 				createdAt.Unix(),
 				updatedAt.Unix(),
-				state,
-				NullString(errorMessage),
 				Null(rootFSEntryID),
 				util.DbCid(&rootCID),
 			)
@@ -144,11 +113,11 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 
 // UpdateUpload implements uploads.Repo.
 func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
-	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
+	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, root_fs_entry_id = $6, root_cid = $7 WHERE id = $1`
+	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), state, NullString(errorMessage), Null(rootFSEntryID), util.DbCid(&rootCID))
+			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), Null(rootFSEntryID), util.DbCid(&rootCID))
 		return err
 	}, upload)
 }

@@ -31,7 +31,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	db := testdb.CreateTestDB(t)
 	repo := sqlrepo.New(db)
 	api := shards.API{Repo: repo}
-	space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Config", spacesmodel.WithShardSize(1<<16))
+	space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
 	source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1.(cidlink.Link).Cid, 1<<14, space.DID(), "some/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1.(cidlink.Link).Cid)
+	shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCid1.(cidlink.Link).Cid)
 	require.NoError(t, err)
 
 	require.False(t, shardClosed)
@@ -72,7 +72,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2.(cidlink.Link).Cid, 1<<14, space.DID(), "some/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2.(cidlink.Link).Cid)
+	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCid2.(cidlink.Link).Cid)
 	require.NoError(t, err)
 
 	require.False(t, shardClosed)
@@ -93,7 +93,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3.(cidlink.Link).Cid, 1<<15, space.DID(), "yet/other/path", source.ID(), 0)
 	require.NoError(t, err)
 
-	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3.(cidlink.Link).Cid)
+	shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCid3.(cidlink.Link).Cid)
 	require.NoError(t, err)
 
 	require.True(t, shardClosed)

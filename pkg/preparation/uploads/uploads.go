@@ -2,32 +2,31 @@ package uploads
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"golang.org/x/sync/errgroup"
 )
 
 var log = logging.Logger("preparation/uploads")
 
-type ExecuteScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
+type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error)
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
-type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
-type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
-type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID) error
+type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 
 type API struct {
 	Repo                        Repo
-	ExecuteScansForUpload       ExecuteScansForUploadFunc
+	ExecuteScan                 ExecuteScanFunc
 	ExecuteDagScansForUpload    ExecuteDagScansForUploadFunc
 	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
 	AddIndexesForUpload         AddIndexesForUploadFunc
@@ -62,27 +61,9 @@ func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Uplo
 	return uploads, nil
 }
 
-// GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-func (a API) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
-	return a.Repo.GetSourceIDForUploadID(ctx, uploadID)
-}
-
 // GetUploadByID retrieves an upload by its unique ID.
 func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error) {
 	return a.Repo.GetUploadByID(ctx, uploadID)
-}
-
-// ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
-func (a API) ExecuteUpload(ctx context.Context, upload *model.Upload) (cid.Cid, error) {
-	return executor{
-		upload: upload,
-		api:    a,
-	}.execute(ctx)
-}
-
-type executor struct {
-	upload *model.Upload
-	api    API
 }
 
 // signal signals on a channel that work is available. The channel
@@ -97,106 +78,52 @@ func signal(work chan<- struct{}) {
 	}
 }
 
-func (e executor) execute(ctx context.Context) (cid.Cid, error) {
-	log.Debugf("Executing upload %s in state %s", e.upload.ID(), e.upload.State())
-
-	eg, ctx := errgroup.WithContext(ctx)
+// ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
+func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) (cid.Cid, error) {
+	eg, wCtx := bettererrgroup.WithContext(ctx)
 
 	var (
-		uploadAvailable       = make(chan struct{}, 1)
 		scansAvailable        = make(chan struct{}, 1)
 		dagScansAvailable     = make(chan struct{}, 1)
 		closedShardsAvailable = make(chan struct{}, 1)
 	)
 
 	// Start the workers
-	eg.Go(func() error { return e.runStartWorker(ctx, uploadAvailable, scansAvailable) })
-	eg.Go(func() error { return e.runScanWorker(ctx, scansAvailable, dagScansAvailable) })
-	eg.Go(func() error { return e.runDAGScanWorker(ctx, dagScansAvailable, closedShardsAvailable) })
-	eg.Go(func() error { return e.runStorachaWorker(ctx, closedShardsAvailable) })
+	eg.Go(func() error { return runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable) })
+	eg.Go(func() error {
+		return runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
+	})
+	eg.Go(func() error { return runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable) })
 
 	// Kick them all off. There may be work available in the DB from a previous
 	// attempt.
-	signal(uploadAvailable)
 	signal(scansAvailable)
 	signal(dagScansAvailable)
 	signal(closedShardsAvailable)
-	close(uploadAvailable)
+	close(scansAvailable)
 
-	log.Debugf("Waiting for workers to finish for upload %s", e.upload.ID())
-	err := eg.Wait()
+	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
+	workersErr := eg.Wait()
 
-	if errors.Is(err, context.Canceled) {
-		log.Debugf("Upload %s was canceled", e.upload.ID())
-		if err := e.upload.Cancel(); err != nil {
-			return cid.Undef, fmt.Errorf("cancelling upload: %w", err)
-		}
-		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
-			return cid.Undef, fmt.Errorf("updating upload after failure: %w", err)
-		}
-	} else if err != nil {
-		log.Errorf("Error executing upload %s: %v", e.upload.ID(), err)
-		if failErr := e.upload.Fail(err.Error()); failErr != nil {
-			return cid.Undef, fmt.Errorf("failing upload: %w", failErr)
-		}
-		if err := e.api.Repo.UpdateUpload(context.WithoutCancel(ctx), e.upload); err != nil {
-			return cid.Undef, fmt.Errorf("updating upload after failure: %w", err)
-		}
-
+	// Reload the upload to get the latest state from the DB.
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return cid.Undef, fmt.Errorf("reloading upload: %w", err)
 	}
 
-	return e.upload.RootCID(), err
+	return upload.RootCID(), workersErr
 }
 
-// runStartWorker runs the worker that creates the scan and signals that it's
-// available to run.
-func (e *executor) runStartWorker(ctx context.Context, uploadAvailable <-chan struct{}, scansAvailable chan<- struct{}) error {
-	return Worker(
-		ctx,
-		uploadAvailable,
-
-		// doWork
-		func() error {
-			if e.upload.State() == model.UploadStatePending {
-				if err := e.upload.Start(); err != nil {
-					return fmt.Errorf("starting upload: %w", err)
-				}
-				if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
-					return fmt.Errorf("updating upload: %w", err)
-				}
-				if _, err := e.api.Repo.CreateScan(ctx, e.upload.ID()); err != nil {
-					return fmt.Errorf("creating scan for upload %s: %w", e.upload.ID(), err)
-				}
-				signal(scansAvailable)
-			}
-
-			return nil
-		},
-
-		// finalize
-		func() error {
-			close(scansAvailable)
-			return nil
-		},
-	)
-}
-
-func (e *executor) runScanWorker(ctx context.Context, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
+func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
 	return Worker(
 		ctx,
 		scansAvailable,
 
 		// doWork
 		func() error {
-			err := e.api.ExecuteScansForUpload(ctx, e.upload.ID(), func(entry scanmodel.FSEntry) error {
-				if entry.Path() == "." {
-					e.upload.SetRootFSEntryID(entry.ID())
-					if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
-						return fmt.Errorf("updating upload: %w", err)
-					}
-				}
+			err := api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
 				_, isDirectory := entry.(*scanmodel.Directory)
-				_, err := e.api.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, e.upload.ID(), e.upload.SpaceDID())
+				_, err := api.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, spaceDID)
 				if err != nil {
 					return fmt.Errorf("creating DAG scan: %w", err)
 				}
@@ -221,16 +148,16 @@ func (e *executor) runScanWorker(ctx context.Context, scansAvailable <-chan stru
 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
-func (e *executor) runDAGScanWorker(ctx context.Context, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
+func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
 	return Worker(
 		ctx,
 		dagScansAvailable,
 
 		// doWork
 		func() error {
-			err := e.api.ExecuteDagScansForUpload(ctx, e.upload.ID(), func(node dagmodel.Node, data []byte) error {
-				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), e.upload.ID())
-				shardClosed, err := e.api.AddNodeToUploadShards(ctx, e.upload.ID(), node.CID())
+			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
+				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
+				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID())
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
@@ -243,7 +170,7 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagScansAvailable <-cha
 			})
 
 			if err != nil {
-				return fmt.Errorf("running dag scans for upload %s: %w", e.upload.ID(), err)
+				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
 			}
 
 			return nil
@@ -252,36 +179,32 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagScansAvailable <-cha
 		// finalize
 		func() error {
 			// We're out of nodes, so we can close any open shards for this upload.
-			shardClosed, err := e.api.CloseUploadShards(ctx, e.upload.ID())
+			shardClosed, err := api.CloseUploadShards(ctx, uploadID)
 			if err != nil {
-				return fmt.Errorf("closing upload shards for upload %s: %w", e.upload.ID(), err)
+				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
 			}
 
 			if shardClosed {
 				signal(closedShardsAvailable)
 			}
 
-			close(closedShardsAvailable)
-
-			rootCid, err := e.api.Repo.CIDForFSEntry(ctx, e.upload.RootFSEntryID())
+			// Reload the upload to get the latest state from the DB.
+			upload, err := api.Repo.GetUploadByID(ctx, uploadID)
 			if err != nil {
-				var incompleteErr IncompleteDagScanError
-				if errors.As(err, &incompleteErr) {
-					log.Debugf("DAG scan for root fs entry %s is not completed, failing upload %s: %s", incompleteErr.DagScan.FsEntryID(), e.upload.ID(), incompleteErr.DagScan.Error())
-					if err := e.upload.Fail("dag scan failed"); err != nil {
-						return fmt.Errorf("failing upload: %w", err)
-					}
-				}
-
+				return fmt.Errorf("reloading upload: %w", err)
+			}
+			rootCid, err := api.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
+			if err != nil {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
-
-			if err := e.upload.SetRootCID(rootCid); err != nil {
+			if err := upload.SetRootCID(rootCid); err != nil {
 				return fmt.Errorf("completing DAG generation: %w", err)
 			}
-			if err := e.api.Repo.UpdateUpload(ctx, e.upload); err != nil {
+			if err := api.Repo.UpdateUpload(ctx, upload); err != nil {
 				return fmt.Errorf("updating upload: %w", err)
 			}
+
+			close(closedShardsAvailable)
 
 			return nil
 		},
@@ -289,16 +212,16 @@ func (e *executor) runDAGScanWorker(ctx context.Context, dagScansAvailable <-cha
 }
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.
-func (e *executor) runStorachaWorker(ctx context.Context, blobWork <-chan struct{}) error {
+func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
 	return Worker(
 		ctx,
 		blobWork,
 
 		// doWork
 		func() error {
-			err := e.api.SpaceBlobAddShardsForUpload(ctx, e.upload.ID())
+			err := api.SpaceBlobAddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", e.upload.ID(), err)
+				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
 
 			return nil
@@ -306,14 +229,14 @@ func (e *executor) runStorachaWorker(ctx context.Context, blobWork <-chan struct
 
 		// finalize
 		func() error {
-			err := e.api.AddIndexesForUpload(ctx, e.upload.ID())
+			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", e.upload.ID(), err)
+				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
 			}
 
-			err = e.api.AddStorachaUploadForUpload(ctx, e.upload.ID())
+			err = api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				return fmt.Errorf("`upload/add`ing upload %s: %w", e.upload.ID(), err)
+				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
 			}
 
 			return nil

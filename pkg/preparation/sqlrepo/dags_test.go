@@ -90,7 +90,7 @@ func TestDirectoryLinks(t *testing.T) {
 	t.Run("for a new DAG scan is empty", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		spaceDID := testutil.RandomDID(t)
-	dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New(), spaceDID)
+		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New(), spaceDID)
 		require.NoError(t, err)
 		dirScan, ok := dagScan.(*model.DirectoryDAGScan)
 		require.True(t, ok, "Expected dagScan to be a DirectoryDAGScan")

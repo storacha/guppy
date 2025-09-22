@@ -40,7 +40,6 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		api := storacha.API{
 			Repo:        repo,
 			Client:      &client,
-			Space:       spaceDID,
 			CarForShard: carForShard,
 		}
 
@@ -64,15 +63,15 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// Add enough nodes to close one shard and create a second one.
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
 		require.NoError(t, err)
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid2)
 		require.NoError(t, err)
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid3)
 		require.NoError(t, err)
 
 		shards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
@@ -86,7 +85,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		secondShard := shards[0]
 
 		// Upload shards that are ready to go.
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID())
+		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// This run should `space/blob/add` the first, closed shard.
@@ -97,7 +96,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID())
+		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// This run should `space/blob/add` the second, newly closed shard.
@@ -125,7 +124,6 @@ func TestAddIndexesForUpload(t *testing.T) {
 		api := storacha.API{
 			Repo:             repo,
 			Client:           &client,
-			Space:            spaceDID,
 			IndexesForUpload: IndexesForUpload,
 		}
 
@@ -138,7 +136,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
-		err = api.AddIndexesForUpload(t.Context(), upload.ID())
+		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		expectedIndexBlobs := [][]byte{
@@ -176,7 +174,6 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		api := storacha.API{
 			Repo:             repo,
 			Client:           &client,
-			Space:            spaceDID,
 			IndexesForUpload: indexesForUpload,
 		}
 
@@ -213,12 +210,11 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
 
-		upload.Start()
 		upload.SetRootCID(rootLink.(cidlink.Link).Cid)
 		err = repo.UpdateUpload(t.Context(), upload)
 		require.NoError(t, err)
 
-		err = api.AddStorachaUploadForUpload(t.Context(), upload.ID())
+		err = api.AddStorachaUploadForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		require.Len(t, client.UploadAddInvocations, 1)

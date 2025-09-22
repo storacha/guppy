@@ -80,11 +80,7 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 	}
 
 	scansAPI := scans.API{
-		Repo: repo,
-		// Lazy-evaluate `uploadsAPI`, which isn't initialized yet, but will be.
-		UploadLookup: func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
-			return uploadsAPI.GetUploadByID(ctx, uploadID)
-		},
+		Repo:           repo,
 		SourceAccessor: sourcesAPI.AccessByID,
 		WalkerFn:       walker.WalkDir,
 	}
@@ -124,14 +120,13 @@ func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) 
 	storachaAPI := storacha.API{
 		Repo:             repo,
 		Client:           client,
-		Space:            space,
 		CarForShard:      shardsAPI.CarForShard,
 		IndexesForUpload: shardsAPI.IndexesForUpload,
 	}
 
 	uploadsAPI = uploads.API{
 		Repo:                        repo,
-		ExecuteScansForUpload:       scansAPI.ExecuteScansForUpload,
+		ExecuteScan:                 scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:    dagsAPI.ExecuteDagScansForUpload,
 		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
 		CloseUploadShards:           shardsAPI.CloseUploadShards,
@@ -176,5 +171,5 @@ func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmod
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
-	return a.Uploads.ExecuteUpload(ctx, upload)
+	return a.Uploads.ExecuteUpload(ctx, upload.ID(), upload.SpaceDID())
 }

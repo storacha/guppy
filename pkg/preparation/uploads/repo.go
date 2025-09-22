@@ -7,7 +7,6 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
-	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -15,20 +14,16 @@ import (
 type Repo interface {
 	// GetUploadByID retrieves an upload by its unique ID.
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadmodel.Upload, error)
-	// GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-	GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error)
 	// CreateUploads creates uploads for a given space
 	CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*uploadmodel.Upload, error)
 	// UpdateUpload updates the state of an upload in the repository.
 	UpdateUpload(ctx context.Context, upload *uploadmodel.Upload) error
 	// CIDForFSEntry retrieves the CID for a file system entry by its ID.
 	CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error)
-	// CreateDAGScanForFSEntry creates a new DAG scan for a file system entry.
+	// CreateDAGScan creates a new DAG scan for a file system entry.
 	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error)
 	// ListSpaceSources lists all space sources for the given space DID.
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
-	// CreateScan creates a new scan for an upload.
-	CreateScan(ctx context.Context, uploadID id.UploadID) (*scanmodel.Scan, error)
 }
 
 // IncompleteDagScanError is returned by CIDForFSEntry when the DAG scan for the file system entry is not completed.
