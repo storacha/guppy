@@ -25,6 +25,10 @@ func init() {
 					Value: "",
 					Usage: "DID of space to upload to.",
 				},
+				&cli.BoolFlag{
+					Name:  "resume",
+					Usage: "Resume a previously interrupted upload.",
+				},
 			},
 		},
 		&cli.Command{
