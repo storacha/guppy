@@ -29,9 +29,9 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
-	"github.com/storacha/guppy/pkg/preparation/shards"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -44,14 +44,14 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// spaceBlobAddClient is a [shards.SpaceBlobAdder] that wraps a [client.Client]
-// to use a custom putClient.
+// spaceBlobAddClient is a [storacha.SpaceBlobAdder] that wraps a
+// [client.Client] to use a custom putClient.
 type spaceBlobAddClient struct {
 	*client.Client
 	putClient *http.Client
 }
 
-var _ shards.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
+var _ storacha.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
 
 func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)

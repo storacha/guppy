@@ -1,18 +1,19 @@
 package shards
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 
 	"github.com/ipfs/go-cid"
+	cbor "github.com/ipfs/go-ipld-cbor"
 	logging "github.com/ipfs/go-log/v2"
+	ipldcar "github.com/ipld/go-car"
+	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
-	"github.com/storacha/go-ucanto/core/delegation"
-	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/pkg/client"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -20,30 +21,44 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
-// Byte length of a CBOR encoded CAR header with zero roots.
-const noRootsHeaderLen = 17
-
 var log = logging.Logger("preparation/shards")
 
-// SpaceBlobAdder is an interface for adding shards to a space blob. It's
-// typically implemented by [client.Client].
-type SpaceBlobAdder interface {
-	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
+// A CAR header with zero roots.
+var noRootsHeader []byte
+
+func init() {
+	var err error
+	noRootsHeaderWithoutLength, err := cbor.Encode(
+		ipldcar.CarHeader{
+			Roots:   nil,
+			Version: 1,
+		},
+	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to encode CAR header: %v", err))
+	}
+
+	var buf bytes.Buffer
+	err = util.LdWrite(&buf, noRootsHeaderWithoutLength)
+	if err != nil {
+		panic(fmt.Sprintf("failed to length-delimit CAR header: %v", err))
+	}
+
+	noRootsHeader = buf.Bytes()
 }
 
-var _ SpaceBlobAdder = (*client.Client)(nil)
+type NodeDataGetter interface {
+	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
+}
 
 // API provides methods to interact with the Shards in the repository.
 type API struct {
-	Repo        Repo
-	Client      SpaceBlobAdder
-	Space       did.DID
-	CarForShard func(ctx context.Context, shard *model.Shard) (io.Reader, error)
+	Repo       Repo
+	NodeReader NodeDataGetter
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
-var _ uploads.SpaceBlobAddShardsForUploadFunc = API{}.SpaceBlobAddShardsForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid) (bool, error) {
 	space, err := a.Repo.GetSpaceByUploadID(ctx, uploadID)
@@ -115,7 +130,7 @@ func (a *API) roomInShard(ctx context.Context, shard *model.Shard, nodeCID cid.C
 }
 
 func (a *API) currentSizeOfShard(ctx context.Context, shardID id.ShardID) (uint64, error) {
-	var totalSize uint64 = noRootsHeaderLen
+	var totalSize uint64 = uint64(len(noRootsHeader))
 
 	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node) error {
 		totalSize += nodeEncodingLength(node.CID(), node.Size())
@@ -153,27 +168,66 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
-func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.UploadID) error {
-	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateClosed)
+func (a API) CarForShard(ctx context.Context, shard *model.Shard) (io.Reader, error) {
+	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
+	err := a.Repo.ForEachNode(ctx, shard.ID(), func(node dagsmodel.Node) error {
+		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
+		cidReader := bytes.NewReader(node.CID().Bytes())
+		newReader := NewLazyReader(func() ([]byte, error) {
+			data, err := a.NodeReader.GetData(ctx, node)
+			if err != nil {
+				return nil, fmt.Errorf("getting data for node %s: %w", node.CID(), err)
+			}
+			return data, nil
+		})
+
+		readers = append(readers, lengthReader, cidReader, newReader)
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
+		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shard.ID(), err)
 	}
 
-	for _, shard := range closedShards {
-		reader, err := a.CarForShard(ctx, shard)
-		if err != nil {
-			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
-		}
+	return io.MultiReader(readers...), nil
+}
 
-		_, _, err = a.Client.SpaceBlobAdd(ctx, reader, a.Space)
+func lengthVarint(size uint64) []byte {
+	buf := make([]byte, 8)
+	n := binary.PutUvarint(buf, size)
+	return buf[:n]
+}
+
+// LazyReader calls a function to provide its bytes the first time it's
+// necessary, then holds the value buffered in memory.
+type LazyReader struct {
+	fn func() ([]byte, error)
+	r  *bytes.Reader
+}
+
+// LazyReader implements io.Reader. It could implement anything that
+// [bytes.Reader] does, but we'll have to implement each method we want
+// separately.
+var _ io.Reader = (*LazyReader)(nil)
+
+// NewLazyReader creates a new [LazyReader] with the given function
+func NewLazyReader(fn func() ([]byte, error)) *LazyReader {
+	return &LazyReader{fn: fn}
+}
+
+func (lr *LazyReader) materialize() error {
+	if lr.r == nil {
+		data, err := lr.fn()
 		if err != nil {
-			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), a.Space, err)
+			return err
 		}
-		shard.Added()
-		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
-			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.ID(), err)
-		}
+		lr.r = bytes.NewReader(data)
 	}
-
 	return nil
+}
+
+func (lr *LazyReader) Read(p []byte) (n int, err error) {
+	if err := lr.materialize(); err != nil {
+		return 0, err
+	}
+	return lr.r.Read(p)
 }

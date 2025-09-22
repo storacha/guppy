@@ -8,13 +8,13 @@ import (
 	"io"
 	"testing"
 
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"github.com/ipld/go-car/v2/blockstore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/testutil"
-	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/pkg/client"
+	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -142,102 +142,86 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 	return foundNodeCids
 }
 
-type mockSpaceBlobAdder struct {
-	T           *testing.T
-	invocations []spaceBlobAddInvocation
+type stubNodeReader struct{}
+
+func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error) {
+	rawNode := node.(*dagsmodel.RawNode)
+	data := fmt.Appendf(nil, "BLOCK DATA: %s", rawNode.Path())
+	if rawNode.Size() != uint64(len(data)) {
+		// The size in FindOrCreateRawNode is a bit of a magic number, but at least
+		// this can tell us early if we need to change it.
+		panic(fmt.Errorf("size for node %s (%s) should be set to %d, not %d", rawNode.CID(), rawNode.Path(), len(data), rawNode.Size()))
+	}
+	return data, nil
 }
 
-type spaceBlobAddInvocation struct {
-	contentRead  []byte
-	spaceAddedTo did.DID
-}
+func TestCarForShard(t *testing.T) {
+	db := testdb.CreateTestDB(t)
+	repo := sqlrepo.New(db)
+	api := shards.API{
+		Repo:       repo,
+		NodeReader: stubNodeReader{},
+	}
 
-var _ shards.SpaceBlobAdder = (*mockSpaceBlobAdder)(nil)
+	uploadID := id.New()
+	spaceDID, err := did.Parse("did:storacha:space:example")
+	require.NoError(t, err)
 
-func (m *mockSpaceBlobAdder) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
-	contentBytes, err := io.ReadAll(content)
-	require.NoError(m.T, err, "reading content for SpaceBlobAdd")
+	nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+	nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
+	nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-	m.invocations = append(m.invocations, spaceBlobAddInvocation{
-		contentRead:  contentBytes,
-		spaceAddedTo: space,
-	})
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 21, spaceDID, "dir/file1", id.New(), 0)
+	require.NoError(t, err)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 21, spaceDID, "dir/file2", id.New(), 0)
+	require.NoError(t, err)
+	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 26, spaceDID, "dir/dir2/file3", id.New(), 0)
+	require.NoError(t, err)
 
-	return []byte{}, nil, nil
-}
+	shard, err := repo.CreateShard(t.Context(), uploadID)
 
-func TestSpaceBlobAddShardsForUpload(t *testing.T) {
-	t.Run("`space/blob/add`s a CAR for each shard", func(t *testing.T) {
-		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
-		spaceDID, err := did.Parse("did:storacha:space:example")
-		require.NoError(t, err)
-		spaceBlobAdder := mockSpaceBlobAdder{T: t}
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid1, spaceDID)
+	require.NoError(t, err)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid2, spaceDID)
+	require.NoError(t, err)
+	err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCid3, spaceDID)
+	require.NoError(t, err)
 
-		carForShard := func(ctx context.Context, shard *model.Shard) (io.Reader, error) {
-			nodes := nodesInShard(ctx, t, db, shard.ID())
-			b := []byte("CAR CONTAINING NODES:")
-			for _, n := range nodes {
-				b = append(b, ' ')
-				b = append(b, []byte(n.String())...)
-			}
-			return bytes.NewReader(b), nil
-		}
+	carReader, err := api.CarForShard(t.Context(), shard)
+	require.NoError(t, err)
 
-		api := shards.API{
-			Repo:        repo,
-			Client:      &spaceBlobAdder,
-			Space:       spaceDID,
-			CarForShard: carForShard,
-		}
+	// Read in the entire CAR, so we can create an [io.ReaderAt] for the
+	// blockstore. In the future, the reader we create could be an [io.ReaderAt]
+	// itself, as it technically knows enough information to jump around. However,
+	// that's complex, and in our use case, we're going to end up reading the
+	// whole thing anyway to store it in Storacha.
+	carBytes, err := io.ReadAll(carReader)
+	require.NoError(t, err)
+	bufferedCarReader := bytes.NewReader(carBytes)
 
-		space, err := repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Config", spacesmodel.WithShardSize(1<<16))
-		require.NoError(t, err)
-		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
-		require.NoError(t, err)
-		uploads, err := repo.CreateUploads(t.Context(), space.DID(), []id.SourceID{source.ID()})
-		require.NoError(t, err)
-		require.Len(t, uploads, 1)
-		upload := uploads[0]
+	// Try to read the CAR bytes as a CAR.
+	bs, err := blockstore.NewReadOnly(bufferedCarReader, nil)
+	require.NoError(t, err)
 
-		nodeCid1 := testutil.RandomCID(t)
-		nodeCid2 := testutil.RandomCID(t)
-		nodeCid3 := testutil.RandomCID(t)
+	cidsCh, err := bs.AllKeysChan(t.Context())
+	require.NoError(t, err)
+	var cids []cid.Cid
+	for cid := range cidsCh {
+		cids = append(cids, cid)
+	}
+	require.Equal(t, []cid.Cid{nodeCid1, nodeCid2, nodeCid3}, cids)
 
-		// Add enough nodes to close one shard and create a second one.
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1.(cidlink.Link).Cid, 1<<14, space.DID(), "some/path", source.ID(), 0)
-		require.NoError(t, err)
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid1.(cidlink.Link).Cid)
-		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2.(cidlink.Link).Cid, 1<<14, space.DID(), "some/other/path", source.ID(), 0)
-		require.NoError(t, err)
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid2.(cidlink.Link).Cid)
-		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3.(cidlink.Link).Cid, 1<<15, space.DID(), "yet/other/path", source.ID(), 0)
-		require.NoError(t, err)
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), nodeCid3.(cidlink.Link).Cid)
-		require.NoError(t, err)
+	var b blocks.Block
 
-		// Upload shards that are ready to go.
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID())
-		require.NoError(t, err)
+	b, err = bs.Get(t.Context(), nodeCid1)
+	require.NoError(t, err)
+	require.Equal(t, []byte("BLOCK DATA: dir/file1"), b.RawData())
 
-		// This run should `space/blob/add` the first, closed shard.
-		require.Len(t, spaceBlobAdder.invocations, 1)
-		require.NotEmpty(t, spaceBlobAdder.invocations[0].contentRead)
-		require.Equal(t, fmt.Appendf(nil, "CAR CONTAINING NODES: %s %s", nodeCid1, nodeCid2), spaceBlobAdder.invocations[0].contentRead)
-		require.Equal(t, spaceDID, spaceBlobAdder.invocations[0].spaceAddedTo)
+	b, err = bs.Get(t.Context(), nodeCid2)
+	require.NoError(t, err)
+	require.Equal(t, []byte("BLOCK DATA: dir/file2"), b.RawData())
 
-		// Now close the upload shards and run it again.
-		_, err = api.CloseUploadShards(t.Context(), upload.ID())
-		require.NoError(t, err)
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID())
-		require.NoError(t, err)
-
-		// This run should `space/blob/add` the second, newly closed shard.
-		require.Len(t, spaceBlobAdder.invocations, 2)
-		require.NotEmpty(t, spaceBlobAdder.invocations[1].contentRead)
-		require.Equal(t, fmt.Appendf(nil, "CAR CONTAINING NODES: %s", nodeCid3), spaceBlobAdder.invocations[1].contentRead)
-		require.Equal(t, spaceDID, spaceBlobAdder.invocations[1].spaceAddedTo)
-	})
+	b, err = bs.Get(t.Context(), nodeCid3)
+	require.NoError(t, err)
+	require.Equal(t, []byte("BLOCK DATA: dir/dir2/file3"), b.RawData())
 }
