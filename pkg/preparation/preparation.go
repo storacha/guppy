@@ -170,6 +170,10 @@ func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmod
 	return a.Uploads.CreateUploads(ctx, spaceDID)
 }
 
+func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
+	return a.Uploads.GetUploadByID(ctx, uploadID)
+}
+
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
 	return a.Uploads.ExecuteUpload(ctx, upload.ID(), upload.SpaceDID())
 }

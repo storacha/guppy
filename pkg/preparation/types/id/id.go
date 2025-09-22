@@ -18,6 +18,11 @@ func New() ID {
 	return ID(uuid.New())
 }
 
+func Parse(s string) (ID, error) {
+	uuid, err := uuid.Parse(s)
+	return ID(uuid), err
+}
+
 func (id ID) Value() (driver.Value, error) {
 	if id == Nil {
 		return nil, nil
@@ -40,7 +45,6 @@ func (id ID) String() string {
 
 // SourceID is an alias for ID and uniquely identifies a source.
 type SourceID = ID
-
 
 // UploadID is an alias for ID and uniquely identifies an upload.
 type UploadID = ID
