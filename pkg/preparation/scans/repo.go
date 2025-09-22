@@ -19,4 +19,5 @@ type Repo interface {
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
 	DirectoryChildren(ctx context.Context, dir *model.Directory) ([]model.FSEntry, error)
 	GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error)
+	DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
 }

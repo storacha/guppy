@@ -25,6 +25,7 @@ type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool
 type SpaceBlobAddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
 type RemoveBadNodesFunc func(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
 
 type API struct {
@@ -34,6 +35,7 @@ type API struct {
 	SpaceBlobAddShardsForUpload SpaceBlobAddShardsForUploadFunc
 	AddIndexesForUpload         AddIndexesForUploadFunc
 	AddStorachaUploadForUpload  AddStorachaUploadForUploadFunc
+	RemoveBadFSEntry            RemoveBadFSEntryFunc
 	RemoveBadNodes              RemoveBadNodesFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
@@ -172,6 +174,34 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 				return nil
 			})
+
+			var badFSEntryErr types.ErrBadFSEntry
+			if errors.As(err, &badFSEntryErr) {
+				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
+				if err != nil {
+					return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
+				}
+
+				log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
+				err = api.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID())
+				if err != nil {
+					return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
+				}
+
+				err = upload.Invalidate()
+				if err != nil {
+					return fmt.Errorf("invalidating upload %s after removing bad FS entry: %w", uploadID, err)
+				}
+
+				err = api.Repo.UpdateUpload(ctx, upload)
+				if err != nil {
+					return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
+				}
+
+				// Bubble the error to fail this attempt entirely. We're now ready for
+				// a retry.
+				return badFSEntryErr
+			}
 
 			if err != nil {
 				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)

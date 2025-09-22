@@ -47,8 +47,9 @@ CREATE TABLE IF NOT EXISTS uploads (
   root_cid BLOB,
   FOREIGN KEY (space_did) REFERENCES spaces(did),
   FOREIGN KEY (source_id) REFERENCES sources(id),
-  FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id),
-  FOREIGN KEY (root_cid, space_did) REFERENCES nodes(cid, space_did)
+  FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id) ON DELETE
+  SET NULL,
+    FOREIGN KEY (root_cid, space_did) REFERENCES nodes(cid, space_did)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS fs_entries (
@@ -67,8 +68,8 @@ CREATE TABLE IF NOT EXISTS fs_entries (
 CREATE TABLE IF NOT EXISTS directory_children (
   directory_id BLOB NOT NULL,
   child_id BLOB NOT NULL,
-  FOREIGN KEY (directory_id) REFERENCES fs_entries(id),
-  FOREIGN KEY (child_id) REFERENCES fs_entries(id),
+  FOREIGN KEY (directory_id) REFERENCES fs_entries(id) ON DELETE CASCADE,
+  FOREIGN KEY (child_id) REFERENCES fs_entries(id) ON DELETE CASCADE,
   PRIMARY KEY (directory_id, child_id)
 ) STRICT;
 
@@ -77,12 +78,10 @@ CREATE TABLE IF NOT EXISTS dag_scans (
   upload_id BLOB NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  error_message TEXT,
-  state TEXT NOT NULL,
   cid BLOB,
   space_did BLOB NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('file', 'directory')),
-  FOREIGN KEY (fs_entry_id) REFERENCES fs_entries(id),
+  FOREIGN KEY (fs_entry_id) REFERENCES fs_entries(id) ON DELETE CASCADE,
   FOREIGN KEY (upload_id) REFERENCES uploads(id),
   FOREIGN KEY (cid, space_did) REFERENCES nodes(cid, space_did),
   FOREIGN KEY (space_did) REFERENCES spaces(did)
