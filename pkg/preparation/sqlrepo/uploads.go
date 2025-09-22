@@ -16,10 +16,10 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-var _ uploads.Repo = (*repo)(nil)
+var _ uploads.Repo = (*Repo)(nil)
 
 // GetUploadByID retrieves an upload by its unique ID from the repository.
-func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error) {
+func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT
 			id,
@@ -75,7 +75,7 @@ func (r *repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 }
 
 // GetSourceIDForUploadID retrieves the source ID associated with a given upload ID.
-func (r *repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
+func (r *Repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID) (id.SourceID, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT source_id FROM uploads WHERE id = ?`, uploadID,
 	)
@@ -88,7 +88,7 @@ func (r *repo) GetSourceIDForUploadID(ctx context.Context, uploadID id.UploadID)
 }
 
 // CreateUploads creates uploads for a given space and source IDs.
-func (r *repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
+func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
 	var uploads []*model.Upload
 	for _, sourceID := range sourceIDs {
 		upload, err := model.NewUpload(spaceDID, sourceID)
@@ -143,7 +143,7 @@ func (r *repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 }
 
 // UpdateUpload implements uploads.Repo.
-func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
+func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, state = $6, error_message = $7, root_fs_entry_id = $8, root_cid = $9 WHERE id = $1`
 	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, state model.UploadState, errorMessage *string, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
@@ -153,7 +153,7 @@ func (r *repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	}, upload)
 }
 
-func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
+func (r *Repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
 	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
 	ds, err := dagmodel.ReadDAGScanFromDatabase(r.dagScanScanner(row))
@@ -166,14 +166,14 @@ func (r *repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.C
 	return ds.CID(), nil
 }
 
-func (r *repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
+func (r *Repo) newDAGScan(fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
 	if isDirectory {
 		return dagmodel.NewDirectoryDAGScan(fsEntryID, uploadID, spaceDID)
 	}
 	return dagmodel.NewFileDAGScan(fsEntryID, uploadID, spaceDID)
 }
 
-func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
+func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error) {
 	log.Debugf("Creating DAG scan for fsEntryID: %s, isDirectory: %t, uploadID: %s", fsEntryID, isDirectory, uploadID)
 	dagScan, err := r.newDAGScan(fsEntryID, isDirectory, uploadID, spaceDID)
 	if err != nil {
@@ -198,7 +198,7 @@ func (r *repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 }
 
 // ListSpaceSources lists all sources associated with a given space DID.
-func (r *repo) ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error) {
+func (r *Repo) ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT cs.source_id
 		FROM space_sources cs

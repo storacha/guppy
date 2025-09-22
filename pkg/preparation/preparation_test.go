@@ -19,6 +19,7 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-car/v2/blockstore"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
@@ -27,12 +28,14 @@ import (
 	"github.com/spf13/afero"
 	"github.com/storacha/go-libstoracha/blobindex"
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
+	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
@@ -44,6 +47,7 @@ import (
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,17 +60,105 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// spaceBlobAddClient is a [storacha.Client] that wraps a
-// [client.Client] to use a custom putClient.
-type spaceBlobAddClient struct {
+// putTrackingClient is a [storacha.putTrackingClient] that wraps a
+// [client.putTrackingClient] to use a custom putClient.
+type putTrackingClient struct {
 	*client.Client
 	putClient *http.Client
 }
 
-var _ storacha.Client = (*spaceBlobAddClient)(nil)
+var _ storacha.Client = (*putTrackingClient)(nil)
 
-func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+func (c *putTrackingClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
+}
+
+// prepareTestClient creates a new test [storacha.Client] that uses the given
+// [http.Client] as the client for PUT requests, stores the index link from the
+// `space/index/add` invocation in the given [indexLink] pointer, and stores the
+// root link and shard links from the `upload/add` in the [rootLink] and
+// [shardLinks] pointers, respectively. The returned function returns the blobs
+// received by the PUT client, and the index link.
+func prepareTestClient(
+	t *testing.T,
+	space principal.Signer,
+	putClient *http.Client,
+	indexLink *ipld.Link,
+	rootLink *ipld.Link,
+	shardLinks *[]ipld.Link,
+) *putTrackingClient {
+	client := &putTrackingClient{
+		Client: helpers.Must(ctestutil.Client(
+			ctestutil.WithSpaceBlobAdd(),
+
+			ctestutil.WithServerOptions(
+				server.WithServiceMethod(
+					spaceindexcap.Add.Can(),
+					server.Provide(
+						spaceindexcap.Add,
+						func(
+							ctx context.Context,
+							cap ucan.Capability[spaceindexcap.AddCaveats],
+							inv invocation.Invocation,
+							context server.InvocationContext,
+						) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
+							assert.Nil(t, *indexLink, "expected only one `space/index/add` invocation")
+							*indexLink = cap.Nb().Index
+							return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
+						},
+					),
+				),
+			),
+
+			ctestutil.WithServerOptions(
+				server.WithServiceMethod(
+					uploadcap.Add.Can(),
+					server.Provide(
+						uploadcap.Add,
+						func(
+							ctx context.Context,
+							cap ucan.Capability[uploadcap.AddCaveats],
+							inv invocation.Invocation,
+							context server.InvocationContext,
+						) (result.Result[uploadcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							assert.Equal(t, space.DID().String(), cap.With(), "expected `upload/add` invocation to be for the correct space")
+							assert.Nil(t, *rootLink, "expected only one `upload/add` invocation")
+							*rootLink = cap.Nb().Root
+							*shardLinks = cap.Nb().Shards
+							return result.Ok[uploadcap.AddOk, failure.IPLDBuilderFailure](uploadcap.AddOk{
+								Root:   cap.Nb().Root,
+								Shards: cap.Nb().Shards,
+							}), nil, nil
+						},
+					),
+				),
+			),
+		)),
+		putClient: putClient,
+	}
+
+	// Delegate * on the space to the client
+	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+	proof, err := delegation.Delegate(space, client.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+	require.NoError(t, err)
+	err = client.AddProofs(proof)
+	require.NoError(t, err)
+
+	return client
+}
+
+func createUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, api preparation.API) *uploadsmodel.Upload {
+	_, err := api.FindOrCreateSpace(t.Context(), spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+	require.NoError(t, err)
+	source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
+	require.NoError(t, err)
+	err = repo.AddSourceToSpace(t.Context(), spaceDID, source.ID())
+	require.NoError(t, err)
+	uploads, err := api.CreateUploads(t.Context(), spaceDID)
+	require.NoError(t, err)
+	require.Len(t, uploads, 1, "expected exactly one upload to be created")
+	return uploads[0]
 }
 
 func TestExecuteUpload(t *testing.T) {
@@ -86,41 +178,10 @@ func TestExecuteUpload(t *testing.T) {
 		testFs := prepareFs(t, fsData)
 
 		putClient := ctestutil.NewPutClient()
-
 		var indexLink ipld.Link
-
-		c := &spaceBlobAddClient{
-			Client: helpers.Must(ctestutil.Client(
-				ctestutil.WithSpaceBlobAdd(),
-				ctestutil.WithServerOptions(
-					server.WithServiceMethod(
-						spaceindexcap.Add.Can(),
-						server.Provide(
-							spaceindexcap.Add,
-							func(
-								ctx context.Context,
-								cap ucan.Capability[spaceindexcap.AddCaveats],
-								inv invocation.Invocation,
-								context server.InvocationContext,
-							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
-								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
-								indexLink = cap.Nb().Index
-								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
-							},
-						),
-					),
-				),
-			)),
-			putClient: putClient,
-		}
-
-		// Delegate * on the space to the client
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
+		var rootLink ipld.Link
+		var shardLinks []ipld.Link
+		c := prepareTestClient(t, space, putClient, &indexLink, &rootLink, &shardLinks)
 
 		api := preparation.NewAPI(
 			repo,
@@ -132,25 +193,22 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 		)
 
-		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
-		require.NoError(t, err)
-		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
-		require.NoError(t, err)
-		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
-		require.NoError(t, err)
-		uploads, err := api.CreateUploads(t.Context(), space.DID())
-		require.NoError(t, err)
-		require.Len(t, uploads, 1, "expected exactly one upload to be created")
-		upload := uploads[0]
+		upload := createUpload(t, repo, space.DID(), api)
 
-		rootCid, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, putBlobs.Size(), 6, "expected 5 shards + 1 index to be added")
 		require.NotNil(t, indexLink, "expected `space/index/add` to be called")
+		indexCIDLink, ok := indexLink.(cidlink.Link)
+		require.True(t, ok, "expected index link to be a CID link")
+		require.NotNil(t, rootLink, "expected `upload/add` to be called")
+		rootCIDLink, ok := rootLink.(cidlink.Link)
+		require.True(t, ok, "expected root link to be a CID link")
+		require.Equal(t, rootLink.(cidlink.Link).Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
 
-		foundData := filesData(t.Context(), t, rootCid, indexLink, putBlobs)
+		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
 		// Don't do this directly in the assertion, because if it fails, we don't want
 		// to try to print all of that data.
@@ -163,6 +221,9 @@ func TestExecuteUpload(t *testing.T) {
 	})
 
 	t.Run("after an error, can be retried safely", func(t *testing.T) {
+		// Hide the error we're about to cause from the logs.
+		logging.SetLogLevel("preparation/uploads", "dpanic")
+
 		space, err := signer.Generate()
 		require.NoError(t, err)
 
@@ -192,39 +253,9 @@ func TestExecuteUpload(t *testing.T) {
 		}
 
 		var indexLink ipld.Link
-
-		c := &spaceBlobAddClient{
-			Client: helpers.Must(ctestutil.Client(
-				ctestutil.WithSpaceBlobAdd(),
-				ctestutil.WithServerOptions(
-					server.WithServiceMethod(
-						spaceindexcap.Add.Can(),
-						server.Provide(
-							spaceindexcap.Add,
-							func(
-								ctx context.Context,
-								cap ucan.Capability[spaceindexcap.AddCaveats],
-								inv invocation.Invocation,
-								context server.InvocationContext,
-							) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-								assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
-								assert.Nil(t, indexLink, "expected only one `space/index/add` invocation")
-								indexLink = cap.Nb().Index
-								return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
-							},
-						),
-					),
-				),
-			)),
-			putClient: putClient,
-		}
-
-		// Delegate * on the space to the client
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
+		var rootLink ipld.Link
+		var shardLinks []ipld.Link
+		c := prepareTestClient(t, space, putClient, &indexLink, &rootLink, &shardLinks)
 
 		api := preparation.NewAPI(
 			repo,
@@ -236,16 +267,7 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 		)
 
-		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Large Upload Space", spacesmodel.WithShardSize(1<<16))
-		require.NoError(t, err)
-		source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
-		require.NoError(t, err)
-		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
-		require.NoError(t, err)
-		uploads, err := api.CreateUploads(t.Context(), space.DID())
-		require.NoError(t, err)
-		require.Len(t, uploads, 1, "expected exactly one upload to be created")
-		upload := uploads[0]
+		upload := createUpload(t, repo, space.DID(), api)
 
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
@@ -253,15 +275,23 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 2, putBlobs.Size(), "expected only 2 shards to be added so far")
+		require.Nil(t, indexLink, "expected `space/index/add` not to have been called yet")
+		require.Nil(t, rootLink, "expected `upload/add` not to have been called yet")
+		require.Nil(t, shardLinks, "expected `upload/add` not to have been called yet")
 
 		// The second time, it should succeedfs
-		rootCid, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err, "expected upload to succeed on retry")
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
+		rootCIDLink, ok := rootLink.(cidlink.Link)
+		require.True(t, ok, "expected root link to be a CID link")
+		indexCIDLink, ok := indexLink.(cidlink.Link)
+		require.True(t, ok, "expected index link to be a CID link")
+		require.Equal(t, rootLink.(cidlink.Link).Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
 
-		foundData := filesData(t.Context(), t, rootCid, indexLink, putBlobs)
+		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
 		// Don't do this directly in the assertion, because if it fails, we don't want
 		// to try to print all of that data.
@@ -299,8 +329,8 @@ func prepareFs(t *testing.T, files map[string][]byte) afero.IOFS {
 	return memIOFS
 }
 
-func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, indexLink ipld.Link, shards ctestutil.BlobMap) map[string][]byte {
-	bs, err := newIndexAndShardsBlockstore(indexLink, shards)
+func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, indexCid cid.Cid, shards ctestutil.BlobMap) map[string][]byte {
+	bs, err := newIndexAndShardsBlockstore(indexCid, shards)
 	require.NoError(t, err)
 
 	blockserv := blockservice.New(bs, nil)
@@ -337,19 +367,14 @@ type indexAndShardsBlockstore struct {
 
 var _ blockstore.Blockstore = (*indexAndShardsBlockstore)(nil)
 
-func newIndexAndShardsBlockstore(indexLink ipld.Link, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
-	indexCidLink, ok := indexLink.(cidlink.Link)
-	if !ok {
-		return nil, fmt.Errorf("expected index link to be a cidlink.Link, got %T", indexLink)
+func newIndexAndShardsBlockstore(indexCid cid.Cid, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
+	if indexCid.Prefix().Codec != uint64(multicodec.Car) {
+		return nil, fmt.Errorf("expected index link CID to have codec 0x%x (CAR), got 0x%x", multicodec.Car, indexCid.Prefix().Codec)
 	}
 
-	if indexCidLink.Prefix().Codec != uint64(multicodec.Car) {
-		return nil, fmt.Errorf("expected index link CID to have codec 0x%x (CAR), got 0x%x", multicodec.Car, indexCidLink.Cid.Prefix().Codec)
-	}
-
-	indexDigest := indexCidLink.Hash()
+	indexDigest := indexCid.Hash()
 	if !shards.Has(indexDigest) {
-		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCidLink.Cid, indexDigest.B58String())
+		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCid, indexDigest.B58String())
 	}
 
 	index, err := blobindex.Extract(bytes.NewReader(shards.Get(indexDigest)))
