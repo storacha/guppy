@@ -121,6 +121,7 @@ func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 
 func Action(cCtx *cli.Context) error {
 	spaceDID := cmdutil.MustParseDID(cCtx.String("space"))
+	resumeUpload := cCtx.Bool("resume")
 	root := cCtx.Args().First()
 	if root == "" {
 		return fmt.Errorf("command requires a root path argument")
@@ -136,9 +137,38 @@ func Action(cCtx *cli.Context) error {
 	// defer closeDb()
 
 	api := preparation.NewAPI(repo, cmdutil.MustGetClient(), spaceDID)
-	upload, err := makeUpload(cCtx.Context, repo, api, spaceDID, root)
-	if err != nil {
-		return err
+
+	var upload *uploadsmodel.Upload
+	if resumeUpload {
+		idBytes, err := os.ReadFile("last-upload-id.txt")
+		if err != nil {
+			return fmt.Errorf("reading last upload ID file: %w", err)
+		}
+
+		id, err := id.Parse(string(idBytes))
+		if err != nil {
+			return fmt.Errorf("parsing upload ID from file: %w", err)
+		}
+
+		upload, err = api.GetUploadByID(cCtx.Context, id)
+		if err != nil {
+			return fmt.Errorf("getting upload by ID: %w", err)
+		}
+		if upload == nil {
+			return fmt.Errorf("no upload found with ID %s", id)
+		}
+		fmt.Println("Resuming upload", upload.ID())
+	} else {
+		upload, err = makeUpload(cCtx.Context, repo, api, spaceDID, root)
+		if err != nil {
+			return err
+		}
+
+		// Write upload ID to file for easy pasting into resume flag
+		err = os.WriteFile("last-upload-id.txt", []byte(upload.ID().String()), 0644)
+		if err != nil {
+			return fmt.Errorf("writing upload ID to file: %w", err)
+		}
 	}
 
 	err = runUploadUI(cCtx.Context, repo, api, upload)
