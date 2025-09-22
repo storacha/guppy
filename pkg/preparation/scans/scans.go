@@ -7,21 +7,17 @@ import (
 	"fmt"
 	"io/fs"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-// API is a dependency container for executing scans on a repository.
-type API struct {
-	Repo           Repo
-	UploadLookup   UploadLookupFunc
-	SourceAccessor SourceAccessorFunc
-	WalkerFn       WalkerFunc
-}
+var log = logging.Logger("preparation/scans")
 
 // WalkerFunc is a function type that defines how to walk the file system.
 type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
@@ -32,7 +28,36 @@ type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, 
 // UploadLookupFunc is a function type that retrieves the upload for a given upload ID.
 type UploadLookupFunc func(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
 
-// ExecuteScan executes a scan on the given source, creating files and directories in the repository.
+// API is a dependency container for executing scans on a repository.
+type API struct {
+	Repo           Repo
+	UploadLookup   UploadLookupFunc
+	SourceAccessor SourceAccessorFunc
+	WalkerFn       WalkerFunc
+}
+
+var _ uploads.ExecuteScansForUploadFunc = API{}.ExecuteScansForUpload
+
+func (a API) ExecuteScansForUpload(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
+	scans, err := a.Repo.ScansForUploadByStatus(ctx, uploadID, model.ScanStatePending, model.ScanStateRunning)
+	if err != nil {
+		return fmt.Errorf("getting scans for upload %s: %w", uploadID, err)
+	}
+
+	for _, scan := range scans {
+		log.Infof("Executing scan %s for upload %s", scan.ID(), uploadID)
+		if err := a.ExecuteScan(ctx, scan, fsEntryCb); err != nil {
+			return fmt.Errorf("executing scan %s: %w", scan.ID(), err)
+		}
+	}
+
+	return nil
+}
+
+// ExecuteScan executes a scan on the given source, creating files and
+// directories in the repository.
+// TODO: This is now only exported for testing purposes. It can be made private,
+// and the tests adjusted to use [ExecuteScansForUpload] instead.
 func (a API) ExecuteScan(ctx context.Context, scan *model.Scan, fsEntryCb func(model.FSEntry) error) error {
 	err := scan.Start()
 	if err != nil {
@@ -79,8 +104,8 @@ func (a API) executeScan(ctx context.Context, scan *model.Scan, fsEntryCb func(m
 	return fsEntry, nil
 }
 
-// OpenFile opens a file for reading, ensuring the checksum matches the expected value.
-func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
+// openFile opens a file for reading, ensuring the checksum matches the expected value.
+func (a API) openFile(ctx context.Context, file *model.File) (fs.File, error) {
 	fsys, err := a.SourceAccessor(ctx, file.SourceID())
 	if err != nil {
 		return nil, fmt.Errorf("accessing source for file %s: %w", file.ID(), err)
@@ -101,8 +126,8 @@ func (a API) OpenFile(ctx context.Context, file *model.File) (fs.File, error) {
 	return fsFile, nil
 }
 
-// GetFileByID retrieves a file by its ID from the repository, returning an error if not found.
-func (a API) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
+// getFileByID retrieves a file by its ID from the repository, returning an error if not found.
+func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
 	file, err := a.Repo.GetFileByID(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
@@ -115,11 +140,11 @@ func (a API) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File,
 
 // OpenFileByID retrieves a file by its ID and opens it for reading, returning an error if not found or if the file cannot be opened.
 func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id.SourceID, string, error) {
-	file, err := a.GetFileByID(ctx, fileID)
+	file, err := a.getFileByID(ctx, fileID)
 	if err != nil {
 		return nil, id.SourceID{}, "", err
 	}
-	fsFile, err := a.OpenFile(ctx, file)
+	fsFile, err := a.openFile(ctx, file)
 	if err != nil {
 		return nil, id.SourceID{}, "", err
 	}

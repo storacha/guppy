@@ -3,10 +3,12 @@ package preparation_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"math/rand"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,15 +22,14 @@ import (
 	"github.com/ipld/go-car/v2/blockstore"
 	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
-	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/guppy/pkg/client"
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/stretchr/testify/assert"
@@ -54,6 +55,225 @@ var _ shards.SpaceBlobAdder = (*spaceBlobAddClient)(nil)
 
 func (c *spaceBlobAddClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.putClient))...)
+}
+
+func TestExecuteUpload(t *testing.T) {
+	t.Run("uploads", func(t *testing.T) {
+		// In case something goes wrong. This should never take this long.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+
+		fsData := map[string][]byte{
+			"a":           randomBytes(1 << 16),
+			"dir1/b":      randomBytes(1 << 16),
+			"dir1/c":      randomBytes(1 << 16),
+			"dir1/dir2/d": randomBytes(1 << 16),
+		}
+
+		testFs := prepareFs(t, fsData)
+
+		putClient := ctestutil.NewPutClient()
+
+		c := &spaceBlobAddClient{
+			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			putClient: putClient,
+		}
+
+		// Use the client's issuer as the space DID to avoid any concerns about
+		// authorization.
+		spaceDID := c.Issuer().DID()
+
+		api := preparation.NewAPI(
+			repo,
+			c,
+			spaceDID,
+			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+				require.Equal(t, ".", path, "test expects root to be '.'")
+				return testFs, nil
+			}),
+		)
+
+		_, err := api.FindOrCreateSpace(ctx, spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := api.CreateSource(ctx, "Large Upload Source", ".")
+		require.NoError(t, err)
+		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		require.NoError(t, err)
+		uploads, err := api.CreateUploads(ctx, spaceDID)
+		require.NoError(t, err)
+		require.Len(t, uploads, 1, "expected exactly one upload to be created")
+		upload := uploads[0]
+
+		rootCid, err := api.ExecuteUpload(ctx, upload)
+		require.NoError(t, err)
+
+		putBlobs := ctestutil.ReceivedBlobs(putClient)
+		fmt.Printf("Received %d blobs\n", len(putBlobs))
+		require.Len(t, putBlobs, 5, "expected exactly 5 blobs to be added")
+
+		foundData := filesData(ctx, t, rootCid, putBlobs)
+
+		// Don't do this directly in the assertion, because if it fails, we don't want
+		// to try to print all of that data.
+		areEqual := assert.ObjectsAreEqual(
+			fsData,
+			foundData,
+		)
+
+		require.True(t, areEqual, "expected all files to be present and match")
+	})
+
+	t.Run("after an error, can be retried safely", func(t *testing.T) {
+		// In case something goes wrong. This should never take this long.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		t.Cleanup(cancel)
+		// ctx := t.Context()
+
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+
+		fsData := map[string][]byte{
+			"a":           randomBytes(1 << 16),
+			"dir1/b":      randomBytes(1 << 16),
+			"dir1/c":      randomBytes(1 << 16),
+			"dir1/dir2/d": randomBytes(1 << 16),
+		}
+
+		testFs := prepareFs(t, fsData)
+
+		putCount := 0
+		putClient := ctestutil.NewPutClient()
+		putClient.Transport = &errorableTransport{
+			wrapped: putClient.Transport,
+			errFn: func(req *http.Request) error {
+				putCount++
+				if putCount == 3 {
+					// Simulate an error on the third PUT request.
+					return assert.AnError
+				}
+				return nil
+			},
+		}
+
+		c := &spaceBlobAddClient{
+			Client:    helpers.Must(ctestutil.SpaceBlobAddClient()),
+			putClient: putClient,
+		}
+
+		// Use the client's issuer as the space DID to avoid any concerns about
+		// authorization.
+		spaceDID := c.Issuer().DID()
+
+		api := preparation.NewAPI(
+			repo,
+			c,
+			spaceDID,
+			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+				require.Equal(t, ".", path, "test expects root to be '.'")
+				return testFs, nil
+			}),
+		)
+
+		_, err := api.FindOrCreateSpace(ctx, spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := api.CreateSource(ctx, "Large Upload Source", ".")
+		require.NoError(t, err)
+		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		require.NoError(t, err)
+		uploads, err := api.CreateUploads(ctx, spaceDID)
+		require.NoError(t, err)
+		require.Len(t, uploads, 1, "expected exactly one upload to be created")
+		upload := uploads[0]
+
+		// The first time, it should hit an error (on the third PUT)
+		_, err = api.ExecuteUpload(ctx, upload)
+		require.ErrorIs(t, err, assert.AnError, "expected error on third PUT request")
+
+		putBlobs := ctestutil.ReceivedBlobs(putClient)
+		require.Len(t, putBlobs, 2, "expected only 2 blobs to be added so far")
+
+		// The second time, it should succeedfs
+		rootCid, err := api.ExecuteUpload(ctx, upload)
+		require.NoError(t, err, "expected upload to succeed on retry")
+
+		putBlobs = ctestutil.ReceivedBlobs(putClient)
+		require.Len(t, putBlobs, 5, "expected only 5 blobs to be added in the end")
+
+		foundData := filesData(ctx, t, rootCid, putBlobs)
+
+		// Don't do this directly in the assertion, because if it fails, we don't want
+		// to try to print all of that data.
+		areEqual := assert.ObjectsAreEqual(
+			fsData,
+			foundData,
+		)
+
+		require.True(t, areEqual, "expected all files to be present and match")
+	})
+}
+
+func prepareFs(t *testing.T, files map[string][]byte) afero.IOFS {
+	t.Helper()
+
+	memFS := afero.NewMemMapFs()
+
+	for path, data := range files {
+		err := memFS.MkdirAll(filepath.Dir(path), 0755)
+		require.NoError(t, err)
+
+		err = afero.WriteFile(memFS, path, data, 0644)
+		require.NoError(t, err, "failed to write file %s", path)
+	}
+
+	memIOFS := afero.NewIOFS(memFS)
+
+	fs.WalkDir(memIOFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return memFS.Chtimes(path, time.Now(), time.Now())
+	})
+
+	return memIOFS
+}
+
+func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, putBlobs [][]byte) map[string][]byte {
+	t.Helper()
+
+	blobBlockstores := make([]blockstore.Blockstore, 0, len(putBlobs))
+	for _, blob := range putBlobs {
+		bs, err := blockstore.NewReadOnly(bytes.NewReader(blob), nil)
+		require.NoError(t, err)
+		blobBlockstores = append(blobBlockstores, bs)
+	}
+
+	bs := &compositeBlockstore{
+		blockstores: blobBlockstores,
+	}
+
+	blockserv := blockservice.New(bs, nil)
+	dagserv := merkledag.NewDAGService(blockserv)
+	rootNode, err := dagserv.Get(ctx, rootCid)
+	require.NoError(t, err)
+	rootFileNode, err := unixfile.NewUnixfsFile(ctx, dagserv, rootNode)
+	require.NoError(t, err)
+
+	foundData := make(map[string][]byte)
+	err = files.Walk(rootFileNode, func(fpath string, fnode files.Node) error {
+		file, ok := fnode.(files.File)
+		if !ok {
+			// Skip directories.
+			return nil
+		}
+		data, err := io.ReadAll(file)
+		require.NoError(t, err)
+		foundData[fpath] = data
+		return nil
+	})
+	require.NoError(t, err)
+
+	return foundData
 }
 
 // compositeBlockstore is a [blockstore.Blockstore] that combines multiple
@@ -102,127 +322,28 @@ func (c *compositeBlockstore) HashOnRead(enabled bool) {
 	panic("not implemented")
 }
 
-func TestExecuteUpload(t *testing.T) {
-	// In case something goes wrong. This should never take this long.
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	t.Cleanup(cancel)
+// errorableTransport wraps an [http.RoundTripper] to provide an opportunity to
+// return an error instead of succeeding.
+type errorableTransport struct {
+	wrapped http.RoundTripper
+	errFn   func(req *http.Request) error
+}
 
-	aData := randomBytes(1 << 16)
-	bData := randomBytes(1 << 16)
-	cData := randomBytes(1 << 16)
-	dData := randomBytes(1 << 16)
+var _ http.RoundTripper = (*errorableTransport)(nil)
+var _ ctestutil.BlobReceiver = (*errorableTransport)(nil)
 
-	memFS := afero.NewMemMapFs()
-	memFS.MkdirAll("dir1/dir2", 0755)
-	afero.WriteFile(memFS, "a", aData, 0644)
-	afero.WriteFile(memFS, "dir1/b", bData, 0644)
-	afero.WriteFile(memFS, "dir1/c", cData, 0644)
-	afero.WriteFile(memFS, "dir1/dir2/d", dData, 0644)
-
-	// Set the last modified time for the files; Afero's in-memory FS doesn't do
-	// that automatically on creation, we expect it to be present.
-	for _, path := range []string{".", "a", "dir1", "dir1/b", "dir1/c", "dir1/dir2", "dir1/dir2/d"} {
-		err := memFS.Chtimes(path, time.Now(), time.Now())
-		require.NoError(t, err)
-	}
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
-
-	putClient := ctestutil.NewPutClient()
-
-	c := &spaceBlobAddClient{
-		Client:    testutil.Must(ctestutil.SpaceBlobAddClient())(t),
-		putClient: putClient,
-	}
-
-	// Use the client's issuer as the space DID to avoid any concerns about
-	// authorization.
-	spaceDID := c.Issuer().DID()
-
-	api := preparation.NewAPI(
-		repo,
-		c,
-		spaceDID,
-		preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
-			require.Equal(t, ".", path, "test expects root to be '.'")
-			return afero.NewIOFS(memFS), nil
-		}),
-	)
-
-	did := testutil.RandomDID(t)
-
-	space, err := api.FindOrCreateSpace(t.Context(), did, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
-	require.NoError(t, err)
-	source, err := api.CreateSource(ctx, "Large Upload Source", ".")
-	require.NoError(t, err)
-
-	err = repo.AddSourceToSpace(ctx, space.DID(), source.ID())
-	require.NoError(t, err)
-
-	uploads, err := api.CreateUploads(ctx, space.DID())
-	require.NoError(t, err)
-	require.Len(t, uploads, 1, "expected exactly one upload to be created")
-	upload := uploads[0]
-
-	rootCid, err := api.ExecuteUpload(ctx, upload)
-	require.NoError(t, err)
-
-	openShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateOpen)
-	require.NoError(t, err)
-	require.Len(t, openShards, 0, "expected no open shards at end of upload")
-
-	closedShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateClosed)
-	require.NoError(t, err)
-	require.Len(t, closedShards, 0, "expected no closed shards at end of upload")
-
-	addedShards, err := repo.ShardsForUploadByStatus(ctx, uploads[0].ID(), model.ShardStateAdded)
-	require.NoError(t, err)
-	require.Len(t, addedShards, 5, "expected all shards to added be for the upload")
-
-	putBlobs := ctestutil.ReceivedBlobs(putClient)
-	require.Len(t, putBlobs, 5, "expected exactly 5 blobs to be added")
-
-	blobBlockstores := make([]blockstore.Blockstore, 0, len(putBlobs))
-	for _, blob := range putBlobs {
-		bs, err := blockstore.NewReadOnly(bytes.NewReader(blob), nil)
-		require.NoError(t, err)
-		blobBlockstores = append(blobBlockstores, bs)
-	}
-
-	bs := &compositeBlockstore{
-		blockstores: blobBlockstores,
-	}
-
-	blockserv := blockservice.New(bs, nil)
-	dagserv := merkledag.NewDAGService(blockserv)
-	rootNode, err := dagserv.Get(ctx, rootCid)
-	require.NoError(t, err)
-	rootFileNode, err := unixfile.NewUnixfsFile(ctx, dagserv, rootNode)
-	require.NoError(t, err)
-
-	foundData := make(map[string][]byte)
-	files.Walk(rootFileNode, func(fpath string, fnode files.Node) error {
-		file, ok := fnode.(files.File)
-		if !ok {
-			// Skip directories.
-			return nil
+func (e *errorableTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if e.errFn != nil {
+		if err := e.errFn(req); err != nil {
+			return nil, err
 		}
-		data, err := io.ReadAll(file)
-		require.NoError(t, err)
-		foundData[fpath] = data
-		return nil
-	})
+	}
+	return e.wrapped.RoundTrip(req)
+}
 
-	// Don't do this directly in the assertion, because if it fails, we don't want
-	// to try to print all of that data.
-	areEqual := assert.ObjectsAreEqual(
-		map[string][]byte{
-			"a":           aData,
-			"dir1/b":      bData,
-			"dir1/c":      cData,
-			"dir1/dir2/d": dData,
-		},
-		foundData,
-	)
-
-	require.True(t, areEqual, "expected all files to be present and match")
+func (e *errorableTransport) ReceivedBlobs() [][]byte {
+	if receiver, ok := e.wrapped.(ctestutil.BlobReceiver); ok {
+		return receiver.ReceivedBlobs()
+	}
+	return nil
 }

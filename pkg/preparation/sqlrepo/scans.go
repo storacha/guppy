@@ -10,6 +10,7 @@ import (
 
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans"
+	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -114,6 +115,67 @@ func (r *repo) GetScanByID(ctx context.Context, scanID id.ScanID) (*scanmodel.Sc
 		return nil, err
 	}
 	return scan, nil
+}
+
+// ScansForUploadByStatus retrieves all scans for a given upload ID matching the
+// given states, if given, or all if no states are provided. Because an upload
+// normally has at most one scan, this will return at most one scan.
+func (r *repo) ScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.ScanState) ([]*model.Scan, error) {
+	query :=
+		`SELECT
+			id,
+			upload_id,
+			root_id,
+			created_at,
+			updated_at,
+			state,
+			error_message
+		FROM scans WHERE upload_id = ?`
+	if len(states) > 0 {
+		query += " AND state IN ("
+		for i, state := range states {
+			if i > 0 {
+				query += ", "
+			}
+			query += "'" + string(state) + "'"
+		}
+		query += ")"
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var scans []*model.Scan
+	for rows.Next() {
+		scan, err := scanmodel.ReadScanFromDatabase(func(
+			id *id.ScanID,
+			uploadID *id.UploadID,
+			rootID **id.FSEntryID,
+			createdAt *time.Time,
+			updatedAt *time.Time,
+			state *scanmodel.ScanState,
+			errorMessage **string) error {
+			return rows.Scan(
+				id,
+				uploadID,
+				rootID,
+				util.TimestampScanner(createdAt),
+				util.TimestampScanner(updatedAt),
+				state,
+				errorMessage,
+			)
+		})
+
+		if err != nil {
+			return nil, err
+		}
+		scans = append(scans, scan)
+	}
+
+	return scans, rows.Err()
 }
 
 // FindOrCreateFile finds or creates a file entry in the repository with the given parameters.

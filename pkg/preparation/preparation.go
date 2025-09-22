@@ -3,7 +3,6 @@ package preparation
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -18,7 +17,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/scans"
-	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -157,35 +155,9 @@ func NewAPI(repo Repo, client shards.SpaceBlobAdder, space did.DID, options ...O
 	}
 
 	uploadsAPI = uploads.API{
-		Repo: repo,
-		RunNewScan: func(ctx context.Context, uploadID id.UploadID, fsEntryCb func(id id.FSEntryID, isDirectory bool) error) (id.FSEntryID, error) {
-			scan, err := repo.CreateScan(ctx, uploadID)
-			if err != nil {
-				return id.Nil, fmt.Errorf("command failed to create new scan: %w", err)
-			}
-
-			err = scansAPI.ExecuteScan(ctx, scan, func(entry scansmodel.FSEntry) error {
-				log.Debugf("Processing entry: %s", entry.Path())
-				_, isDirectory := entry.(*scansmodel.Directory)
-				return fsEntryCb(entry.ID(), isDirectory)
-			})
-
-			if err != nil {
-				return id.Nil, fmt.Errorf("command failed to execute scan: %w", err)
-			}
-
-			if scan.State() != scansmodel.ScanStateCompleted {
-				return id.Nil, fmt.Errorf("scan did not complete successfully, state: %s, error: %w", scan.State(), scan.Error())
-			}
-
-			if !scan.HasRootID() {
-				return id.Nil, errors.New("completed scan did not have a root ID")
-			}
-
-			return scan.RootID(), nil
-		},
-		RestartDagScansForUpload:    dagsAPI.RestartDagScansForUpload,
-		RunDagScansForUpload:        dagsAPI.RunDagScansForUpload,
+		Repo:                        repo,
+		ExecuteScansForUpload:       scansAPI.ExecuteScansForUpload,
+		ExecuteDagScansForUpload:    dagsAPI.ExecuteDagScansForUpload,
 		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
 		CloseUploadShards:           shardsAPI.CloseUploadShards,
 		SpaceBlobAddShardsForUpload: shardsAPI.SpaceBlobAddShardsForUpload,

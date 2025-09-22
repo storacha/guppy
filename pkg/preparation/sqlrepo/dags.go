@@ -103,7 +103,8 @@ func (r *repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	}
 }
 
-// DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID and optional states.
+// DAGScansForUploadByStatus retrieves all DAG scans for a given upload ID
+// matching the given states, if given, or all if no states are provided.
 func (r *repo) DAGScansForUploadByStatus(ctx context.Context, uploadID id.UploadID, states ...model.DAGScanState) ([]model.DAGScan, error) {
 	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE upload_id = $1`
 	if len(states) > 0 {
