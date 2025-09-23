@@ -21,10 +21,10 @@ import (
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
-	"github.com/storacha/go-ucanto/core/invocation/ran"
 	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
+	"github.com/storacha/go-ucanto/core/receipt/ran"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/core/result/failure"
 	"github.com/storacha/go-ucanto/did"
@@ -389,7 +389,7 @@ func WithSpaceBlobAdd() Option {
 					spaceblobcap.Add,
 					uhelpers.Must(SpaceBlobAddHandler(
 						func(rcpt receipt.AnyReceipt) {
-							receiptsTrans.receipts[rcpt.Ran().Root().Link().String()] = rcpt
+							receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
 						},
 					)),
 				),
