@@ -7,16 +7,15 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/ipfs/boxo v0.30.0
 	github.com/ipfs/go-cid v0.5.0
-	github.com/ipfs/go-log/v2 v2.6.0
+	github.com/ipfs/go-log/v2 v2.8.1
 	github.com/ipld/go-car/v2 v2.14.3
 	github.com/ipld/go-ipld-prime v0.21.1-0.20240917223228-6148356a4c2e
-	github.com/multiformats/go-multicodec v0.9.1
+	github.com/multiformats/go-multicodec v0.9.2
 	github.com/multiformats/go-multihash v0.2.3
-	github.com/multiformats/go-varint v0.0.7
+	github.com/multiformats/go-varint v0.1.0
 	github.com/spf13/afero v1.6.0
-	// TK: Release actual version and use:
-	github.com/storacha/go-libstoracha v0.2.2-0.20250829145457-6bd495926f4b
-	github.com/storacha/go-ucanto v0.5.0
+	github.com/storacha/go-libstoracha v0.2.7
+	github.com/storacha/go-ucanto v0.6.2
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.25.7
 	golang.org/x/sync v0.14.0

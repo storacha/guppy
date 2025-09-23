@@ -27,8 +27,8 @@ func init() {
 	}
 
 	// HTTP transport and CAR encoding
-	channel := http.NewHTTPChannel(serviceURL)
-	codec := car.NewCAROutboundCodec()
+	channel := http.NewChannel(serviceURL)
+	codec := car.NewOutboundCodec()
 
 	conn, err := uclient.NewConnection(servicePrincipal, channel, uclient.WithOutboundCodec(codec))
 	if err != nil {

@@ -47,7 +47,7 @@ func WithHTTPClient(client *http.Client) Option {
 func New(endpoint *url.URL, options ...Option) *Client {
 	c := Client{
 		endpoint: endpoint,
-		codec:    car.NewCAROutboundCodec(),
+		codec:    car.NewOutboundCodec(),
 	}
 	for _, o := range options {
 		o(&c)
@@ -76,7 +76,7 @@ func (c *Client) Fetch(ctx context.Context, task ucan.Link) (receipt.AnyReceipt,
 	var msg message.AgentMessage
 	switch resp.StatusCode {
 	case http.StatusOK:
-		msg, err = c.codec.Decode(ucanhttp.NewHTTPResponse(resp.StatusCode, resp.Body, resp.Header))
+		msg, err = c.codec.Decode(ucanhttp.NewResponse(resp.StatusCode, resp.Body, resp.Header))
 		if err != nil {
 			return nil, fmt.Errorf("decoding message: %w", err)
 		}
