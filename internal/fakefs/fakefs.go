@@ -302,7 +302,7 @@ func (d *Dir) readDirFiles(n int) ([]fs.File, error) {
 }
 
 func (d *Dir) numEntries() int {
-	return 5 + int(d.r.Uint64()%20)
+	return 5 + int(d.r.Uint64()%17)
 }
 
 func (d *Dir) remainingEntries() int {

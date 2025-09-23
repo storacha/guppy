@@ -85,7 +85,9 @@ func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 	if err != nil {
 		return fmt.Errorf("command failed to run upload UI: %w", err)
 	}
-	if um, ok := m.(uploadModel); ok && um.err != nil {
+	um := m.(uploadModel)
+
+	if um.err != nil {
 		var errBadNodes types.ErrBadNodes
 		if errors.As(um.err, &errBadNodes) {
 			var sb strings.Builder
@@ -100,10 +102,20 @@ func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
 
 			fmt.Print(sb.String())
-		} else {
-			return fmt.Errorf("upload failed: %w", um.err)
+
+			return nil
 		}
+
+		if errors.Is(um.err, context.Canceled) || errors.Is(um.err, Canceled{}) {
+			fmt.Println("\nUpload canceled.")
+			return nil
+		}
+
+		return fmt.Errorf("upload failed: %w", um.err)
 	}
+
+	fmt.Println("Upload complete!")
+
 	return nil
 }
 

@@ -19,6 +19,12 @@ import (
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
+type Canceled struct{}
+
+func (c Canceled) Error() string {
+	return "upload canceled"
+}
+
 type uploadModel struct {
 	// Configuration
 	ctx    context.Context
@@ -57,6 +63,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
+			m.err = Canceled{}
 			return m, tea.Quit
 		default:
 			return m, nil

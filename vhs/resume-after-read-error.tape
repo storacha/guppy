@@ -28,4 +28,5 @@ Wait+Screen /Upload failed due to out-of-date scan:/
 Sleep 2s
 Type "go run -tags wip . large-upload-demo --resume"
 Enter
-Sleep 5s
+Wait@60s
+Sleep 2s

@@ -23,10 +23,11 @@ Set Height 900
 
 Type "go run -tags wip . large-upload-demo"
 Enter
-Sleep 10s
+Sleep 5s
 Ctrl+C
 Sleep 1s
 
 Type "go run -tags wip . large-upload-demo --resume"
 Enter
-Sleep 5s
+Wait@60s
+Sleep 2s
