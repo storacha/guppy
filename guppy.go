@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/internal/output"
 	"github.com/storacha/guppy/internal/upload"
 	"github.com/storacha/guppy/pkg/didmailto"
 	"github.com/urfave/cli/v2"
@@ -121,6 +122,14 @@ func main() {
 		Name:     "guppy",
 		Usage:    "interact with the Storacha Network",
 		Commands: commands,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "json",
+				Aliases: []string{"j"},
+				Usage:   "Output in JSON format",
+				Value:   false,
+			},
+		},
 	}
 
 	// set up a context that is canceled when a command is interrupted
@@ -151,53 +160,79 @@ func main() {
 
 func whoami(cCtx *cli.Context) error {
 	c := cmdutil.MustGetClient()
-	fmt.Println(c.DID())
+	did := c.DID()
+	
+	if cCtx.Bool("json") {
+		return output.JSON(map[string]string{"did": did})
+	}
+	output.Success("Current agent DID: %s", did)
 	return nil
 }
 
 func login(cCtx *cli.Context) error {
 	email := cCtx.Args().First()
 	if email == "" {
-		return fmt.Errorf("email address is required")
+		return output.JSONError(fmt.Errorf("email address is required"))
 	}
 
 	accountDid, err := didmailto.FromEmail(email)
 	if err != nil {
-		return fmt.Errorf("invalid email address: %w", err)
+		return output.JSONError(fmt.Errorf("invalid email address: %w", err))
 	}
 
 	c := cmdutil.MustGetClient()
 
 	authOk, err := c.RequestAccess(cCtx.Context, accountDid.String())
 	if err != nil {
-		return fmt.Errorf("requesting access: %w", err)
+		return output.JSONError(fmt.Errorf("requesting access: %w", err))
 	}
 
 	resultChan := c.PollClaim(cCtx.Context, authOk)
 
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
-	s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
-	s.Start()
+	if !cCtx.Bool("json") {
+		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+		s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
+		s.Start()
+		defer s.Stop()
+	}
+
 	claimedDels, err := result.Unwrap(<-resultChan)
-	s.Stop()
 
 	if cCtx.Context.Err() != nil {
-		return fmt.Errorf("login canceled: %w", cCtx.Context.Err())
+		return output.JSONError(fmt.Errorf("login canceled: %w", cCtx.Context.Err()))
 	}
 
 	if err != nil {
-		return fmt.Errorf("claiming access: %w", err)
+		return output.JSONError(fmt.Errorf("claiming access: %w", err))
 	}
 
-	fmt.Println("Successfully logged in!", claimedDels)
 	c.AddProofs(claimedDels...)
 
+	if cCtx.Bool("json") {
+		return output.JSON(map[string]interface{}{
+			"message": "Successfully logged in",
+			"delegations": claimedDels,
+		})
+	}
+	
+	output.Success("Successfully logged in!")
 	return nil
 }
 
 func reset(cCtx *cli.Context) error {
 	c := cmdutil.MustGetClient()
-	return c.Reset()
+	if err := c.Reset(); err != nil {
+		return output.JSONError(err)
+	}
+
+	if cCtx.Bool("json") {
+		return output.JSON(map[string]string{
+			"message": "Successfully reset agent",
+		})
+	}
+
+	output.Success("Successfully reset agent")
+	return nil
 }
 
 func ls(cCtx *cli.Context) error {
@@ -216,17 +251,40 @@ func ls(cCtx *cli.Context) error {
 		space,
 		uploadcap.ListCaveats{})
 	if err != nil {
-		return err
+		return output.JSONError(err)
 	}
 
+	if cCtx.Bool("json") {
+		return output.JSON(map[string]interface{}{
+			"space": space.String(),
+			"uploads": listOk.Results,
+		})
+	}
+
+	if len(listOk.Results) == 0 {
+		output.Success("No uploads found in space %s", space)
+		return nil
+	}
+
+	// Prepare table data
+	var data [][]string
+	data = append(data, []string{"ROOT", "SHARDS"})
+	
 	for _, r := range listOk.Results {
-		fmt.Printf("%s\n", r.Root)
 		if cCtx.Bool("shards") {
-			for _, s := range r.Shards {
-				fmt.Printf("\t%s\n", s)
+			shards := ""
+			for i, s := range r.Shards {
+				if i > 0 {
+					shards += ", "
+				}
+				shards += s.String()
 			}
+			data = append(data, []string{r.Root.String(), shards})
+		} else {
+			data = append(data, []string{r.Root.String(), "-"})
 		}
 	}
 
+	output.Table(data)
 	return nil
 }
