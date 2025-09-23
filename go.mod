@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/ipfs/boxo v0.30.0
 	github.com/ipfs/go-cid v0.5.0
-	github.com/ipfs/go-log/v2 v2.8.1
+	github.com/ipfs/go-log/v2 v2.6.0
 	github.com/ipld/go-car/v2 v2.14.3
 	github.com/ipld/go-ipld-prime v0.21.1-0.20240917223228-6148356a4c2e
 	github.com/multiformats/go-multicodec v0.9.2
