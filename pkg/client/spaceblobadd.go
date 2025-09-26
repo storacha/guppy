@@ -131,7 +131,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 					legacyAccept = true
 				}
 			default:
-				fmt.Printf("[WARN] ignoring unexpected task: %s\n", inv.Capabilities()[0].Can())
+				log.Warnf("ignoring unexpected task: %s", inv.Capabilities()[0].Can())
 			}
 		}
 	}
@@ -195,7 +195,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 				return nil, nil, fmt.Errorf("unexpected capability in accept task: %s", ability)
 			}
 		default:
-			fmt.Printf("[WARN] ignoring receipt for unexpected task: %s\n", concludeRcpt.Ran().Link())
+			log.Warnf("ignoring receipt for unexpected task: %s", concludeRcpt.Ran().Link())
 		}
 	}
 
