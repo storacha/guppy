@@ -18,55 +18,54 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/car/sharding"
 	"github.com/storacha/guppy/pkg/client"
-	"github.com/urfave/cli/v2"
 )
 
 // Upload handles file and directory uploads to Storacha.
 // Note: This doesn't really belong in `internal` in the long run. This was
 // pulled out of `main` without much refactoring, as uploading is still
 // evolving. It should end up implemented within `pkg` before long.
-func Upload(cCtx *cli.Context) error {
-	space := cmdutil.MustParseDID(cCtx.String("space"))
+func Upload(ctx context.Context, spaceDID, proofPath, carPath string, filePaths []string, hidden, json, verbose, wrap bool, shardSize int) error {
+	space := cmdutil.MustParseDID(spaceDID)
 	proofs := []delegation.Delegation{}
-	if cCtx.String("proof") != "" {
-		proof := cmdutil.MustGetProof(cCtx.String("proof"))
+	if proofPath != "" {
+		proof := cmdutil.MustGetProof(proofPath)
 		proofs = append(proofs, proof)
 	}
 
 	c := cmdutil.MustGetClient(proofs...)
 
 	// Handle options
-	isCAR := cCtx.String("car") != ""
-	isJSON := cCtx.Bool("json")
-	// isVerbose := cCtx.Bool("verbose")
-	isWrap := cCtx.Bool("wrap")
+	isCAR := carPath != ""
+	isJSON := json
+	// isVerbose := verbose
+	isWrap := wrap
 	// shardSize := cCtx.Int("shard-size")
 
 	var paths []string
 	if isCAR {
-		paths = []string{cCtx.String("car")}
+		paths = []string{carPath}
 	} else {
-		paths = cCtx.Args().Slice()
+		paths = filePaths
 	}
 
 	var root ipld.Link
 	if isCAR {
 		fmt.Printf("Uploading %s...\n", paths[0])
 		var err error
-		root, err = uploadCAR(cCtx.Context, paths[0], c, space)
+		root, err = uploadCAR(ctx, paths[0], c, space)
 		if err != nil {
 			return err
 		}
 	} else {
 		if len(paths) == 1 && !isWrap {
 			var err error
-			root, err = uploadFile(cCtx.Context, paths[0], c, space)
+			root, err = uploadFile(ctx, paths[0], c, space)
 			if err != nil {
 				return err
 			}
 		} else {
 			var err error
-			root, err = uploadDirectory(cCtx.Context, paths, c, space)
+			root, err = uploadDirectory(ctx, paths, c, space)
 			if err != nil {
 				return err
 			}
