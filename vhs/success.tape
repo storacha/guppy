@@ -10,22 +10,18 @@
 #
 # Then run:
 #
-#   $ vhs vhs/resume-after-dag-error.tape
+#   $ vhs vhs/resume-after-read-error.tape
 #
 # More info: https://github.com/charmbracelet/vhs
 
-Output resume-after-dag-error.gif
+Output success.gif
 
 Set Shell "bash"
 Set FontSize 18
 Set Width 1200
 Set Height 900
 
-Type "go run -tags wip . large-upload-demo --alter-metadata"
-Enter
-Wait+Screen /Upload failed due to out-of-date scan:/
-
-Type "go run -tags wip . large-upload-demo --resume"
+Type "go run -tags wip . large-upload-demo"
 Enter
 Wait@60s
 Sleep 2s
