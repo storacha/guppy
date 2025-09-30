@@ -9,6 +9,11 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
+var lsFlags struct {
+	proofsPath string
+	showShards bool
+}
+
 var lsCmd = &cobra.Command{
 	Use:     "ls <space-did>",
 	Aliases: []string{"list"},
@@ -20,22 +25,11 @@ var lsCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		spaceDID := cmd.Flags().Arg(0)
-
-		proofsPath, err := cmd.Flags().GetString("proof")
-		if err != nil {
-			return err
-		}
-
-		showShards, err := cmd.Flags().GetBool("shards")
-		if err != nil {
-			return err
-		}
-
 		space := cmdutil.MustParseDID(spaceDID)
 
 		proofs := []delegation.Delegation{}
-		if proofsPath != "" {
-			proof := cmdutil.MustGetProof(proofsPath)
+		if lsFlags.proofsPath != "" {
+			proof := cmdutil.MustGetProof(lsFlags.proofsPath)
 			proofs = append(proofs, proof)
 		}
 
@@ -51,7 +45,7 @@ var lsCmd = &cobra.Command{
 
 		for _, r := range listOk.Results {
 			fmt.Printf("%s\n", r.Root)
-			if showShards {
+			if lsFlags.showShards {
 				for _, s := range r.Shards {
 					fmt.Printf("\t%s\n", s)
 				}
@@ -65,7 +59,6 @@ var lsCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(lsCmd)
 
-	lsCmd.Flags().String("space", "", "DID of the space to list")
-	lsCmd.Flags().String("proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
-	lsCmd.Flags().Bool("shards", false, "Display shard CIDs under each upload root.")
+	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
+	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }
