@@ -1,4 +1,4 @@
-package largeupload
+package upload
 
 import (
 	"context"
