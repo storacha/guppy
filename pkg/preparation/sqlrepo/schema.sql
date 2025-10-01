@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   updated_at INTEGER NOT NULL,
   root_fs_entry_id BLOB,
   root_cid BLOB,
+  UNIQUE (space_did, source_id),
   FOREIGN KEY (space_did) REFERENCES spaces(did),
   FOREIGN KEY (source_id) REFERENCES sources(id),
   FOREIGN KEY (root_fs_entry_id) REFERENCES fs_entries(id) ON DELETE
