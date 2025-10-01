@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	_ "modernc.org/sqlite"
 )
 
 func Make(ctx context.Context, dbPath string) (*sqlrepo.Repo, func() error, error) {

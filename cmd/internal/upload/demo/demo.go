@@ -20,7 +20,6 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/cmd/internal/upload"
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/fakefs"
 	"github.com/storacha/guppy/pkg/client"
@@ -279,9 +278,20 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 
 	if len(uploads) == 0 {
 		// Try adding the source and running again.
-		err := upload.AddSource(ctx, repo, spaceDID, ".")
+
+		_, err = api.FindOrCreateSpace(ctx, spaceDID, spaceDID.String())
 		if err != nil {
-			return fmt.Errorf("command failed to add source: %w", err)
+			return fmt.Errorf("command failed to create space: %w", err)
+		}
+
+		source, err := api.CreateSource(ctx, ".", ".")
+		if err != nil {
+			return fmt.Errorf("command failed to create source: %w", err)
+		}
+
+		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		if err != nil {
+			return fmt.Errorf("command failed to add source to space: %w", err)
 		}
 
 		uploads, err = api.FindOrCreateUploads(ctx, spaceDID)
