@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/cmd/internal/upload/repo"
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
@@ -12,10 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func AddSource(ctx context.Context, repo *sqlrepo.Repo, space string, path string) error {
-	// TK: Move parsing a layer up.
-	spaceDID := cmdutil.MustParseDID(space)
-
+func AddSource(ctx context.Context, repo *sqlrepo.Repo, spaceDID did.DID, path string) error {
 	if path == "" {
 		return fmt.Errorf("command requires a path argument")
 	}
@@ -39,9 +37,7 @@ func AddSource(ctx context.Context, repo *sqlrepo.Repo, space string, path strin
 	return nil
 }
 
-func Action(ctx context.Context, space string) error {
-	spaceDID := cmdutil.MustParseDID(space)
-
+func Action(ctx context.Context, spaceDID did.DID) error {
 	repo, _, err := repo.Make(ctx, "guppy.db")
 	if err != nil {
 		return err

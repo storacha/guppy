@@ -152,14 +152,6 @@ func MustGetReceiptsURL() *url.URL {
 	return receiptsURL
 }
 
-func MustParseDID(str string) did.DID {
-	did, err := did.Parse(str)
-	if err != nil {
-		log.Fatalf("parsing DID: %s", err)
-	}
-	return did
-}
-
 func MustGetProof(path string) delegation.Delegation {
 	b, err := os.ReadFile(path)
 	if err != nil {

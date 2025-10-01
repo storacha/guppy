@@ -4,8 +4,10 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/cmd/internal/upload"
 	"github.com/storacha/guppy/cmd/internal/upload/repo"
 )
@@ -21,8 +23,12 @@ var uploadCmd = &cobra.Command{
 		if space == "" {
 			return errors.New("Space cannot be empty")
 		}
+		spaceDID, err := did.Parse(space)
+		if err != nil {
+			return fmt.Errorf("parsing space DID: %w", err)
+		}
 
-		return upload.Action(cmd.Context(), space)
+		return upload.Action(cmd.Context(), spaceDID)
 	},
 }
 
@@ -60,7 +66,12 @@ var uploadAddSourceCmd = &cobra.Command{
 			return errors.New("Path cannot be empty")
 		}
 
-		return upload.AddSource(ctx, repo, space, path)
+		spaceDID, err := did.Parse(space)
+		if err != nil {
+			return fmt.Errorf("parsing space DID: %w", err)
+		}
+
+		return upload.AddSource(ctx, repo, spaceDID, path)
 	},
 }
 

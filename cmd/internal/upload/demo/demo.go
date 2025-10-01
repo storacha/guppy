@@ -279,7 +279,7 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 
 	if len(uploads) == 0 {
 		// Try adding the source and running again.
-		err := upload.AddSource(ctx, repo, spaceDID.String(), ".")
+		err := upload.AddSource(ctx, repo, spaceDID, ".")
 		if err != nil {
 			return fmt.Errorf("command failed to add source: %w", err)
 		}
