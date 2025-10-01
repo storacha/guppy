@@ -1,7 +1,6 @@
 package client
 
 import (
-	"log"
 	"net/url"
 
 	uclient "github.com/storacha/go-ucanto/client"

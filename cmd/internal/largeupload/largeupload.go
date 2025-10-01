@@ -33,7 +33,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"github.com/urfave/cli/v2"
 	_ "modernc.org/sqlite"
 )
 
@@ -119,14 +118,14 @@ func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 	return nil
 }
 
-func Action(cCtx *cli.Context) error {
-	spaceDID := cmdutil.MustParseDID(cCtx.String("space"))
-	root := cCtx.Args().First()
+func Action(ctx context.Context, space string, resumeUpload bool, root string) error {
+	spaceDID := cmdutil.MustParseDID(space)
+
 	if root == "" {
 		return fmt.Errorf("command requires a root path argument")
 	}
 
-	repo, _, err := makeRepo(cCtx.Context)
+	repo, _, err := makeRepo(ctx)
 	if err != nil {
 		return err
 	}
@@ -136,12 +135,41 @@ func Action(cCtx *cli.Context) error {
 	// defer closeDb()
 
 	api := preparation.NewAPI(repo, cmdutil.MustGetClient(), spaceDID)
-	upload, err := makeUpload(cCtx.Context, repo, api, spaceDID, root)
-	if err != nil {
-		return err
+
+	var upload *uploadsmodel.Upload
+	if resumeUpload {
+		idBytes, err := os.ReadFile("last-upload-id.txt")
+		if err != nil {
+			return fmt.Errorf("reading last upload ID file: %w", err)
+		}
+
+		id, err := id.Parse(string(idBytes))
+		if err != nil {
+			return fmt.Errorf("parsing upload ID from file: %w", err)
+		}
+
+		upload, err = api.GetUploadByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("getting upload by ID: %w", err)
+		}
+		if upload == nil {
+			return fmt.Errorf("no upload found with ID %s", id)
+		}
+		fmt.Println("Resuming upload", upload.ID())
+	} else {
+		upload, err = makeUpload(ctx, repo, api, spaceDID, root)
+		if err != nil {
+			return err
+		}
+
+		// Write upload ID to file for easy pasting into resume flag
+		err = os.WriteFile("last-upload-id.txt", []byte(upload.ID().String()), 0644)
+		if err != nil {
+			return fmt.Errorf("writing upload ID to file: %w", err)
+		}
 	}
 
-	err = runUploadUI(cCtx.Context, repo, api, upload)
+	err = runUploadUI(ctx, repo, api, upload)
 	return err
 }
 
@@ -321,12 +349,8 @@ func newChangingFS(fsys fs.FS, changeModTime, changeData bool) (fs.FS, error) {
 	}, nil
 }
 
-func Demo(cCtx *cli.Context) error {
-	resumeUpload := cCtx.Bool("resume")
-	alterMetadata := cCtx.Bool("alter-metadata")
-	alterData := cCtx.Bool("alter-data")
-
-	repo, _, err := makeRepo(cCtx.Context)
+func Demo(ctx context.Context, resumeUpload, alterMetadata, alterData bool) error {
+	repo, _, err := makeRepo(ctx)
 	if err != nil {
 		return err
 	}
@@ -413,7 +437,7 @@ func Demo(cCtx *cli.Context) error {
 			return fmt.Errorf("parsing upload ID from file: %w", err)
 		}
 
-		upload, err = api.GetUploadByID(cCtx.Context, id)
+		upload, err = api.GetUploadByID(ctx, id)
 		if err != nil {
 			return fmt.Errorf("getting upload by ID: %w", err)
 		}
@@ -422,7 +446,7 @@ func Demo(cCtx *cli.Context) error {
 		}
 		fmt.Println("Resuming upload", upload.ID())
 	} else {
-		upload, err = makeUpload(cCtx.Context, repo, api, spaceDID, ".")
+		upload, err = makeUpload(ctx, repo, api, spaceDID, ".")
 		if err != nil {
 			return err
 		}
@@ -434,6 +458,6 @@ func Demo(cCtx *cli.Context) error {
 		}
 	}
 
-	err = runUploadUI(cCtx.Context, repo, api, upload)
+	err = runUploadUI(ctx, repo, api, upload)
 	return err
 }

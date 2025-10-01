@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime/schema"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	uclient "github.com/storacha/go-ucanto/client"
@@ -25,6 +26,8 @@ import (
 	"github.com/storacha/guppy/pkg/client/nodevalue"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
+
+var log = logging.Logger("client")
 
 type Client struct {
 	connection     uclient.Connection
