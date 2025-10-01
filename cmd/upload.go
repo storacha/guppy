@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/preparation"
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
 var uploadCmd = &cobra.Command{
@@ -31,7 +33,7 @@ var uploadCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		repo, _, err := repo.Make(ctx, "guppy.db")
+		repo, _, err := makeRepo(ctx)
 		if err != nil {
 			return err
 		}
@@ -46,6 +48,13 @@ var uploadCmd = &cobra.Command{
 			return fmt.Errorf("command failed to create uploads: %w", err)
 		}
 
+		if len(uploads) == 0 {
+			fmt.Printf("No sources found for space. Add a source first with:\n\n$ %s %s <path>\n\n", uploadSourcesAddCmd.CommandPath(), spaceDID)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			return fmt.Errorf("no uploads found for space %s", spaceDID)
+		}
+
 		return ui.RunUploadUI(ctx, repo, api, uploads)
 	},
 }
@@ -54,16 +63,26 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 }
 
-var uploadAddSourceCmd = &cobra.Command{
-	Use:     "add-space <space> <path>",
-	Aliases: []string{"up"},
-	Short:   "WIP - Upload data to the service",
-	Args:    cobra.ExactArgs(2),
+var uploadSourcesCmd = &cobra.Command{
+	Use: "sources",
+}
+
+func init() {
+	uploadCmd.AddCommand(uploadSourcesCmd)
+}
+
+var uploadSourcesAddCmd = &cobra.Command{
+	Use:   "add <space> <path>",
+	Short: "Add a source to a space",
+	Long: `Adds a source to a space. A source is currently a path on the local filesystem,
+but this may be expanded in the future to include other types of data sources.
+` + "`upload`" + ` will upload data from all sources associated with a space.`,
+	Args: cobra.ExactArgs(2),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, closeDb, err := repo.Make(ctx, "guppy.db")
+		repo, closeDb, err := makeRepo(ctx)
 		if err != nil {
 			return err
 		}
@@ -106,5 +125,64 @@ var uploadAddSourceCmd = &cobra.Command{
 }
 
 func init() {
-	uploadCmd.AddCommand(uploadAddSourceCmd)
+	uploadSourcesCmd.AddCommand(uploadSourcesAddCmd)
+}
+
+var uploadSourcesListCmd = &cobra.Command{
+	Use:     "list <space>",
+	Aliases: []string{"ls"},
+	Short:   "List sources added to a space",
+	Long:    `Lists the sources added to a space.`,
+	Args:    cobra.ExactArgs(1),
+
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
+		repo, closeDb, err := makeRepo(ctx)
+		if err != nil {
+			return err
+		}
+		defer closeDb()
+
+		space := cmd.Flags().Arg(0)
+		if space == "" {
+			return errors.New("Space cannot be empty")
+		}
+
+		spaceDID, err := did.Parse(space)
+		if err != nil {
+			return fmt.Errorf("parsing space DID: %w", err)
+		}
+
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
+
+		sourceIDs, err := repo.ListSpaceSources(ctx, spaceDID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Sources for space %s:\n", spaceDID)
+		for _, sourceID := range sourceIDs {
+			source, err := repo.GetSourceByID(ctx, sourceID)
+			if err != nil {
+				return fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
+			}
+			fmt.Printf("- %s\n", source.Path())
+		}
+		if len(sourceIDs) == 0 {
+			fmt.Printf("No sources found for space %s. Add a source first with:\n\n$ %s %s <path>\n\n", spaceDID, uploadSourcesAddCmd.CommandPath(), spaceDID)
+		}
+
+		_ = api // to avoid unused variable error for now
+
+		return nil
+	},
+}
+
+func init() {
+	uploadSourcesCmd.AddCommand(uploadSourcesListCmd)
+}
+
+func makeRepo(ctx context.Context) (*sqlrepo.Repo, func() error, error) {
+	return repo.Make(ctx, "guppy.db")
 }
