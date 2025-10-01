@@ -247,3 +247,17 @@ func (r *Repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error
 			return err
 		})
 }
+
+func (r *Repo) DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM fs_entries
+		WHERE id = ?
+		  AND space_did = ?`,
+		fsEntryID,
+		util.DbDID(&spaceDID),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete FS entry for space %s: %w", spaceDID, err)
+	}
+	return nil
+}

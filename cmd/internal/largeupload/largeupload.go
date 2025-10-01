@@ -87,21 +87,29 @@ func runUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 	um := m.(uploadModel)
 
 	if um.err != nil {
+		var errBadFSEntry types.ErrBadFSEntry
 		var errBadNodes types.ErrBadNodes
-		if errors.As(um.err, &errBadNodes) {
+		if errors.As(um.err, &errBadFSEntry) || errors.As(um.err, &errBadNodes) {
 			var sb strings.Builder
 			sb.WriteString("\nUpload failed due to out-of-date scan:\n")
-			for i, ebn := range errBadNodes.Errs() {
-				if i >= 3 {
-					sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
-					break
-				}
-				sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+
+			if errors.As(um.err, &errBadFSEntry) {
+				sb.WriteString(fmt.Sprintf(" - FS entry %s is out of date\n", errBadFSEntry.FsEntryID()))
 			}
+
+			if errors.As(um.err, &errBadNodes) {
+				for i, ebn := range errBadNodes.Errs() {
+					if i >= 3 {
+						sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
+						break
+					}
+					sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+				}
+			}
+
 			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
 
 			fmt.Print(sb.String())
-
 			return nil
 		}
 
