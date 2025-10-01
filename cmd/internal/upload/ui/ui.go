@@ -261,6 +261,7 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 	})
 }
 
+// TK: Remove
 var brailleSpinner = spinner.Spinner{
 	Frames: []string{
 		"⣸",
