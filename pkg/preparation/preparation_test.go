@@ -174,7 +174,6 @@ func TestExecuteUpload(t *testing.T) {
 		api := preparation.NewAPI(
 			repo,
 			c,
-			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil
@@ -253,7 +252,6 @@ func TestExecuteUpload(t *testing.T) {
 		api := preparation.NewAPI(
 			repo,
 			c,
-			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil

@@ -267,7 +267,7 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 	if err != nil {
 		return fmt.Errorf("creating changing FS: %w", err)
 	}
-	api := preparation.NewAPI(repo, customPutClient, spaceDID, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+	api := preparation.NewAPI(repo, customPutClient, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 		return fsys, nil
 	}))
 

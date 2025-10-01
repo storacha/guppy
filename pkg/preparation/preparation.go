@@ -55,7 +55,7 @@ type config struct {
 	maxNodesPerIndex    int
 }
 
-func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) API {
+func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
 		maxNodesPerIndex:    defaultMaxNodesPerIndex,

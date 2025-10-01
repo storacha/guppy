@@ -40,7 +40,7 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer closeDb()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(), spaceDID)
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
 		uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -84,7 +84,7 @@ var uploadAddSourceCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(), spaceDID)
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
 
 		_, err = api.FindOrCreateSpace(ctx, spaceDID, spaceDID.String())
 		if err != nil {
