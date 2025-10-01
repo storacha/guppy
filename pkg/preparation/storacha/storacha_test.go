@@ -51,7 +51,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 		require.NoError(t, err)
-		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
 		require.NoError(t, err)
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
@@ -131,7 +131,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 		require.NoError(t, err)
-		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
 		require.NoError(t, err)
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
@@ -181,7 +181,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 		require.NoError(t, err)
-		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
 		require.NoError(t, err)
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
