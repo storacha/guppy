@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
@@ -24,8 +25,10 @@ var lsCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spaceDID := cmd.Flags().Arg(0)
-		space := cmdutil.MustParseDID(spaceDID)
+		spaceDID, err := did.Parse(cmd.Flags().Arg(0))
+		if err != nil {
+			return fmt.Errorf("parsing space DID: %w", err)
+		}
 
 		proofs := []delegation.Delegation{}
 		if lsFlags.proofsPath != "" {
@@ -37,7 +40,7 @@ var lsCmd = &cobra.Command{
 
 		listOk, err := c.UploadList(
 			cmd.Context(),
-			space,
+			spaceDID,
 			uploadcap.ListCaveats{})
 		if err != nil {
 			return err
