@@ -49,6 +49,7 @@ func TestRequestAccess(t *testing.T) {
 		c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
 
 		authOk, err := c.RequestAccess(testContext(t), "did:mailto:example.com:alice")
+		require.NoError(t, err)
 
 		require.Len(t, invokedInvocations, 1, "expected exactly one invocation to be invoked")
 		invocation := invokedInvocations[0]
