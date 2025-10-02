@@ -261,31 +261,6 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 	})
 }
 
-// TK: Remove
-var brailleSpinner = spinner.Spinner{
-	Frames: []string{
-		"⣸",
-		"⡼",
-		"⡞",
-		"⢏",
-		"⢣",
-		"⢱",
-		"⡸",
-		"⡜",
-		"⡎",
-		"⣇",
-		"⢧",
-		"⢳",
-		"⡹",
-		"⡜",
-		"⡎",
-		"⢇",
-		"⢣",
-		"⢱",
-	},
-	FPS: time.Second / 10,
-}
-
 func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) uploadModel {
 	if len(uploads) == 0 {
 		panic("no uploads provided to upload model")
