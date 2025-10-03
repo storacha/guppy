@@ -123,16 +123,34 @@ func invokeAndExecute[Caveats, Out any](
 	successType schema.Type,
 	options ...delegation.Option,
 ) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
+	inv, err := invoke[Caveats, Out](c, capParser, with, caveats, options...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invoking `%s`: %w", capParser.Can(), err)
+	}
+	return execute[Caveats, Out](ctx, c, capParser, inv, successType)
+}
+
+func invoke[Caveats, Out any](
+	c *Client,
+	capParser validator.CapabilityParser[Caveats],
+	with ucan.Resource,
+	caveats Caveats,
+	options ...delegation.Option,
+) (invocation.IssuedInvocation, error) {
 	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
 	for _, del := range c.Proofs() {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
+	return capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+}
 
-	inv, err := capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generating invocation: %w", err)
-	}
-
+func execute[Caveats, Out any](
+	ctx context.Context,
+	c *Client,
+	capParser validator.CapabilityParser[Caveats],
+	inv invocation.Invocation,
+	successType schema.Type,
+) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
 	if err != nil {
 		return nil, nil, fmt.Errorf("sending invocation: %w", err)
