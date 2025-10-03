@@ -21,7 +21,6 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-car/v2/blockstore"
-	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/spf13/afero"
@@ -67,9 +66,8 @@ func prepareTestClient(
 	t *testing.T,
 	space principal.Signer,
 	putClient *http.Client,
-	indexLink *ipld.Link,
-	rootLink *ipld.Link,
-	shardLinks *[]ipld.Link,
+	indexCaps *[]ucan.Capability[spaceindexcap.AddCaveats],
+	uploadAddCaps *[]ucan.Capability[uploadcap.AddCaveats],
 ) *ctestutil.ClientWithCustomPut {
 	client := &ctestutil.ClientWithCustomPut{
 		Client: helpers.Must(ctestutil.Client(
@@ -86,9 +84,7 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-							assert.Equal(t, space.DID().String(), cap.With(), "expected `space/index/add` invocation to be for the correct space")
-							assert.Nil(t, *indexLink, "expected only one `space/index/add` invocation")
-							*indexLink = cap.Nb().Index
+							*indexCaps = append(*indexCaps, cap)
 							return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
 						},
 					),
@@ -106,10 +102,7 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[uploadcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-							assert.Equal(t, space.DID().String(), cap.With(), "expected `upload/add` invocation to be for the correct space")
-							assert.Nil(t, *rootLink, "expected only one `upload/add` invocation")
-							*rootLink = cap.Nb().Root
-							*shardLinks = cap.Nb().Shards
+							*uploadAddCaps = append(*uploadAddCaps, cap)
 							return result.Ok[uploadcap.AddOk, failure.IPLDBuilderFailure](uploadcap.AddOk{
 								Root:   cap.Nb().Root,
 								Shards: cap.Nb().Shards,
@@ -166,10 +159,9 @@ func TestExecuteUpload(t *testing.T) {
 		testFs := prepareFs(t, fsData)
 
 		putClient := ctestutil.NewPutClient()
-		var indexLink ipld.Link
-		var rootLink ipld.Link
-		var shardLinks []ipld.Link
-		c := prepareTestClient(t, space, putClient, &indexLink, &rootLink, &shardLinks)
+		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
+		c := prepareTestClient(t, space, putClient, &indexCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -188,13 +180,18 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added")
-		require.NotNil(t, indexLink, "expected `space/index/add` to be called")
-		indexCIDLink, ok := indexLink.(cidlink.Link)
+
+		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
+		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
+		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
+		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
 		require.True(t, ok, "expected index link to be a CID link")
-		require.NotNil(t, rootLink, "expected `upload/add` to be called")
-		rootCIDLink, ok := rootLink.(cidlink.Link)
+
+		require.Len(t, uploadAddCaps, 1, "expected only one `upload/add` invocation")
+		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
+		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
 		require.True(t, ok, "expected root link to be a CID link")
-		require.Equal(t, rootLink.(cidlink.Link).Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
+		require.Equal(t, rootCIDLink.Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
 
 		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
@@ -244,10 +241,9 @@ func TestExecuteUpload(t *testing.T) {
 			},
 		}
 
-		var indexLink ipld.Link
-		var rootLink ipld.Link
-		var shardLinks []ipld.Link
-		c := prepareTestClient(t, space, putClient, &indexLink, &rootLink, &shardLinks)
+		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
+		c := prepareTestClient(t, space, putClient, &indexCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -266,9 +262,9 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 2, putBlobs.Size(), "expected only 2 shards to be added so far")
-		require.Nil(t, indexLink, "expected `space/index/add` not to have been called yet")
-		require.Nil(t, rootLink, "expected `upload/add` not to have been called yet")
-		require.Nil(t, shardLinks, "expected `upload/add` not to have been called yet")
+
+		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
+		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
 
 		// Now, retry.
 
@@ -282,11 +278,18 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
-		rootCIDLink, ok := rootLink.(cidlink.Link)
-		require.True(t, ok, "expected root link to be a CID link")
-		indexCIDLink, ok := indexLink.(cidlink.Link)
+
+		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
+		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
+		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
+		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
 		require.True(t, ok, "expected index link to be a CID link")
-		require.Equal(t, rootLink.(cidlink.Link).Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
+
+		require.Len(t, uploadAddCaps, 1, "expected only one `upload/add` invocation")
+		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
+		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
+		require.True(t, ok, "expected root link to be a CID link")
+		require.Equal(t, rootCIDLink.Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
 
 		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
