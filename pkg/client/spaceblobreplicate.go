@@ -6,28 +6,43 @@ import (
 
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
-	"github.com/storacha/go-ucanto/core/ipld"
+	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 )
 
-func (c *Client) SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, site ipld.Link) (spaceblobcap.ReplicateOk, error) {
+func (c *Client) SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, error) {
 	caveats := spaceblobcap.ReplicateCaveats{
 		Blob:     blob,
 		Replicas: replicaCount,
-		Site:     site,
+		Site:     locationCommitment.Link(),
 	}
 
-	res, _, err := invokeAndExecute[spaceblobcap.ReplicateCaveats, spaceblobcap.ReplicateOk](
+	inv, err := invoke[spaceblobcap.ReplicateCaveats, spaceblobcap.ReplicateOk](
+		c,
+		spaceblobcap.Replicate,
+		space.String(),
+		caveats,
+	)
+	if err != nil {
+		return spaceblobcap.ReplicateOk{}, fmt.Errorf("invoking `space/blob/replicate`: %w", err)
+	}
+	for b, err := range locationCommitment.Blocks() {
+		if err != nil {
+			return spaceblobcap.ReplicateOk{}, fmt.Errorf("getting block from location commitment: %w", err)
+		}
+		inv.Attach(b)
+	}
+
+	res, _, err := execute[spaceblobcap.ReplicateCaveats, spaceblobcap.ReplicateOk](
 		ctx,
 		c,
 		spaceblobcap.Replicate,
-		c.Issuer().DID().String(),
-		caveats,
+		inv,
 		spaceblobcap.ReplicateOkType(),
 	)
 	if err != nil {
-		return spaceblobcap.ReplicateOk{}, fmt.Errorf("invoking and executing `space/blob/replicate`: %w", err)
+		return spaceblobcap.ReplicateOk{}, fmt.Errorf("executing `space/blob/replicate`: %w", err)
 	}
 
 	replicateOk, failErr := result.Unwrap(res)
