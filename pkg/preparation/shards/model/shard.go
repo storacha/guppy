@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 
+	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -138,4 +140,8 @@ func (s *Shard) Size() uint64 {
 
 func (s *Shard) Digest() multihash.Multihash {
 	return s.digest
+}
+
+func (s *Shard) CID() cid.Cid {
+	return cid.NewCidV1(uint64(multicodec.Car), s.digest)
 }

@@ -11,6 +11,8 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
+	"github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
@@ -27,6 +29,7 @@ type Client interface {
 	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
 	SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error
 	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
+	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, error)
 }
 
 var _ Client = (*client.Client)(nil)
@@ -55,16 +58,31 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	for _, shard := range closedShards {
 		car, err := a.CarForShard(ctx, shard.ID())
 		if err != nil {
-			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
+			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.CID(), err)
 		}
 
-		digest, _, err := a.Client.SpaceBlobAdd(ctx, car, spaceDID)
+		digest, locationCommitment, err := a.Client.SpaceBlobAdd(ctx, car, spaceDID)
 		if err != nil {
-			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.CID(), spaceDID, err)
 		}
+
+		_, err = a.Client.SpaceBlobReplicate(
+			ctx,
+			spaceDID,
+			types.Blob{
+				Digest: digest,
+				Size:   shard.Size(),
+			},
+			3,
+			locationCommitment,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to replicate shard %s: %w", shard.CID(), err)
+		}
+
 		shard.Added(digest)
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
-			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.ID(), err)
+			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.CID(), err)
 		}
 	}
 
@@ -86,9 +104,23 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
 		}
 
-		indexDigest, _, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
+		indexDigest, locationCommitment, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
 		if err != nil {
 			return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
+		}
+
+		_, err = a.Client.SpaceBlobReplicate(
+			ctx,
+			spaceDID,
+			types.Blob{
+				Digest: indexDigest,
+				Size:   uint64(len(indexBytes)),
+			},
+			3,
+			locationCommitment,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to replicate index: %w", err)
 		}
 
 		indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
