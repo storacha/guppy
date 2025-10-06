@@ -10,6 +10,8 @@ import (
 	"github.com/multiformats/go-multihash"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
+	libtestutil "github.com/storacha/go-libstoracha/testutil"
+	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/core/result"
@@ -28,6 +30,7 @@ func TestSpaceBlobReplicate(t *testing.T) {
 		space, err := ed25519signer.Generate()
 		require.NoError(t, err)
 
+		invocations := []invocation.Invocation{}
 		invokedCapabilities := []ucan.Capability[spaceblobcap.ReplicateCaveats]{}
 
 		connection := testutil.NewTestServerConnection(
@@ -41,6 +44,7 @@ func TestSpaceBlobReplicate(t *testing.T) {
 						inv invocation.Invocation,
 						context server.InvocationContext,
 					) (result.Result[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						invocations = append(invocations, inv)
 						invokedCapabilities = append(invokedCapabilities, cap)
 						sitePromises := make([]types.Promise, cap.Nb().Replicas)
 						for i := range sitePromises {
@@ -71,20 +75,26 @@ func TestSpaceBlobReplicate(t *testing.T) {
 		digest, err := multihash.Encode([]byte("test-digest"), multihash.IDENTITY)
 		blob := types.Blob{Digest: digest, Size: 123}
 
-		siteDigest, err := multihash.Encode([]byte("test-location-commitment"), multihash.IDENTITY)
-		require.NoError(t, err)
-		site := cidlink.Link{Cid: cid.NewCidV1(cid.Raw, siteDigest)}
-
-		replicateOk, err := c.SpaceBlobReplicate(t.Context(), space.DID(), blob, 5, site)
+		location := libtestutil.RandomLocationDelegation(t)
+		replicateOk, err := c.SpaceBlobReplicate(t.Context(), space.DID(), blob, 5, location)
 		require.NoError(t, err)
 
+		require.Len(t, invocations, 1, "expected exactly one invocation to be made")
+		inv := invocations[0]
 		require.Len(t, invokedCapabilities, 1, "expected exactly one capability to be invoked")
 		capability := invokedCapabilities[0]
 
 		nb := uhelpers.Must(spaceblobcap.ReplicateCaveatsReader.Read(capability.Nb()))
 		require.Equal(t, blob, nb.Blob, "expected to replicate the correct blob")
 		require.Equal(t, uint(5), nb.Replicas, "expected to replicate the correct number of replicas")
-		require.Equal(t, site, nb.Site, "expected to replicate from the correct site")
+		require.Equal(t, location.Link(), nb.Site, "expected to replicate from the correct site")
+
+		// Get the location claim from the invocation's extra blocks.
+		br, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(inv.Blocks()))
+		require.NoError(t, err)
+		attachedLocation, err := invocation.NewInvocationView(nb.Site, br)
+		require.NoError(t, err)
+		require.Equal(t, location.Root().Bytes(), attachedLocation.Root().Bytes(), "expected the invocation to be attached to the location commitment")
 
 		// This is somewhat testing the test, but we want to make sure we get out
 		// whatever the server sent.
