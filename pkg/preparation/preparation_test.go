@@ -20,12 +20,15 @@ import (
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"
-	"github.com/ipld/go-car/v2/blockstore"
+	carblockstore "github.com/ipld/go-car/v2/blockstore"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
 	"github.com/storacha/go-libstoracha/blobindex"
+	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
+	"github.com/storacha/go-libstoracha/capabilities/types"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
@@ -67,6 +70,7 @@ func prepareTestClient(
 	space principal.Signer,
 	putClient *http.Client,
 	indexCaps *[]ucan.Capability[spaceindexcap.AddCaveats],
+	replicateCaps *[]ucan.Capability[spaceblobcap.ReplicateCaveats],
 	uploadAddCaps *[]ucan.Capability[uploadcap.AddCaveats],
 ) *ctestutil.ClientWithCustomPut {
 	client := &ctestutil.ClientWithCustomPut{
@@ -86,6 +90,41 @@ func prepareTestClient(
 						) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
 							*indexCaps = append(*indexCaps, cap)
 							return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
+						},
+					),
+				),
+			),
+
+			ctestutil.WithServerOptions(
+				server.WithServiceMethod(
+					spaceblobcap.Replicate.Can(),
+					server.Provide(
+						spaceblobcap.Replicate,
+						func(
+							ctx context.Context,
+							cap ucan.Capability[spaceblobcap.ReplicateCaveats],
+							inv invocation.Invocation,
+							context server.InvocationContext,
+						) (result.Result[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							*replicateCaps = append(*replicateCaps, cap)
+							sitePromises := make([]types.Promise, cap.Nb().Replicas)
+							for i := range sitePromises {
+								siteDigest, err := multihash.Encode(fmt.Appendf(nil, "test-replicated-site-%d", i), multihash.IDENTITY)
+								if err != nil {
+									return nil, nil, fmt.Errorf("encoding site digest: %w", err)
+								}
+								sitePromises[i] = types.Promise{
+									UcanAwait: types.Await{
+										Selector: ".out.ok.site",
+										Link:     cidlink.Link{Cid: cid.NewCidV1(cid.Raw, siteDigest)},
+									},
+								}
+							}
+							return result.Ok[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure](
+								spaceblobcap.ReplicateOk{
+									Site: sitePromises,
+								},
+							), nil, nil
 						},
 					),
 				),
@@ -160,8 +199,9 @@ func TestExecuteUpload(t *testing.T) {
 
 		putClient := ctestutil.NewPutClient()
 		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
-		c := prepareTestClient(t, space, putClient, &indexCaps, &uploadAddCaps)
+		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -186,6 +226,28 @@ func TestExecuteUpload(t *testing.T) {
 		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
 		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
 		require.True(t, ok, "expected index link to be a CID link")
+
+		require.Len(t, replicateCaps, 6, "expected 5 shards + 1 index to be replicated")
+		putBlobDescs := make([]types.Blob, 0, putBlobs.Size())
+		for digest, blob := range putBlobs.Iterator() {
+			putBlobDescs = append(putBlobDescs, types.Blob{
+				Digest: digest,
+				Size:   uint64(len(blob)),
+			})
+		}
+		replicatedBlobDescs := make([]types.Blob, 0, len(replicateCaps))
+		for _, i := range replicateCaps {
+			replicatedBlobDescs = append(replicatedBlobDescs, i.Nb().Blob)
+		}
+		require.ElementsMatch(t, putBlobDescs, replicatedBlobDescs, "expected all PUT blobs to be replicated")
+
+		for _, i := range replicateCaps {
+			require.Equal(t, space.DID().String(), i.With(), "expected `space/blob/replicate` invocation to be for the correct space")
+			require.Equal(t, uint(3), i.Nb().Replicas, "expected `space/blob/replicate` to request 3 replicas")
+
+			// Verifying the correct site is left to lower level tests.
+			require.NotNil(t, uint(3), i.Nb().Site, "expected `space/blob/replicate` to provide a site")
+		}
 
 		require.Len(t, uploadAddCaps, 1, "expected only one `upload/add` invocation")
 		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
@@ -242,8 +304,9 @@ func TestExecuteUpload(t *testing.T) {
 		}
 
 		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
-		c := prepareTestClient(t, space, putClient, &indexCaps, &uploadAddCaps)
+		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -357,7 +420,7 @@ func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, indexCid cid.
 	return foundData
 }
 
-// indexAndShardsBlockstore is a [blockstore.Blockstore] that combines multiple
+// indexAndShardsBlockstore is a [carblockstore.Blockstore] that combines multiple
 // blockstores into one. It doesn't actually implement the entire interface, and
 // is only suitable for testing purposes.
 type indexAndShardsBlockstore struct {
@@ -365,7 +428,7 @@ type indexAndShardsBlockstore struct {
 	shards ctestutil.BlobMap
 }
 
-var _ blockstore.Blockstore = (*indexAndShardsBlockstore)(nil)
+var _ carblockstore.Blockstore = (*indexAndShardsBlockstore)(nil)
 
 func newIndexAndShardsBlockstore(indexCid cid.Cid, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
 	if indexCid.Prefix().Codec != uint64(multicodec.Car) {
@@ -431,14 +494,14 @@ func (c *indexAndShardsBlockstore) HashOnRead(enabled bool) {
 	panic("not implemented")
 }
 
-// compositeBlockstore is a [blockstore.Blockstore] that combines multiple
+// compositeBlockstore is a [carblockstore.Blockstore] that combines multiple
 // blockstores into one. It doesn't actually implement the entire interface, and
 // is only suitable for testing purposes.
 type compositeBlockstore struct {
-	blockstores []blockstore.Blockstore
+	blockstores []carblockstore.Blockstore
 }
 
-var _ blockstore.Blockstore = (*compositeBlockstore)(nil)
+var _ carblockstore.Blockstore = (*compositeBlockstore)(nil)
 
 func (c *compositeBlockstore) Get(ctx context.Context, key cid.Cid) (blocks.Block, error) {
 	for _, bs := range c.blockstores {
