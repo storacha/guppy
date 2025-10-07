@@ -7,6 +7,8 @@ import (
 	"io"
 	"testing"
 
+	commcid "github.com/filecoin-project/go-fil-commcid"
+	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
@@ -25,6 +27,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// commP is not defined for inputs shorter than 65 bytes, so add 65 bytes of
+// padding to every "CAR" to make sure it's definitely long enough.
+var padding = bytes.Repeat([]byte{0}, 65)
+
 func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
@@ -34,7 +40,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		client := mockclient.MockClient{T: t}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			return bytes.NewReader(fmt.Appendf(nil, "CAR OF SHARD: %s", shardID)), nil
+			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
 		}
 
 		api := storacha.API{
@@ -97,7 +103,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
 
 		// This run should `space/blob/add` the first, closed shard.
-		expectedData := fmt.Appendf(nil, "CAR OF SHARD: %s", firstShard.ID())
+		expectedData := fmt.Append(nil, "CAR OF SHARD: ", firstShard.ID(), padding)
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
 		require.Equal(t, expectedData, client.SpaceBlobAddInvocations[0].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
@@ -109,6 +115,22 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[0].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[0].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
+
+		// Then it should `filecoin/offer` it.
+		require.Len(t, client.FilecoinOfferInvocations, 1)
+		require.Equal(t, spaceDID, client.FilecoinOfferInvocations[0].Space)
+		require.Equal(t, cidlink.Link{Cid: firstShard.CID()}, client.FilecoinOfferInvocations[0].Content)
+
+		cp := &commp.Calc{}
+		_, err = cp.Write(expectedData)
+		require.NoError(t, err)
+		digest, _, err := cp.Digest()
+		require.NoError(t, err)
+		shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(digest, firstShard.Size())
+		require.NoError(t, err)
+		shardPieceLink := cidlink.Link{Cid: shardPieceCID}
+
+		require.Equal(t, shardPieceLink, client.FilecoinOfferInvocations[0].Piece)
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
@@ -123,7 +145,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
-		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", secondShard.ID()), client.SpaceBlobAddInvocations[1].BlobAdded)
+		require.Equal(t, fmt.Append(nil, "CAR OF SHARD: ", secondShard.ID(), padding), client.SpaceBlobAddInvocations[1].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
 
 		// Then it should `space/blob/replicate` it.
@@ -223,7 +245,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 
 		rootLink := testutil.RandomCID(t)
 
-		shard1Digest, err := multihash.Sum([]byte("CAR OF SHARD 1"), multihash.SHA2_256, -1)
+		shard1Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 1"), padding...), multihash.SHA2_256, -1)
 		require.NoError(t, err)
 		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
 		require.NoError(t, err)
@@ -234,7 +256,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
 
-		shard2Digest, err := multihash.Sum([]byte("CAR OF SHARD 2"), multihash.SHA2_256, -1)
+		shard2Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 2"), padding...), multihash.SHA2_256, -1)
 		require.NoError(t, err)
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
 		require.NoError(t, err)

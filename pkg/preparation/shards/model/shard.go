@@ -143,5 +143,8 @@ func (s *Shard) Digest() multihash.Multihash {
 }
 
 func (s *Shard) CID() cid.Cid {
+	if s.digest == nil {
+		return cid.Undef
+	}
 	return cid.NewCidV1(uint64(multicodec.Car), s.digest)
 }
