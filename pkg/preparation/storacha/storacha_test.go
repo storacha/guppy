@@ -32,7 +32,7 @@ import (
 var padding = bytes.Repeat([]byte{0}, 65)
 
 func TestSpaceBlobAddShardsForUpload(t *testing.T) {
-	t.Run("`space/blob/add`s a CAR for each shard", func(t *testing.T) {
+	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
@@ -159,7 +159,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 }
 
 func TestAddIndexesForUpload(t *testing.T) {
-	t.Run("`space/blob/add`s an index CAR", func(t *testing.T) {
+	t.Run("`space/blob/add`s and `space/blob/replicate`s index CARs", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
