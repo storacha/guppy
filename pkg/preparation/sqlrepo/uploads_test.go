@@ -21,10 +21,33 @@ func TestCreateUploads(t *testing.T) {
 	require.NoError(t, err)
 	sourceIDs := []id.SourceID{source1.ID(), source2.ID()}
 
-	uploads, err := repo.CreateUploads(t.Context(), space.DID(), sourceIDs)
+	uploads, err := repo.FindOrCreateUploads(t.Context(), space.DID(), sourceIDs)
 	require.NoError(t, err)
 
 	for i, upload := range uploads {
+		readUpload, err := repo.GetUploadByID(t.Context(), upload.ID())
+		require.NoError(t, err)
+		require.Equal(t, upload, readUpload)
+
+		require.Equal(t, space.DID(), upload.SpaceDID())
+		require.Equal(t, sourceIDs[i], upload.SourceID())
+		require.NotEmpty(t, upload.CreatedAt())
+		require.Empty(t, upload.RootFSEntryID())
+	}
+
+	///
+
+	source3, err := repo.CreateSource(t.Context(), "source3 name", "source3/path")
+	require.NoError(t, err)
+	sourceIDs = []id.SourceID{source1.ID(), source3.ID(), source2.ID()}
+
+	uploadsAgain, err := repo.FindOrCreateUploads(t.Context(), space.DID(), sourceIDs)
+	require.NoError(t, err)
+
+	require.Equal(t, uploads[0], uploadsAgain[0])
+	require.Equal(t, uploads[1], uploadsAgain[2])
+
+	for i, upload := range uploadsAgain {
 		readUpload, err := repo.GetUploadByID(t.Context(), upload.ID())
 		require.NoError(t, err)
 		require.Equal(t, upload, readUpload)

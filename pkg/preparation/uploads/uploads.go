@@ -49,8 +49,8 @@ type API struct {
 	CloseUploadShards CloseUploadShardsFunc
 }
 
-// CreateUploads creates uploads for a given space and its associated sources.
-func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Upload, error) {
+// FindOrCreateUploads creates uploads for a given space and its associated sources.
+func (a API) FindOrCreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Upload, error) {
 	log.Debugf("Creating uploads for space %s", spaceDID)
 	sources, err := a.Repo.ListSpaceSources(ctx, spaceDID)
 	if err != nil {
@@ -59,7 +59,7 @@ func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*model.Uplo
 
 	log.Debugf("Found %d sources for space %s", len(sources), spaceDID)
 
-	uploads, err := a.Repo.CreateUploads(ctx, spaceDID, sources)
+	uploads, err := a.Repo.FindOrCreateUploads(ctx, spaceDID, sources)
 	if err != nil {
 		return nil, err
 	}

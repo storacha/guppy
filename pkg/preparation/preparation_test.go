@@ -139,7 +139,7 @@ func createUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, api prepar
 	require.NoError(t, err)
 	err = repo.AddSourceToSpace(t.Context(), spaceDID, source.ID())
 	require.NoError(t, err)
-	uploads, err := api.CreateUploads(t.Context(), spaceDID)
+	uploads, err := api.FindOrCreateUploads(t.Context(), spaceDID)
 	require.NoError(t, err)
 	require.Len(t, uploads, 1, "expected exactly one upload to be created")
 	return uploads[0]
@@ -174,7 +174,6 @@ func TestExecuteUpload(t *testing.T) {
 		api := preparation.NewAPI(
 			repo,
 			c,
-			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil
@@ -253,7 +252,6 @@ func TestExecuteUpload(t *testing.T) {
 		api := preparation.NewAPI(
 			repo,
 			c,
-			space.DID(),
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 				require.Equal(t, ".", path, "test expects root to be '.'")
 				return testFs, nil

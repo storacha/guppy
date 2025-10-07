@@ -38,7 +38,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 	source, err := repo.CreateSource(t.Context(), "Test Source", ".")
 	require.NoError(t, err)
-	uploads, err := repo.CreateUploads(t.Context(), space.DID(), []id.SourceID{source.ID()})
+	uploads, err := repo.FindOrCreateUploads(t.Context(), space.DID(), []id.SourceID{source.ID()})
 	require.NoError(t, err)
 	require.Len(t, uploads, 1)
 	upload := uploads[0]
@@ -305,7 +305,7 @@ func TestIndexForUpload(t *testing.T) {
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 
-		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
 		require.NoError(t, err)
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
@@ -414,7 +414,7 @@ func TestIndexForUpload(t *testing.T) {
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 
-		uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{id.New()})
 		require.NoError(t, err)
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
