@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
@@ -27,6 +27,8 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
+
+var log = logging.Logger("preparation/storacha")
 
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
@@ -99,13 +101,18 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 			return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
 		}
 
-		pieceDigest, _, err := commpCalc.Digest()
-		if err != nil && !strings.Contains(err.Error(), "insufficient state accumulated") {
-			return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
-		}
-
 		// On shards too small to compute a CommP, just skip the `filecoin/offer`.
-		if err == nil {
+		switch {
+		case shard.Size() < commp.MinPiecePayload:
+			log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), commp.MinPiecePayload)
+		case shard.Size() > commp.MaxPiecePayload:
+			log.Warnf("skipping `filecoin/offer` for shard %s: size %d is above maximum %d", shard.ID(), shard.Size(), commp.MaxPiecePayload)
+		default:
+			pieceDigest, _, err := commpCalc.Digest()
+			if err != nil {
+				return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+			}
+
 			shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
 			if err != nil {
 				return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
