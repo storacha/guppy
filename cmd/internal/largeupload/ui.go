@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
 	"github.com/ipfs/go-cid"
+	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -31,6 +33,7 @@ type uploadModel struct {
 	repo   *sqlrepo.Repo
 	api    preparation.API
 	upload *uploadsmodel.Upload
+	rng    *rand.Rand
 
 	// State
 	recentAddedShards  []*shardsmodel.Shard
@@ -44,7 +47,7 @@ type uploadModel struct {
 	rootCID            cid.Cid
 
 	// Bubbles
-	spinner spinner.Model
+	closedShardSpinners map[id.ShardID]spinner.Model
 
 	// Output
 	err error
@@ -54,7 +57,6 @@ func (m uploadModel) Init() tea.Cmd {
 	return tea.Batch(
 		executeUpload(m.ctx, m.api, m.upload),
 		checkStats(m.ctx, m.repo, m.upload.ID()),
-		m.spinner.Tick,
 	)
 }
 
@@ -74,6 +76,8 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case statsMsg:
+		var cmds []tea.Cmd
+
 		m.recentAddedShards = msg.addedShards
 		m.addedShardsSize = 0
 		for _, s := range msg.addedShards {
@@ -86,6 +90,18 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closedShardsSize += s.Size()
 		}
 
+		previousSpinners := m.closedShardSpinners
+		m.closedShardSpinners = make(map[id.ShardID]spinner.Model)
+		for _, s := range msg.closedShards {
+			if sp, ok := previousSpinners[s.ID()]; ok {
+				m.closedShardSpinners[s.ID()] = sp
+			} else {
+				newSpinner := spinner.New(spinner.WithSpinner(bubbleup.Spinner(m.rng)))
+				m.closedShardSpinners[s.ID()] = newSpinner
+				cmds = append(cmds, newSpinner.Tick)
+			}
+		}
+
 		m.openShardsSize = 0
 		for _, s := range msg.openShards {
 			m.openShardsSize += s.Size()
@@ -95,16 +111,20 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filesToDAGScan = msg.filesToDAGScan
 		m.shardedFiles = msg.shardedFiles
 
-		return m, checkStats(m.ctx, m.repo, m.upload.ID())
+		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, m.upload.ID()))...)
 
 	case error:
 		m.err = msg
 		return m, tea.Quit
 
 	default:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		var cmds []tea.Cmd
+		for id, sp := range m.closedShardSpinners {
+			updatedSpinner, cmd := sp.Update(msg)
+			m.closedShardSpinners[id] = updatedSpinner
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 	}
 }
 
@@ -113,10 +133,10 @@ func renderListItem(style lipgloss.Style, text string, size uint64) string {
 }
 
 func (m uploadModel) View() string {
-	red := lipgloss.Color("#D63328")
-	yellow := lipgloss.Color("#F7CA5B")
-	blue := lipgloss.Color("#3373C9")
-	lightblue := lipgloss.Color("#C4DFFC")
+	addedShardColor := lipgloss.Color("#0176CE")
+	closedShardColor := lipgloss.Color("#7CABCF")
+	shardedColor := lipgloss.Color("#FFE299")
+	scannedColor := lipgloss.Color("#E88B8D")
 
 	var output strings.Builder
 
@@ -126,11 +146,11 @@ func (m uploadModel) View() string {
 
 	output.WriteString("Shards:\n")
 	for _, s := range m.recentAddedShards {
-		output.WriteString(renderListItem(style.Foreground(red), s.Digest().B58String(), s.Size()))
+		output.WriteString(renderListItem(style.Foreground(addedShardColor), s.Digest().B58String(), s.Size()))
 	}
 
 	for _, s := range m.recentClosedShards {
-		output.WriteString(renderListItem(style.Foreground(yellow), m.spinner.View()+" "+s.ID().String(), s.Size()))
+		output.WriteString(renderListItem(style.Foreground(closedShardColor), m.closedShardSpinners[s.ID()].View()+" "+s.ID().String(), s.Size()))
 	}
 
 	output.WriteString("\n")
@@ -138,9 +158,9 @@ func (m uploadModel) View() string {
 	output.WriteString("Added to Shards:\n")
 	for i, fi := range m.shardedFiles {
 		if i < 5 {
-			output.WriteString(renderListItem(style.Foreground(blue), fi.Path, fi.Size))
+			output.WriteString(renderListItem(style.Foreground(shardedColor), fi.Path, fi.Size))
 		} else {
-			output.WriteString(style.Foreground(blue).Italic(true).Render("... and more\n"))
+			output.WriteString(style.Foreground(shardedColor).Italic(true).Render("... and more\n"))
 		}
 	}
 
@@ -149,19 +169,19 @@ func (m uploadModel) View() string {
 	output.WriteString("Scanning Files:\n")
 	for i, fi := range m.filesToDAGScan {
 		if i < 5 {
-			output.WriteString(renderListItem(style.Foreground(lightblue), fi.Path, fi.Size))
+			output.WriteString(renderListItem(style.Foreground(scannedColor), fi.Path, fi.Size))
 		} else {
-			output.WriteString(style.Foreground(lightblue).Italic(true).Render("... and more\n"))
+			output.WriteString(style.Foreground(scannedColor).Italic(true).Render("... and more\n"))
 		}
 	}
 
 	output.WriteString("\n")
 
 	output.WriteString(renderBars([]bar{
-		{color: red, value: int(m.addedShardsSize)},
-		{color: yellow, value: int(m.closedShardsSize)},
-		{color: blue, value: int(m.openShardsSize)},
-		{color: lightblue, value: int(m.dagScans)},
+		{color: addedShardColor, value: int(m.addedShardsSize)},
+		{color: closedShardColor, value: int(m.closedShardsSize)},
+		{color: shardedColor, value: int(m.openShardsSize)},
+		{color: scannedColor, value: int(m.dagScans)},
 	}, 80))
 
 	output.WriteString("\n\nPress q to quit.\n")
@@ -260,11 +280,11 @@ var brailleSpinner = spinner.Spinner{
 
 func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, upload *uploadsmodel.Upload) uploadModel {
 	return uploadModel{
-		ctx:     ctx,
-		repo:    repo,
-		api:     api,
-		upload:  upload,
-		spinner: spinner.New(spinner.WithSpinner(brailleSpinner)),
+		ctx:    ctx,
+		repo:   repo,
+		api:    api,
+		upload: upload,
+		rng:    rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
 	}
 }
 
