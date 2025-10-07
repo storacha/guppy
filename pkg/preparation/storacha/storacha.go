@@ -85,7 +85,10 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 		if err != nil {
 			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 		}
-		shard.Added(digest)
+		err = shard.Added(digest)
+		if err != nil {
+			return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
+		}
 
 		_, _, err = a.Client.SpaceBlobReplicate(
 			ctx,
