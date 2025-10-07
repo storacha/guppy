@@ -31,7 +31,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
-		client := mockclient.MockClient{}
+		client := mockclient.MockClient{T: t}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 			return bytes.NewReader(fmt.Appendf(nil, "CAR OF SHARD: %s", shardID)), nil
@@ -88,10 +88,27 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
+		// Reload shards
+		firstShard, err = repo.GetShardByID(t.Context(), firstShard.ID())
+		require.NoError(t, err)
+		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
+		require.NoError(t, err)
+		require.Equal(t, model.ShardStateAdded, firstShard.State(), "expected first shard to be marked as added now")
+		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
+
 		// This run should `space/blob/add` the first, closed shard.
+		expectedData := fmt.Appendf(nil, "CAR OF SHARD: %s", firstShard.ID())
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
-		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", firstShard.ID()), client.SpaceBlobAddInvocations[0].BlobAdded)
+		require.Equal(t, expectedData, client.SpaceBlobAddInvocations[0].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
+
+		// Then it should `space/blob/replicate` it.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+		require.Equal(t, firstShard.Digest(), client.SpaceBlobReplicateInvocations[0].Blob.Digest)
+		require.Equal(t, firstShard.Size(), client.SpaceBlobReplicateInvocations[0].Blob.Size)
+		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[0].Space)
+		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[0].ReplicaCount)
+		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
@@ -99,10 +116,23 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
+		// Reload second shard
+		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
+		require.NoError(t, err)
+		require.Equal(t, model.ShardStateAdded, secondShard.State(), "expected second shard to be marked as added now")
+
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
 		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", secondShard.ID()), client.SpaceBlobAddInvocations[1].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
+
+		// Then it should `space/blob/replicate` it.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
+		require.Equal(t, secondShard.Digest(), client.SpaceBlobReplicateInvocations[1].Blob.Digest)
+		require.Equal(t, secondShard.Size(), client.SpaceBlobReplicateInvocations[1].Blob.Size)
+		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[1].Space)
+		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
+		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 	})
 }
 
@@ -112,7 +142,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
-		client := mockclient.MockClient{}
+		client := mockclient.MockClient{T: t}
 
 		IndexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
 			return []io.Reader{
@@ -145,11 +175,16 @@ func TestAddIndexesForUpload(t *testing.T) {
 		}
 
 		require.Len(t, client.SpaceBlobAddInvocations, len(expectedIndexBlobs))
+		require.Len(t, client.SpaceBlobReplicateInvocations, len(expectedIndexBlobs))
 		require.Len(t, client.SpaceIndexAddInvocations, len(expectedIndexBlobs))
 
 		for i, blob := range expectedIndexBlobs {
 			require.Equal(t, blob, client.SpaceBlobAddInvocations[i].BlobAdded)
 			require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[i].Space)
+
+			require.Equal(t, client.SpaceBlobAddInvocations[i].ReturnedLocation, client.SpaceBlobReplicateInvocations[i].LocationCommitment)
+			require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[i].Space)
+			require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[i].ReplicaCount)
 
 			cid, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(blob)
 			require.NoError(t, err)
