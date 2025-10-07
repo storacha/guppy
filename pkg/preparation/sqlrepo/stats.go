@@ -13,7 +13,7 @@ func (r *Repo) TotalBytesToScan(ctx context.Context, uploadID id.UploadID) (uint
 		 	FROM dag_scans
 			JOIN fs_entries ON dag_scans.fs_entry_id = fs_entries.id
 		 	WHERE dag_scans.upload_id = $1
-			AND dag_scans.state IN ('pending', 'awaiting_children', 'running')
+			AND dag_scans.cid IS NULL
 		`,
 		uploadID,
 	)

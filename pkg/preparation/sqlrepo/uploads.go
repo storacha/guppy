@@ -123,14 +123,14 @@ func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 }
 
 func (r *Repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
-	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, state, error_message, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
+	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
 	ds, err := dagmodel.ReadDAGScanFromDatabase(r.dagScanScanner(row))
 	if err != nil {
 		return cid.Undef, err
 	}
-	if ds.State() != dagmodel.DAGScanStateCompleted {
-		return cid.Undef, uploads.IncompleteDagScanError{DagScan: ds}
+	if !ds.CID().Defined() {
+		return cid.Undef, fmt.Errorf("DAG scan for fs entry %s is not completed", fsEntryID)
 	}
 	return ds.CID(), nil
 }
@@ -149,17 +149,23 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 		return nil, err
 	}
 
-	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(kind string, fsEntryID id.FSEntryID, uploadID id.UploadID, spaceDID did.DID, createdAt time.Time, updatedAt time.Time, errorMessage *string, state dagmodel.DAGScanState, cid cid.Cid) error {
+	return dagScan, dagmodel.WriteDAGScanToDatabase(dagScan, func(
+		kind string,
+		fsEntryID id.FSEntryID,
+		uploadID id.UploadID,
+		spaceDID did.DID,
+		createdAt time.Time,
+		updatedAt time.Time,
+		cid cid.Cid,
+	) error {
 		_, err := r.db.ExecContext(ctx,
-			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, space_did, created_at, updated_at, error_message, state, cid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO dag_scans (kind, fs_entry_id, upload_id, space_did, created_at, updated_at, cid) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			kind,
 			fsEntryID,
 			uploadID,
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
-			errorMessage,
-			state,
 			util.DbCid(&cid),
 		)
 		return err
