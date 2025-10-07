@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
@@ -99,18 +100,21 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 		}
 
 		pieceDigest, _, err := commpCalc.Digest()
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "insufficient state accumulated") {
 			return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
 		}
 
-		shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
-		if err != nil {
-			return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
-		}
+		// On shards too small to compute a CommP, just skip the `filecoin/offer`.
+		if err == nil {
+			shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
+			if err != nil {
+				return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
+			}
 
-		_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID})
-		if err != nil {
-			return fmt.Errorf("failed to offer shard %s: %w", shard.CID(), err)
+			_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID})
+			if err != nil {
+				return fmt.Errorf("failed to offer shard %s: %w", shard.CID(), err)
+			}
 		}
 
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {

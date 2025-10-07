@@ -156,6 +156,58 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 	})
+
+	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := mockclient.MockClient{T: t}
+
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+			return bytes.NewReader([]byte("VERY SHORT CAR")), nil
+		}
+
+		api := storacha.API{
+			Repo:        repo,
+			Client:      &client,
+			CarForShard: carForShard,
+		}
+
+		shardsApi := shards.API{
+			Repo: repo,
+		}
+
+		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		require.NoError(t, err)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
+		require.NoError(t, err)
+		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+
+		// It should `space/blob/add`...
+		require.Len(t, client.SpaceBlobAddInvocations, 1)
+
+		// ...and it should `space/blob/replicate`...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+
+		// ...but it should cleanly avoid `filecoin/offer`ing, which wouldn't work.
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+	})
 }
 
 func TestAddIndexesForUpload(t *testing.T) {
