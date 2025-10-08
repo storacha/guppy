@@ -154,8 +154,6 @@ var uploadSourcesListCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
-
 		sourceIDs, err := repo.ListSpaceSources(ctx, spaceDID)
 		if err != nil {
 			return err
@@ -172,8 +170,6 @@ var uploadSourcesListCmd = &cobra.Command{
 		if len(sourceIDs) == 0 {
 			fmt.Printf("No sources found for space %s. Add a source first with:\n\n$ %s %s <path>\n\n", spaceDID, uploadSourcesAddCmd.CommandPath(), spaceDID)
 		}
-
-		_ = api // to avoid unused variable error for now
 
 		return nil
 	},
