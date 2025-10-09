@@ -14,9 +14,15 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-var log = logging.Logger("preparation/uploads")
+var (
+	log    = logging.Logger("preparation/uploads")
+	tracer = otel.Tracer("preparation/uploads")
+)
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
@@ -86,7 +92,11 @@ func signal(work chan<- struct{}) {
 
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
 func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) (cid.Cid, error) {
-	eg, wCtx := bettererrgroup.WithContext(ctx)
+	ctx, span := tracer.Start(ctx, "ExecuteUpload", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer span.End()
 
 	var (
 		scansAvailable        = make(chan struct{}, 1)
@@ -95,6 +105,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	)
 
 	// Start the workers
+	eg, wCtx := bettererrgroup.WithContext(ctx)
 	eg.Go(func() error { return runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable) })
 	eg.Go(func() error {
 		return runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
@@ -121,6 +132,12 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 }
 
 func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
+	ctx, span := tracer.Start(ctx, "runScanWorker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer span.End()
+
 	return Worker(
 		ctx,
 		scansAvailable,
@@ -155,6 +172,12 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
 func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
+	ctx, span := tracer.Start(ctx, "runDAGScanWorker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer span.End()
+
 	return Worker(
 		ctx,
 		dagScansAvailable,
@@ -247,6 +270,12 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.
 func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
+	ctx, span := tracer.Start(ctx, "runStorachaWorker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer span.End()
+
 	return Worker(
 		ctx,
 		blobWork,
