@@ -125,16 +125,16 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	uploadsAPI = uploads.API{
-		Repo:                        repo,
-		ExecuteScan:                 scansAPI.ExecuteScan,
-		ExecuteDagScansForUpload:    dagsAPI.ExecuteDagScansForUpload,
-		AddNodeToUploadShards:       shardsAPI.AddNodeToUploadShards,
-		CloseUploadShards:           shardsAPI.CloseUploadShards,
-		SpaceBlobAddShardsForUpload: storachaAPI.SpaceBlobAddShardsForUpload,
-		AddIndexesForUpload:         storachaAPI.AddIndexesForUpload,
-		AddStorachaUploadForUpload:  storachaAPI.AddStorachaUploadForUpload,
-		RemoveBadFSEntry:            scansAPI.RemoveBadFSEntry,
-		RemoveBadNodes:              dagsAPI.RemoveBadNodes,
+		Repo:                       repo,
+		ExecuteScan:                scansAPI.ExecuteScan,
+		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
+		AddNodeToUploadShards:      shardsAPI.AddNodeToUploadShards,
+		CloseUploadShards:          shardsAPI.CloseUploadShards,
+		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
+		AddIndexesForUpload:        storachaAPI.AddIndexesForUpload,
+		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
+		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
+		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
 	}
 
 	return API{
