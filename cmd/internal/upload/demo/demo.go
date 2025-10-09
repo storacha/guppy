@@ -11,7 +11,13 @@ import (
 	"path"
 	"time"
 
+	"github.com/ipfs/go-cid"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multihash"
+	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
+	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
+	"github.com/storacha/go-libstoracha/capabilities/types"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
@@ -234,9 +240,58 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 					},
 				),
 			),
-		),
 
-		ctestutil.WithServerOptions(
+			server.WithServiceMethod(
+				spaceblobcap.Replicate.Can(),
+				server.Provide(
+					spaceblobcap.Replicate,
+					func(
+						ctx context.Context,
+						cap ucan.Capability[spaceblobcap.ReplicateCaveats],
+						inv invocation.Invocation,
+						context server.InvocationContext,
+					) (result.Result[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						sitePromises := make([]types.Promise, cap.Nb().Replicas)
+						for i := range sitePromises {
+							siteDigest, err := multihash.Encode(fmt.Appendf(nil, "test-replicated-site-%d", i), multihash.IDENTITY)
+							if err != nil {
+								return nil, nil, fmt.Errorf("encoding site digest: %w", err)
+							}
+							sitePromises[i] = types.Promise{
+								UcanAwait: types.Await{
+									Selector: ".out.ok.site",
+									Link:     cidlink.Link{Cid: cid.NewCidV1(cid.Raw, siteDigest)},
+								},
+							}
+						}
+						return result.Ok[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure](
+							spaceblobcap.ReplicateOk{
+								Site: sitePromises,
+							},
+						), nil, nil
+					},
+				),
+			),
+
+			server.WithServiceMethod(
+				filecoincap.Offer.Can(),
+				server.Provide(
+					filecoincap.Offer,
+					func(
+						ctx context.Context,
+						cap ucan.Capability[filecoincap.OfferCaveats],
+						inv invocation.Invocation,
+						context server.InvocationContext,
+					) (result.Result[filecoincap.OfferOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						return result.Ok[filecoincap.OfferOk, failure.IPLDBuilderFailure](
+							filecoincap.OfferOk{
+								Piece: cap.Nb().Piece,
+							},
+						), nil, nil
+					},
+				),
+			),
+
 			server.WithServiceMethod(
 				uploadcap.Add.Can(),
 				server.Provide(
