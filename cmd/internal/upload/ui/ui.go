@@ -32,6 +32,7 @@ func (c Canceled) Error() string {
 type uploadModel struct {
 	// Configuration
 	ctx     context.Context
+	cancel  context.CancelFunc
 	repo    *sqlrepo.Repo
 	api     preparation.API
 	uploads []*uploadsmodel.Upload
@@ -72,8 +73,8 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			m.err = Canceled{}
-			return m, tea.Quit
+			m.cancel()
+			return m, nil
 		default:
 			return m, nil
 		}
@@ -221,32 +222,32 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 	return tea.Tick(10*time.Millisecond, func(t time.Time) tea.Msg {
 		addedShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateAdded)
 		if err != nil {
-			panic(fmt.Errorf("getting added shards for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting added shards for upload %s: %w", uploadID, err)
 		}
 
 		closedShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
 		if err != nil {
-			panic(fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err)
 		}
 
 		openShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateOpen)
 		if err != nil {
-			panic(fmt.Errorf("getting open shards for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
 		}
 
 		bytesToDAGScan, err := repo.TotalBytesToScan(ctx, uploadID)
 		if err != nil {
-			panic(fmt.Errorf("getting total bytes to scan for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting total bytes to scan for upload %s: %w", uploadID, err)
 		}
 
 		filesToDAGScan, err := repo.FilesToDAGScan(ctx, uploadID, 6)
 		if err != nil {
-			panic(fmt.Errorf("getting info on remaining files for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting info on remaining files for upload %s: %w", uploadID, err)
 		}
 
 		shardedFiles, err := repo.ShardedFiles(ctx, uploadID, 6)
 		if err != nil {
-			panic(fmt.Errorf("getting info on sharded files for upload %s: %w", uploadID, err))
+			return fmt.Errorf("getting info on sharded files for upload %s: %w", uploadID, err)
 		}
 
 		return statsMsg{
@@ -266,8 +267,11 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		panic("no uploads provided to upload model")
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+
 	return uploadModel{
 		ctx:     ctx,
+		cancel:  cancel,
 		repo:    repo,
 		api:     api,
 		uploads: uploads,
