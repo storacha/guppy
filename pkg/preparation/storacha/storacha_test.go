@@ -31,7 +31,7 @@ import (
 // padding to every "CAR" to make sure it's definitely long enough.
 var padding = bytes.Repeat([]byte{0}, 65)
 
-func TestSpaceBlobAddShardsForUpload(t *testing.T) {
+func TestAddShardsForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
@@ -91,7 +91,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		secondShard := shards[0]
 
 		// Upload shards that are ready to go.
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// Reload shards
@@ -135,7 +135,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// Reload second shard
@@ -165,6 +165,11 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		client := mockclient.MockClient{T: t}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+			// Note that the decision to skip `filecoin/offer` is based on the size
+			// listed on the shard, which is based on the size of the nodes added to
+			// it, not the actual CAR bytes (which are written lazily). So the
+			// behavior is triggered by the node below being 1, while the short CAR
+			// is here to cause an error if we *do* try to `filecoin/offer` it.
 			return bytes.NewReader([]byte("VERY SHORT CAR")), nil
 		}
 
@@ -189,14 +194,14 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 
 		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
 		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
 		require.NoError(t, err)
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
 
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// It should `space/blob/add`...
