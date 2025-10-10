@@ -15,9 +15,15 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-var log = logging.Logger("preparation/scans")
+var (
+	log    = logging.Logger("preparation/scans")
+	tracer = otel.Tracer("preparation/scans")
+)
 
 // WalkerFunc is a function type that defines how to walk the file system.
 type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)
@@ -36,6 +42,11 @@ var _ uploads.ExecuteScanFunc = API{}.ExecuteScan
 var _ uploads.RemoveBadFSEntryFunc = API{}.RemoveBadFSEntry
 
 func (a API) ExecuteScan(ctx context.Context, uploadID id.UploadID, fsEntryCb func(model.FSEntry) error) error {
+	ctx, span := tracer.Start(ctx, "execute-scan", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+	))
+	defer span.End()
+
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("getting upload by ID: %w", err)

@@ -30,6 +30,9 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // SpaceBlobAddOption configures options for SpaceBlobAdd.
@@ -63,24 +66,40 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 // Returns the multihash of the added blob and the location commitment that contains details about where the
 // blob can be located, or an error if something went wrong.
 func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+	ctx, span := tracer.Start(ctx, "space-blob-add", trace.WithAttributes(
+		attribute.String("space", space.String()),
+	))
+	defer span.End()
+
 	// Configure options
 	cfg := &spaceBlobAddConfig{
-		putClient: http.DefaultClient,
+		putClient: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
 	}
 	for _, opt := range options {
 		opt(cfg)
 	}
 	putClient := cfg.putClient
 
+	_, readSpan := tracer.Start(ctx, "read-content")
 	contentBytes, err := io.ReadAll(content)
 	if err != nil {
+		readSpan.End()
 		return nil, nil, fmt.Errorf("reading content: %w", err)
 	}
+	readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
+	readSpan.End()
 
+	_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
+		attribute.Int("content-size", len(contentBytes)),
+	))
 	contentHash, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
 	if err != nil {
+		hashSpan.End()
 		return nil, nil, fmt.Errorf("computing content multihash: %w", err)
 	}
+	hashSpan.End()
 
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{
