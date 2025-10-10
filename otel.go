@@ -3,17 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/log"
-	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 )
@@ -71,24 +65,6 @@ func setupOTelSDK(ctx context.Context) (func(context.Context) error, error) {
 	shutdownFuncs = append(shutdownFuncs, tracerProvider.Shutdown)
 	otel.SetTracerProvider(tracerProvider)
 
-	// Set up meter provider.
-	meterProvider, err := newMeterProvider(ctx, res)
-	if err != nil {
-		handleErr(err)
-		return shutdown, err
-	}
-	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
-	otel.SetMeterProvider(meterProvider)
-
-	// Set up logger provider.
-	loggerProvider, err := newLoggerProvider(ctx, res)
-	if err != nil {
-		handleErr(err)
-		return shutdown, err
-	}
-	shutdownFuncs = append(shutdownFuncs, loggerProvider.Shutdown)
-	global.SetLoggerProvider(loggerProvider)
-
 	return shutdown, err
 }
 
@@ -100,8 +76,6 @@ func newPropagator() propagation.TextMapPropagator {
 }
 
 func newTracerProvider(ctx context.Context, res *resource.Resource) (*trace.TracerProvider, error) {
-	// traceExporter, err := stdouttrace.New(
-	// 	stdouttrace.WithPrettyPrint())
 	traceExporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint("localhost:4318"),
 		otlptracehttp.WithInsecure(),
@@ -111,50 +85,8 @@ func newTracerProvider(ctx context.Context, res *resource.Resource) (*trace.Trac
 	}
 
 	tracerProvider := trace.NewTracerProvider(
-		trace.WithBatcher(
-			traceExporter,
-			// Default is 5s. Set to 1s for demonstrative purposes.
-			trace.WithBatchTimeout(time.Second),
-		),
+		trace.WithBatcher(traceExporter),
 		trace.WithResource(res),
 	)
 	return tracerProvider, nil
-}
-
-func newMeterProvider(ctx context.Context, res *resource.Resource) (*metric.MeterProvider, error) {
-	metricExporter, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpoint("localhost:4318"),
-		otlpmetrichttp.WithInsecure(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(
-			metric.NewPeriodicReader(
-				metricExporter,
-				// Default is 1m. Set to 3s for demonstrative purposes.
-				metric.WithInterval(3*time.Second),
-			),
-		),
-		metric.WithResource(res),
-	)
-	return meterProvider, nil
-}
-
-func newLoggerProvider(ctx context.Context, res *resource.Resource) (*log.LoggerProvider, error) {
-	logExporter, err := otlploghttp.New(ctx,
-		otlploghttp.WithEndpoint("localhost:4318"),
-		otlploghttp.WithInsecure(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	loggerProvider := log.NewLoggerProvider(
-		log.WithProcessor(log.NewBatchProcessor(logExporter)),
-		log.WithResource(res),
-	)
-	return loggerProvider, nil
 }
