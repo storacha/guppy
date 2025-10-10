@@ -3,13 +3,21 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/guppy/cmd"
 )
 
+var log = logging.Logger("main")
+
 func main() {
 	var err error
+	defer func() {
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}()
+
 	ctx := context.Background()
 
 	// Set up OpenTelemetry.
@@ -23,11 +31,5 @@ func main() {
 		err = errors.Join(err, otelShutdown(context.Background()))
 	}()
 
-	defer func() {
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}()
-
-	cmd.ExecuteContext(ctx)
+	err = cmd.ExecuteContext(ctx)
 }
