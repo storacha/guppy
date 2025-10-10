@@ -30,6 +30,7 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -72,7 +73,9 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	// Configure options
 	cfg := &spaceBlobAddConfig{
-		putClient: http.DefaultClient,
+		putClient: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
 	}
 	for _, opt := range options {
 		opt(cfg)
