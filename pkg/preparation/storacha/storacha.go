@@ -21,6 +21,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
@@ -94,8 +95,14 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	commpCalc := &commp.Calc{}
 
 	go func() {
-		defer addWriter.Close()
-		mw := io.MultiWriter(addWriter, commpCalc)
+		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
+		meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
+		defer meteredAddWriter.Close()
+		defer meteredCommpCalc.Close()
+		mw := io.MultiWriter(
+			meteredAddWriter,
+			meteredCommpCalc,
+		)
 		_, err := io.Copy(mw, car)
 		if err != nil {
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
