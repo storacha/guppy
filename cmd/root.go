@@ -27,15 +27,11 @@ var rootCmd = &cobra.Command{
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
-func ExecuteContext(ctx context.Context) {
+func ExecuteContext(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "cli")
 	defer span.End()
 
-	err := rootCmd.ExecuteContext(ctx)
-
-	if err != nil {
-		log.Fatal(err)
-	}
+	return rootCmd.ExecuteContext(ctx)
 }
 
 // commandPath returns the command path for a `cobra.Command`. Where
