@@ -33,6 +33,10 @@ var uploadCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
+		// The command line was valid. Past here, errors do not mean the user needs
+		// to see the usage.
+		cmd.SilenceUsage = true
+
 		repo, _, err := makeRepo(ctx)
 		if err != nil {
 			return err
@@ -51,7 +55,6 @@ var uploadCmd = &cobra.Command{
 		if len(uploads) == 0 {
 			fmt.Printf("No sources found for space. Add a source first with:\n\n$ %s %s <path>\n\n", uploadSourcesAddCmd.CommandPath(), spaceDID)
 			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
 			return fmt.Errorf("no uploads found for space %s", spaceDID)
 		}
 
@@ -154,8 +157,6 @@ var uploadSourcesListCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
-
 		sourceIDs, err := repo.ListSpaceSources(ctx, spaceDID)
 		if err != nil {
 			return err
@@ -172,8 +173,6 @@ var uploadSourcesListCmd = &cobra.Command{
 		if len(sourceIDs) == 0 {
 			fmt.Printf("No sources found for space %s. Add a source first with:\n\n$ %s %s <path>\n\n", spaceDID, uploadSourcesAddCmd.CommandPath(), spaceDID)
 		}
-
-		_ = api // to avoid unused variable error for now
 
 		return nil
 	},
