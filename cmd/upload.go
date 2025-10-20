@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
@@ -16,6 +18,8 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
+
+var uploadDbPath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
@@ -65,6 +69,7 @@ var uploadCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(uploadCmd)
+	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "db", "", "Path to the preparation database file (default: ~/.storacha/preparation.db)")
 }
 
 var uploadSourcesCmd = &cobra.Command{
@@ -197,5 +202,23 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, func() error, error) {
-	return repo.Make(ctx, "guppy.db")
+	dbPath := uploadDbPath
+	if dbPath == "" {
+		// Use default path: ~/.storacha/preparation.db
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get user home directory: %w", err)
+		}
+
+		storachaDir := filepath.Join(homedir, ".storacha")
+
+		// Create the directory if it doesn't exist
+		if err := os.MkdirAll(storachaDir, 0700); err != nil {
+			return nil, nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
+		}
+
+		dbPath = filepath.Join(storachaDir, "preparation.db")
+	}
+
+	return repo.Make(ctx, dbPath)
 }
