@@ -165,6 +165,11 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		client := mockclient.MockClient{T: t}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+			// Note that the decision to skip `filecoin/offer` is based on the size
+			// listed on the shard, which is based on the size of the nodes added to
+			// it, not the actual CAR bytes (which are written lazily). So the
+			// behavior is triggered by the node below being 1, while the short CAR
+			// is here to cause an error if we *do* try to `filecoin/offer` it.
 			return bytes.NewReader([]byte("VERY SHORT CAR")), nil
 		}
 
@@ -189,7 +194,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 
 		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
 		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
 		require.NoError(t, err)
