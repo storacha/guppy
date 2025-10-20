@@ -296,7 +296,7 @@ func TestPoll(t *testing.T) {
 			receiptclient.WithRetries(3),
 		)
 		require.Error(t, err)
-		require.ErrorContains(t, err, "receipt was not found after 4 attempts")
+		require.ErrorContains(t, err, "not found after 4 attempts")
 		require.Equal(t, 4, n) // 3 retries = 4 requests
 	})
 
