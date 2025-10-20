@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/cmd/internal/upload/repo"
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/preparation"
@@ -42,14 +41,14 @@ var uploadCmd = &cobra.Command{
 		// to see the usage.
 		cmd.SilenceUsage = true
 
-		repo, _, err := makeRepo(ctx)
+		repo, err := makeRepo(ctx)
 		if err != nil {
 			return err
 		}
 		// Currently leads to a race condition with the app still running delayed DB
 		// queries. We can deal with this issue later, since the process ends at the
 		// end of this function anyhow.
-		// defer closeDb()
+		// defer repo.Close()
 
 		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
 		uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
@@ -93,11 +92,11 @@ but this may be expanded in the future to include other types of data sources.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, closeDb, err := makeRepo(ctx)
+		repo, err := makeRepo(ctx)
 		if err != nil {
 			return err
 		}
-		defer closeDb()
+		defer repo.Close()
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
@@ -160,11 +159,11 @@ var uploadSourcesListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, closeDb, err := makeRepo(ctx)
+		repo, err := makeRepo(ctx)
 		if err != nil {
 			return err
 		}
-		defer closeDb()
+		defer repo.Close()
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
@@ -201,24 +200,24 @@ func init() {
 	uploadSourcesCmd.AddCommand(uploadSourcesListCmd)
 }
 
-func makeRepo(ctx context.Context) (*sqlrepo.Repo, func() error, error) {
+func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
 	dbPath := uploadDbPath
 	if dbPath == "" {
 		// Use default path: ~/.storacha/preparation.db
 		homedir, err := os.UserHomeDir()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get user home directory: %w", err)
+			return nil, fmt.Errorf("failed to get user home directory: %w", err)
 		}
 
 		storachaDir := filepath.Join(homedir, ".storacha")
 
 		// Create the directory if it doesn't exist
 		if err := os.MkdirAll(storachaDir, 0700); err != nil {
-			return nil, nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
+			return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
 		}
 
 		dbPath = filepath.Join(storachaDir, "preparation.db")
 	}
 
-	return repo.Make(ctx, dbPath)
+	return preparation.OpenRepo(ctx, dbPath)
 }
