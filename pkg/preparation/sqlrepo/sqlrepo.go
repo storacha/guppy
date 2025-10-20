@@ -34,3 +34,7 @@ func New(db *sql.DB) *Repo {
 type Repo struct {
 	db *sql.DB
 }
+
+func (r *Repo) Close() error {
+	return r.db.Close()
+}
