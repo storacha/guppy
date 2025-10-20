@@ -377,7 +377,7 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 	io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("uploading blob: %s", resp.Status)
 	}
 
