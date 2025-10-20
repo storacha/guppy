@@ -40,6 +40,7 @@ type Repo interface {
 type StorachaClient = storacha.Client
 
 type API struct {
+	Repo    Repo
 	Spaces  spaces.API
 	Uploads uploads.API
 	Sources sources.API
@@ -138,6 +139,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	return API{
+		Repo:    repo,
 		Spaces:  spacesAPI,
 		Uploads: uploadsAPI,
 		Sources: sourcesAPI,
@@ -174,6 +176,10 @@ func (a API) FindOrCreateUploads(ctx context.Context, spaceDID did.DID) ([]*uplo
 
 func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {
 	return a.Uploads.GetUploadByID(ctx, uploadID)
+}
+
+func (a API) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
+	return a.Repo.AddSourceToSpace(ctx, spaceDID, sourceID)
 }
 
 func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
