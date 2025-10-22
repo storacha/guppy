@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -29,7 +30,7 @@ type Client interface {
 	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
 	SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error
 	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
-	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, error)
+	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error)
 }
 
 var _ Client = (*client.Client)(nil)
@@ -66,7 +67,7 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.CID(), spaceDID, err)
 		}
 
-		_, err = a.Client.SpaceBlobReplicate(
+		_, _, err = a.Client.SpaceBlobReplicate(
 			ctx,
 			spaceDID,
 			types.Blob{
@@ -109,7 +110,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
 		}
 
-		_, err = a.Client.SpaceBlobReplicate(
+		_, _, err = a.Client.SpaceBlobReplicate(
 			ctx,
 			spaceDID,
 			types.Blob{

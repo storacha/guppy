@@ -76,7 +76,7 @@ func TestSpaceBlobReplicate(t *testing.T) {
 		blob := types.Blob{Digest: digest, Size: 123}
 
 		location := libtestutil.RandomLocationDelegation(t)
-		replicateOk, err := c.SpaceBlobReplicate(t.Context(), space.DID(), blob, 5, location)
+		replicateOk, _, err := c.SpaceBlobReplicate(t.Context(), space.DID(), blob, 5, location)
 		require.NoError(t, err)
 
 		require.Len(t, invocations, 1, "expected exactly one invocation to be made")

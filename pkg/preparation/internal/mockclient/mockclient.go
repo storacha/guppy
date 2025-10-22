@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
@@ -85,7 +86,7 @@ func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, spa
 	return nil
 }
 
-func (m *MockClient) SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, error) {
+func (m *MockClient) SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error) {
 	m.SpaceBlobReplicateInvocations = append(m.SpaceBlobReplicateInvocations, spaceBlobReplicateInvocation{
 		Space:              space,
 		Blob:               blob,
@@ -104,7 +105,7 @@ func (m *MockClient) SpaceBlobReplicate(ctx context.Context, space did.DID, blob
 			},
 		}
 	}
-	return spaceblobcap.ReplicateOk{Site: sitePromises}, nil
+	return spaceblobcap.ReplicateOk{Site: sitePromises}, nil, nil
 }
 
 func (m *MockClient) UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error) {
