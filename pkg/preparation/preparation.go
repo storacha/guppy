@@ -55,7 +55,7 @@ type config struct {
 	maxNodesPerIndex    int
 }
 
-func NewAPI(repo Repo, client StorachaClient, space did.DID, options ...Option) API {
+func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
 		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
 		maxNodesPerIndex:    defaultMaxNodesPerIndex,
@@ -168,8 +168,8 @@ func (a API) CreateSource(ctx context.Context, name string, path string, options
 	return a.Sources.CreateSource(ctx, name, path, options...)
 }
 
-func (a API) CreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmodel.Upload, error) {
-	return a.Uploads.CreateUploads(ctx, spaceDID)
+func (a API) FindOrCreateUploads(ctx context.Context, spaceDID did.DID) ([]*uploadsmodel.Upload, error) {
+	return a.Uploads.FindOrCreateUploads(ctx, spaceDID)
 }
 
 func (a API) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error) {

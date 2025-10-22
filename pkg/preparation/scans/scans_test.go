@@ -36,7 +36,7 @@ func newUploadAndScansAPI(t *testing.T) (*uploadmodel.Upload, scans.API) {
 	spaceDID := testutil.RandomDID(t)
 
 	repo := sqlrepo.New(testdb.CreateTestDB(t))
-	uploads, err := repo.CreateUploads(t.Context(), spaceDID, []id.SourceID{sourceID})
+	uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{sourceID})
 	require.NoError(t, err)
 	require.Len(t, uploads, 1)
 	upload := uploads[0]

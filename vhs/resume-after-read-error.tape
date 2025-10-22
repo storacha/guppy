@@ -21,12 +21,12 @@ Set FontSize 18
 Set Width 1200
 Set Height 900
 
-Type "go run -tags wip . large-upload-demo --alter-data"
+Type "go run -tags wip . upload-demo --alter-data"
 Enter
 Wait+Screen /Upload failed due to out-of-date scan:/
 
 Sleep 2s
-Type "go run -tags wip . large-upload-demo --resume"
+Type "go run -tags wip . upload-demo --resume"
 Enter
 Wait@60s
 Sleep 2s

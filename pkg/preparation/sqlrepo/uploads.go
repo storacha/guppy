@@ -62,8 +62,8 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 	return upload, err
 }
 
-// CreateUploads creates uploads for a given space and source IDs.
-func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
+// FindOrCreateUploads creates uploads for a given space and source IDs.
+func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
 	var uploads []*model.Upload
 	for _, sourceID := range sourceIDs {
 		upload, err := model.NewUpload(spaceDID, sourceID)
@@ -80,10 +80,23 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 				updated_at,
 				root_fs_entry_id,
 				root_cid
-			) VALUES (?, ?, ?, ?, ?, ?, ?)`
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(space_did, source_id)
+				-- Force conflicts to return the row rather than completely ignore it.
+				DO UPDATE SET id = id
+			RETURNING
+				id,
+				space_did,
+				source_id,
+				created_at,
+				updated_at,
+				root_fs_entry_id,
+				root_cid
+			`
 
 		err = model.WriteUploadToDatabase(func(
-			id id.UploadID,
+			uploadID id.UploadID,
 			spaceDID did.DID,
 			sourceID id.SourceID,
 			createdAt,
@@ -91,9 +104,9 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 			rootFSEntryID *id.FSEntryID,
 			rootCID cid.Cid,
 		) error {
-			_, err := r.db.ExecContext(ctx,
+			row := r.db.QueryRowContext(ctx,
 				insertQuery,
-				id,
+				uploadID,
 				util.DbDID(&spaceDID),
 				sourceID,
 				createdAt.Unix(),
@@ -101,13 +114,40 @@ func (r *Repo) CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []
 				Null(rootFSEntryID),
 				util.DbCid(&rootCID),
 			)
+
+			readUpload, err := model.ReadUploadFromDatabase(func(
+				id *id.UploadID,
+				spaceDID *did.DID,
+				sourceID *id.SourceID,
+				createdAt,
+				updatedAt *time.Time,
+				rootFSEntryID **id.FSEntryID,
+				rootCID *cid.Cid,
+			) error {
+				err := row.Scan(
+					id,
+					util.DbDID(spaceDID),
+					sourceID,
+					util.TimestampScanner(createdAt),
+					util.TimestampScanner(updatedAt),
+					rootFSEntryID,
+					util.DbCid(rootCID),
+				)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+
+			uploads = append(uploads, readUpload)
+
 			return err
 		}, upload)
 		if err != nil {
 			return nil, fmt.Errorf("failed to write upload to database for space %s and source %s: %w", spaceDID, sourceID, err)
 		}
-		uploads = append(uploads, upload)
 	}
+
 	return uploads, nil
 }
 

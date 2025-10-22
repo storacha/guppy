@@ -21,13 +21,13 @@ Set FontSize 18
 Set Width 1200
 Set Height 900
 
-Type "go run -tags wip . large-upload-demo"
+Type "go run -tags wip . upload-demo"
 Enter
 Sleep 5s
 Ctrl+C
 Sleep 1s
 
-Type "go run -tags wip . large-upload-demo --resume"
+Type "go run -tags wip . upload-demo --resume"
 Enter
 Wait@60s
 Sleep 2s

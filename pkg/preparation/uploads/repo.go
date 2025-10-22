@@ -13,8 +13,8 @@ import (
 type Repo interface {
 	// GetUploadByID retrieves an upload by its unique ID.
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadmodel.Upload, error)
-	// CreateUploads creates uploads for a given space
-	CreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*uploadmodel.Upload, error)
+	// FindOrCreateUploads ensures uploads exist for a given space
+	FindOrCreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*uploadmodel.Upload, error)
 	// UpdateUpload updates the state of an upload in the repository.
 	UpdateUpload(ctx context.Context, upload *uploadmodel.Upload) error
 	// CIDForFSEntry retrieves the CID for a file system entry by its ID.

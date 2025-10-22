@@ -1,7 +1,8 @@
-package largeupload
+package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -17,6 +18,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -29,11 +31,11 @@ func (c Canceled) Error() string {
 
 type uploadModel struct {
 	// Configuration
-	ctx    context.Context
-	repo   *sqlrepo.Repo
-	api    preparation.API
-	upload *uploadsmodel.Upload
-	rng    *rand.Rand
+	ctx     context.Context
+	repo    *sqlrepo.Repo
+	api     preparation.API
+	uploads []*uploadsmodel.Upload
+	rng     *rand.Rand
 
 	// State
 	recentAddedShards  []*shardsmodel.Shard
@@ -54,10 +56,15 @@ type uploadModel struct {
 }
 
 func (m uploadModel) Init() tea.Cmd {
-	return tea.Batch(
-		executeUpload(m.ctx, m.api, m.upload),
-		checkStats(m.ctx, m.repo, m.upload.ID()),
-	)
+	cmds := make([]tea.Cmd, 0, len(m.uploads)+1)
+	for _, u := range m.uploads {
+		cmds = append(cmds, executeUpload(m.ctx, m.api, u))
+	}
+	// TK: Handle stats for more than one upload. Right now, we're just looking at
+	// the first one to make the UI easier, since that's almost always what we
+	// have.
+	cmds = append(cmds, checkStats(m.ctx, m.repo, m.uploads[0].ID()))
+	return tea.Batch(cmds...)
 }
 
 func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -111,7 +118,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filesToDAGScan = msg.filesToDAGScan
 		m.shardedFiles = msg.shardedFiles
 
-		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, m.upload.ID()))...)
+		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
 
 	case error:
 		m.err = msg
@@ -139,8 +146,6 @@ func (m uploadModel) View() string {
 	scannedColor := lipgloss.Color("#E88B8D")
 
 	var output strings.Builder
-
-	output.WriteString("Uploading " + m.upload.ID().String() + "\n\n")
 
 	style := lipgloss.NewStyle()
 
@@ -203,6 +208,7 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 }
 
 type statsMsg struct {
+	uploadID       id.UploadID
 	addedShards    []*shardsmodel.Shard
 	closedShards   []*shardsmodel.Shard
 	openShards     []*shardsmodel.Shard
@@ -244,6 +250,7 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 		}
 
 		return statsMsg{
+			uploadID:       uploadID,
 			addedShards:    addedShards,
 			closedShards:   closedShards,
 			openShards:     openShards,
@@ -254,37 +261,17 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 	})
 }
 
-var brailleSpinner = spinner.Spinner{
-	Frames: []string{
-		"⣸",
-		"⡼",
-		"⡞",
-		"⢏",
-		"⢣",
-		"⢱",
-		"⡸",
-		"⡜",
-		"⡎",
-		"⣇",
-		"⢧",
-		"⢳",
-		"⡹",
-		"⡜",
-		"⡎",
-		"⢇",
-		"⢣",
-		"⢱",
-	},
-	FPS: time.Second / 10,
-}
+func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) uploadModel {
+	if len(uploads) == 0 {
+		panic("no uploads provided to upload model")
+	}
 
-func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, upload *uploadsmodel.Upload) uploadModel {
 	return uploadModel{
-		ctx:    ctx,
-		repo:   repo,
-		api:    api,
-		upload: upload,
-		rng:    rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
+		ctx:     ctx,
+		repo:    repo,
+		api:     api,
+		uploads: uploads,
+		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
 	}
 }
 
@@ -353,4 +340,47 @@ func (mb multiBar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (mb multiBar) View() string {
 	return renderBars(mb.bars, mb.width)
+}
+
+func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) error {
+	if len(uploads) == 0 {
+		return fmt.Errorf("no uploads provided to upload UI")
+	}
+
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads)).Run()
+	if err != nil {
+		return fmt.Errorf("command failed to run upload UI: %w", err)
+	}
+	um := m.(uploadModel)
+
+	if um.err != nil {
+		var errBadNodes types.ErrBadNodes
+		if errors.As(um.err, &errBadNodes) {
+			var sb strings.Builder
+			sb.WriteString("\nUpload failed due to out-of-date scan:\n")
+			for i, ebn := range errBadNodes.Errs() {
+				if i >= 3 {
+					sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
+					break
+				}
+				sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+			}
+			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
+
+			fmt.Print(sb.String())
+
+			return nil
+		}
+
+		if errors.Is(um.err, context.Canceled) || errors.Is(um.err, Canceled{}) {
+			fmt.Println("\nUpload canceled.")
+			return nil
+		}
+
+		return fmt.Errorf("upload failed: %w", um.err)
+	}
+
+	fmt.Println("Upload complete!")
+
+	return nil
 }
