@@ -148,7 +148,7 @@ func execute[Caveats, Out any](
 	ctx context.Context,
 	c *Client,
 	capParser validator.CapabilityParser[Caveats],
-	inv invocation.Invocation,
+	inv invocation.IssuedInvocation,
 	successType schema.Type,
 ) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
