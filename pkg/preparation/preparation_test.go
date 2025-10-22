@@ -21,11 +21,13 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"
 	carblockstore "github.com/ipld/go-car/v2/blockstore"
+	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"github.com/spf13/afero"
 	"github.com/storacha/go-libstoracha/blobindex"
+	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
 	"github.com/storacha/go-libstoracha/capabilities/types"
@@ -71,6 +73,7 @@ func prepareTestClient(
 	putClient *http.Client,
 	indexCaps *[]ucan.Capability[spaceindexcap.AddCaveats],
 	replicateCaps *[]ucan.Capability[spaceblobcap.ReplicateCaveats],
+	offerCaps *[]ucan.Capability[filecoincap.OfferCaveats],
 	uploadAddCaps *[]ucan.Capability[uploadcap.AddCaveats],
 ) *ctestutil.ClientWithCustomPut {
 	client := &ctestutil.ClientWithCustomPut{
@@ -93,9 +96,7 @@ func prepareTestClient(
 						},
 					),
 				),
-			),
 
-			ctestutil.WithServerOptions(
 				server.WithServiceMethod(
 					spaceblobcap.Replicate.Can(),
 					server.Provide(
@@ -128,9 +129,27 @@ func prepareTestClient(
 						},
 					),
 				),
-			),
 
-			ctestutil.WithServerOptions(
+				server.WithServiceMethod(
+					filecoincap.Offer.Can(),
+					server.Provide(
+						filecoincap.Offer,
+						func(
+							ctx context.Context,
+							cap ucan.Capability[filecoincap.OfferCaveats],
+							inv invocation.Invocation,
+							context server.InvocationContext,
+						) (result.Result[filecoincap.OfferOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							*offerCaps = append(*offerCaps, cap)
+							return result.Ok[filecoincap.OfferOk, failure.IPLDBuilderFailure](
+								filecoincap.OfferOk{
+									Piece: cap.Nb().Piece,
+								},
+							), nil, nil
+						},
+					),
+				),
+
 				server.WithServiceMethod(
 					uploadcap.Add.Can(),
 					server.Provide(
@@ -200,8 +219,9 @@ func TestExecuteUpload(t *testing.T) {
 		putClient := ctestutil.NewPutClient()
 		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
 		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
+		var offerCaps []ucan.Capability[filecoincap.OfferCaveats]
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
-		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &uploadAddCaps)
+		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -236,10 +256,6 @@ func TestExecuteUpload(t *testing.T) {
 			})
 		}
 		replicatedBlobDescs := make([]types.Blob, 0, len(replicateCaps))
-		for _, i := range replicateCaps {
-			replicatedBlobDescs = append(replicatedBlobDescs, i.Nb().Blob)
-		}
-		require.ElementsMatch(t, putBlobDescs, replicatedBlobDescs, "expected all PUT blobs to be replicated")
 
 		for _, i := range replicateCaps {
 			require.Equal(t, space.DID().String(), i.With(), "expected `space/blob/replicate` invocation to be for the correct space")
@@ -247,7 +263,24 @@ func TestExecuteUpload(t *testing.T) {
 
 			// Verifying the correct site is left to lower level tests.
 			require.NotNil(t, uint(3), i.Nb().Site, "expected `space/blob/replicate` to provide a site")
+
+			replicatedBlobDescs = append(replicatedBlobDescs, i.Nb().Blob)
 		}
+		require.ElementsMatch(t, putBlobDescs, replicatedBlobDescs, "expected all PUT blobs to be replicated")
+
+		require.Len(t, offerCaps, 5, "expected the 5 shards to be `filecoin/offer`ed")
+		putLinks := make([]ipld.Link, 0, putBlobs.Size())
+		for digest := range putBlobs.Iterator() {
+			putLink := cidlink.Link{Cid: cid.NewCidV1(uint64(multicodec.Car), digest)}
+			if putLink.Cid != indexCIDLink.Cid {
+				putLinks = append(putLinks, putLink)
+			}
+		}
+		offeredLinks := make([]ipld.Link, 0, len(offerCaps))
+		for _, i := range offerCaps {
+			offeredLinks = append(offeredLinks, i.Nb().Content)
+		}
+		require.ElementsMatch(t, putLinks, offeredLinks, "expected all PUT shards to be `filecoin/offer`ed")
 
 		require.Len(t, uploadAddCaps, 1, "expected only one `upload/add` invocation")
 		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
@@ -305,8 +338,9 @@ func TestExecuteUpload(t *testing.T) {
 
 		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
 		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
+		var offerCaps []ucan.Capability[filecoincap.OfferCaveats]
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
-		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &uploadAddCaps)
+		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
 		api := preparation.NewAPI(
 			repo,
@@ -325,6 +359,8 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 2, putBlobs.Size(), "expected only 2 shards to be added so far")
+		require.Len(t, replicateCaps, 2, "expected only 2 shards to be replicated so far")
+		require.Len(t, offerCaps, 2, "expected only 2 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
@@ -341,6 +377,8 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
+		require.Len(t, replicateCaps, 6, "expected 5 shards + 1 index to be replicated")
+		require.Len(t, offerCaps, 5, "expected the 5 shards to be `filecoin/offer`ed")
 
 		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")

@@ -7,6 +7,8 @@ import (
 	"io"
 	"testing"
 
+	commcid "github.com/filecoin-project/go-fil-commcid"
+	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
@@ -25,8 +27,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// commP is not defined for inputs shorter than 65 bytes, so add 65 bytes of
+// padding to every "CAR" to make sure it's definitely long enough.
+var padding = bytes.Repeat([]byte{0}, 65)
+
 func TestSpaceBlobAddShardsForUpload(t *testing.T) {
-	t.Run("`space/blob/add`s a CAR for each shard", func(t *testing.T) {
+	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
@@ -34,7 +40,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		client := mockclient.MockClient{T: t}
 
 		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			return bytes.NewReader(fmt.Appendf(nil, "CAR OF SHARD: %s", shardID)), nil
+			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
 		}
 
 		api := storacha.API{
@@ -97,7 +103,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
 
 		// This run should `space/blob/add` the first, closed shard.
-		expectedData := fmt.Appendf(nil, "CAR OF SHARD: %s", firstShard.ID())
+		expectedData := fmt.Append(nil, "CAR OF SHARD: ", firstShard.ID(), padding)
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
 		require.Equal(t, expectedData, client.SpaceBlobAddInvocations[0].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
@@ -109,6 +115,22 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[0].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[0].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
+
+		// Then it should `filecoin/offer` it.
+		require.Len(t, client.FilecoinOfferInvocations, 1)
+		require.Equal(t, spaceDID, client.FilecoinOfferInvocations[0].Space)
+		require.Equal(t, cidlink.Link{Cid: firstShard.CID()}, client.FilecoinOfferInvocations[0].Content)
+
+		cp := &commp.Calc{}
+		_, err = cp.Write(expectedData)
+		require.NoError(t, err)
+		digest, _, err := cp.Digest()
+		require.NoError(t, err)
+		shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(digest, firstShard.Size())
+		require.NoError(t, err)
+		shardPieceLink := cidlink.Link{Cid: shardPieceCID}
+
+		require.Equal(t, shardPieceLink, client.FilecoinOfferInvocations[0].Piece)
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
@@ -123,7 +145,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
-		require.Equal(t, fmt.Appendf(nil, "CAR OF SHARD: %s", secondShard.ID()), client.SpaceBlobAddInvocations[1].BlobAdded)
+		require.Equal(t, fmt.Append(nil, "CAR OF SHARD: ", secondShard.ID(), padding), client.SpaceBlobAddInvocations[1].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
 
 		// Then it should `space/blob/replicate` it.
@@ -134,10 +156,67 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 	})
+
+	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := mockclient.MockClient{T: t}
+
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+			// Note that the decision to skip `filecoin/offer` is based on the size
+			// listed on the shard, which is based on the size of the nodes added to
+			// it, not the actual CAR bytes (which are written lazily). So the
+			// behavior is triggered by the node below being 1, while the short CAR
+			// is here to cause an error if we *do* try to `filecoin/offer` it.
+			return bytes.NewReader([]byte("VERY SHORT CAR")), nil
+		}
+
+		api := storacha.API{
+			Repo:        repo,
+			Client:      &client,
+			CarForShard: carForShard,
+		}
+
+		shardsApi := shards.API{
+			Repo: repo,
+		}
+
+		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1, spaceDID, "some/path", source.ID(), 0)
+		require.NoError(t, err)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
+		require.NoError(t, err)
+		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+
+		// It should `space/blob/add`...
+		require.Len(t, client.SpaceBlobAddInvocations, 1)
+
+		// ...and it should `space/blob/replicate`...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+
+		// ...but it should cleanly avoid `filecoin/offer`ing, which wouldn't work.
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+	})
 }
 
 func TestAddIndexesForUpload(t *testing.T) {
-	t.Run("`space/blob/add`s an index CAR", func(t *testing.T) {
+	t.Run("`space/blob/add`s and `space/blob/replicate`s index CARs", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
@@ -223,7 +302,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 
 		rootLink := testutil.RandomCID(t)
 
-		shard1Digest, err := multihash.Sum([]byte("CAR OF SHARD 1"), multihash.SHA2_256, -1)
+		shard1Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 1"), padding...), multihash.SHA2_256, -1)
 		require.NoError(t, err)
 		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
 		require.NoError(t, err)
@@ -234,7 +313,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
 
-		shard2Digest, err := multihash.Sum([]byte("CAR OF SHARD 2"), multihash.SHA2_256, -1)
+		shard2Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 2"), padding...), multihash.SHA2_256, -1)
 		require.NoError(t, err)
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
 		require.NoError(t, err)
