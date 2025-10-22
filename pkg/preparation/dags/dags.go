@@ -17,12 +17,18 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const BlockSize = 1 << 20         // 1 MiB
 const DefaultLinksPerBlock = 1024 // Default number of links per block for UnixFS
 
-var log = logging.Logger("preparation/dags")
+var (
+	log    = logging.Logger("preparation/dags")
+	tracer = otel.Tracer("preparation/dags")
+)
 
 func init() {
 	// Set the default links per block for UnixFS.
@@ -45,6 +51,11 @@ var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
 	for {
+		ctx, span := tracer.Start(ctx, "dag-scans-batch", trace.WithAttributes(
+			attribute.String("upload.id", uploadID.String()),
+		))
+		defer span.End() // In case of early return
+
 		dagScans, err := a.Repo.IncompleteDAGScansForUpload(ctx, uploadID)
 		if err != nil {
 			return fmt.Errorf("getting dag scans for upload %s: %w", uploadID, err)
@@ -63,8 +74,13 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 			if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
 				return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 			}
+
 			executions++
+			span.SetAttributes(attribute.Int("executed", executions))
 		}
+
+		span.End()
+
 		if executions == 0 {
 			return nil // No scans executed, only awaiting children handled and no pending scans left
 		}

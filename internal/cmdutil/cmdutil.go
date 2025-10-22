@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -16,11 +17,12 @@ import (
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/transport/car"
-	"github.com/storacha/go-ucanto/transport/http"
+	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const defaultServiceName = "staging.up.storacha.network"
@@ -34,6 +36,10 @@ func envSigner() (principal.Signer, error) {
 	}
 
 	return signer.Parse(str)
+}
+
+var tracedHttpClient = &http.Client{
+	Transport: otelhttp.NewTransport(http.DefaultTransport),
 }
 
 // MustGetClient creates a new client suitable for the CLI, using stored data,
@@ -90,7 +96,7 @@ func MustGetClient(proofs ...delegation.Delegation) *client.Client {
 		append(
 			clientOptions,
 			client.WithConnection(MustGetConnection()),
-			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL())),
+			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(), receiptclient.WithHTTPClient(tracedHttpClient))),
 		)...,
 	)
 	if err != nil {
@@ -127,7 +133,7 @@ func MustGetConnection() uclient.Connection {
 	}
 
 	// HTTP transport and CAR encoding
-	channel := http.NewChannel(serviceURL)
+	channel := uhttp.NewChannel(serviceURL, uhttp.WithClient(tracedHttpClient))
 	codec := car.NewOutboundCodec()
 
 	conn, err := uclient.NewConnection(servicePrincipal, channel, uclient.WithOutboundCodec(codec))

@@ -25,9 +25,15 @@ import (
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client/nodevalue"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-var log = logging.Logger("client")
+var (
+	log    = logging.Logger("github.com/storacha/guppy/pkg/client")
+	tracer = otel.Tracer("github.com/storacha/guppy/pkg/client")
+)
 
 type Client struct {
 	connection     uclient.Connection
@@ -151,6 +157,12 @@ func execute[Caveats, Out any](
 	inv invocation.IssuedInvocation,
 	successType schema.Type,
 ) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
+	ctx, span := tracer.Start(ctx, "UCAN "+capParser.Can(), trace.WithAttributes(
+		attribute.String("invocation.ability", capParser.Can()),
+		attribute.String("invocation.audience", inv.Audience().DID().String()),
+	))
+	defer span.End()
+
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
 	if err != nil {
 		return nil, nil, fmt.Errorf("sending invocation: %w", err)
