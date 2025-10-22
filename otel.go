@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -15,6 +16,12 @@ import (
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
 func setupOTelSDK(ctx context.Context) (func(context.Context) error, error) {
+	_, otlpSet := os.LookupEnv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	_, otlpTracesSet := os.LookupEnv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	if !otlpSet && !otlpTracesSet {
+		return func(context.Context) error { return nil }, nil
+	}
+
 	var shutdownFuncs []func(context.Context) error
 	var err error
 
@@ -77,7 +84,6 @@ func newPropagator() propagation.TextMapPropagator {
 
 func newTracerProvider(ctx context.Context, res *resource.Resource) (*trace.TracerProvider, error) {
 	traceExporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint("localhost:4318"),
 		otlptracehttp.WithInsecure(),
 	)
 	if err != nil {
