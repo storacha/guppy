@@ -1,5 +1,5 @@
 dist/
-guppy.db*
 .claude
 /last-upload-id.txt
 /*.gif
+/demo.db*

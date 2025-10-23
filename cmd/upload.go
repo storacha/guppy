@@ -1,5 +1,3 @@
-//go:build wip
-
 package cmd
 
 import (
@@ -9,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
@@ -23,8 +22,14 @@ var uploadDbPath string
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
 	Aliases: []string{"up"},
-	Short:   "WIP - Upload data to the service",
-	Args:    cobra.ExactArgs(1),
+	Short:   "Upload data to a Storacha space",
+	Long: wordwrap.WrapString(
+		"Uploads data to a Storacha space. This will produce one upload in the "+
+			"space for each source added to the space with `upload sources add`. If "+
+			"no sources have been added to the space yet, the command will exit "+
+			"with an error.",
+		80),
+	Args: cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -84,9 +89,13 @@ var uploadSourcesAddShardSize string
 var uploadSourcesAddCmd = &cobra.Command{
 	Use:   "add <space> <path>",
 	Short: "Add a source to a space",
-	Long: `Adds a source to a space. A source is currently a path on the local filesystem,
-but this may be expanded in the future to include other types of data sources.
-` + "`upload`" + ` will upload data from all sources associated with a space.`,
+	Long: wordwrap.WrapString(
+		"Adds a source to a space. A source is currently a path on the local "+
+			"filesystem, but this may be expanded in the future to include other "+
+			"types of data sources. `upload` will upload data from all sources "+
+			"associated with a space. Sources are associated with the space locally "+
+			"for future local upload commands; no association is made remotely.",
+		80),
 	Args: cobra.ExactArgs(2),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
