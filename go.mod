@@ -28,6 +28,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/filecoin-project/go-fil-commp-hashhash v0.2.0
+	github.com/mitchellh/go-wordwrap v1.0.1
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
 	github.com/wordgen/wordlists/eff v0.3.0

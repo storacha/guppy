@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/guppy/internal/cmdutil"
@@ -14,14 +15,17 @@ import (
 var loginCmd = &cobra.Command{
 	Use:   "login <account>",
 	Short: "Authenticate with a Storacha account",
-	Long: `Authenticates this agent with an email address to gain access to all
-capabilities that have been delegated to it. This command will ask Storacha to
-send an authorization email and then wait for that authorization to be
-confirmed.
-
-You can rerun this command at any time to gain access to any new spaces created
-since your last login. Your agent can authorize with multiple Storacha accounts
-at once; your agent will simply store delegations received from each account.`,
+	Long: wordwrap.WrapString(
+		"Authenticates this agent with an email address to gain access to all "+
+			"capabilities that have been delegated to it. This command will ask "+
+			"Storacha to send an authorization email and then wait for that "+
+			"authorization to be confirmed."+
+			"\n\n"+
+			"You can rerun this command at any time to gain access to any new "+
+			"spaces created since your last login. Your agent can authorize with "+
+			"multiple Storacha accounts at once; your agent will simply store "+
+			"delegations received from each account.",
+		80),
 	Example: fmt.Sprintf("  %s login racha@storacha.network", rootCmd.Name()),
 	Args:    cobra.ExactArgs(1),
 
