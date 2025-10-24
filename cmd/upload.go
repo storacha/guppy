@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/preparation"
+	"github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
@@ -74,6 +75,8 @@ func init() {
 	uploadCmd.AddCommand(uploadSourcesCmd)
 }
 
+var uploadSourcesAddShardSize string
+
 var uploadSourcesAddCmd = &cobra.Command{
 	Use:   "add <space> <path>",
 	Short: "Add a source to a space",
@@ -108,7 +111,17 @@ but this may be expanded in the future to include other types of data sources.
 
 		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
 
-		_, err = api.FindOrCreateSpace(ctx, spaceDID, spaceDID.String())
+		// Parse shard size if provided
+		var spaceOptions []model.SpaceOption
+		if uploadSourcesAddShardSize != "" {
+			shardSize, err := cmdutil.ParseSize(uploadSourcesAddShardSize)
+			if err != nil {
+				return fmt.Errorf("parsing shard size: %w", err)
+			}
+			spaceOptions = append(spaceOptions, model.WithShardSize(shardSize))
+		}
+
+		_, err = api.FindOrCreateSpace(ctx, spaceDID, spaceDID.String(), spaceOptions...)
 		if err != nil {
 			return fmt.Errorf("command failed to create space: %w", err)
 		}
@@ -129,6 +142,7 @@ but this may be expanded in the future to include other types of data sources.
 
 func init() {
 	uploadSourcesCmd.AddCommand(uploadSourcesAddCmd)
+	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shardSize", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
 }
 
 var uploadSourcesListCmd = &cobra.Command{

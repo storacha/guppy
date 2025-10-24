@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -25,7 +27,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const defaultServiceName = "staging.up.storacha.network"
+const defaultServiceName = "staging.up.warm.storacha.network"
 
 // envSigner returns a principal.Signer from the environment variable
 // GUPPY_PRIVATE_KEY, if any.
@@ -169,4 +171,50 @@ func MustGetProof(path string) delegation.Delegation {
 		log.Fatalf("extracting proof: %s", err)
 	}
 	return proof
+}
+
+// ParseSize parses a data size string with optional suffix (B, K, M, G).
+// Accepts formats like: "1024", "512B", "100K", "50M", "2G". Digits with no
+// suffix are interpreted as bytes. Returns the size in bytes.
+func ParseSize(s string) (uint64, error) {
+	if s == "" {
+		return 0, errors.New("data size cannot be empty")
+	}
+
+	// Trim any whitespace
+	s = strings.TrimSpace(s)
+
+	// Check if it ends with a suffix
+	var multiplier uint64 = 1
+	var numStr string
+
+	lastChar := strings.ToUpper(s[len(s)-1:])
+	switch lastChar {
+	case "B":
+		multiplier = 1
+		numStr = s[:len(s)-1]
+	case "K":
+		multiplier = 1024
+		numStr = s[:len(s)-1]
+	case "M":
+		multiplier = 1024 * 1024
+		numStr = s[:len(s)-1]
+	case "G":
+		multiplier = 1024 * 1024 * 1024
+		numStr = s[:len(s)-1]
+	default:
+		// No suffix, assume bytes
+		numStr = s
+	}
+
+	// Parse the numeric part
+	num, err := strconv.ParseUint(numStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid shard size format: %w", err)
+	}
+
+	// Calculate the final size
+	size := num * multiplier
+
+	return size, nil
 }
