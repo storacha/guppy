@@ -39,7 +39,7 @@ var lsCmd = &cobra.Command{
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(proofs...)
+		c := cmdutil.MustGetClient(storePath, proofs...)
 
 		listOk, err := c.UploadList(
 			cmd.Context(),

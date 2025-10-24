@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 
@@ -47,26 +46,14 @@ var tracedHttpClient = &http.Client{
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func MustGetClient(proofs ...delegation.Delegation) *client.Client {
-	homedir, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("obtaining user home directory: %s", err)
-	}
-
-	datadir := path.Join(homedir, ".guppy")
-	datapath := path.Join(datadir, "config.json")
-
-	data, err := agentdata.ReadFromFile(datapath)
+func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Client {
+	data, err := agentdata.ReadFromFile(storePath)
 
 	if err != nil {
+		// If the file doesn't exist yet, that's fine. The config will be empty
+		// until it's written to.
 		if !errors.Is(err, fs.ErrNotExist) {
 			log.Fatalf("reading agent data: %s", err)
-		}
-
-		// If the file doesn't exist yet, that's fine, but make sure the directory
-		// exists to save into later.
-		if err := os.MkdirAll(datadir, 0700); err != nil {
-			log.Fatalf("creating data directory: %s", err)
 		}
 	}
 
@@ -89,7 +76,7 @@ func MustGetClient(proofs ...delegation.Delegation) *client.Client {
 		// Only enable saving if no proofs are provided
 		clientOptions = append(clientOptions,
 			client.WithSaveFn(func(data agentdata.AgentData) error {
-				return data.WriteToFile(datapath)
+				return data.WriteToFile(storePath)
 			}),
 		)
 	}

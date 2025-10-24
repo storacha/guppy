@@ -1,6 +1,6 @@
 # guppy
 
-A w3up client in golang. ⚠️ Heavily WIP.
+A Storacha client in golang. ⚠️ Heavily WIP.
 
 ## Install
 
@@ -10,7 +10,7 @@ go get github.com/storacha/guppy
 
 ## Usage
 
-⚠️ Heavily WIP. At time of writing the client/CLI does not yet upload arbitrary files or directories, only prepared CAR files.
+Guppy can be used as a Go library or as a CLI command.
 
 ### Client library
 
@@ -22,31 +22,14 @@ To bring your own pre-authorized identity, instantiate the client with the optio
 
 ### CLI
 
-The CLI will automatically generate an identity for you and store it in `~/.guppy/config`. Like the library, there are two ways to authenticate the CLI client: interactively, or by authorizing in advance.
+The CLI will automatically generate an identity for you and store it in `~/.storacha/store.json`, or in another directory given with `--storachaDir`. Like the library, there are two ways to authenticate the CLI client: interactively, or by authorizing in advance.
 
 To authorize interactively, use `go run ./cmd login` and follow the prompts.
 
 To authorize in advance, use `go run ./cmd whoami` to see the client's DID and then [delegate capabilities](#obtain-proofs) to that identity. Then, pass the proofs you create on the command line whenever you use the CLI.
 
-```
-NAME:
-   guppy - interact with the Storacha Network
 
-USAGE:
-   guppy [global options] command [command options] [arguments...]
-
-COMMANDS:
-   whoami      Print information about the current agent.
-   login       Authenticate this agent with your email address to gain access to all capabilities that have been delegated to it.
-   up, upload  Store a file(s) to the service and register an upload.
-   ls, list    List uploads in the current space.
-   help, h     Shows a list of commands or help for one command
-
-GLOBAL OPTIONS:
-   --help, -h  show help
-```
-
-## Guppy vs the Storacha JS CLI
+## Uploads in Guppy vs the Storacha JS CLI
 
 While both Guppy and the [Storacha JS CLI](https://github.com/storacha/upload-service/tree/main/packages/cli) provide access to the Storacha Network, they serve different use cases and are optimized for different scenarios:
 
@@ -62,19 +45,21 @@ Guppy provides several enterprise-focused features that set it apart:
 
 **Resumable Uploads**: Guppy can resume interrupted uploads, ensuring that large datasets don't need to be re-uploaded from scratch if something goes wrong.
 
-**Multiple Data Source Support**: Pull data from various sources including:
+<!-- [Not yet implemented:] **Multiple Data Source Support**: Pull data from various sources including:
 - Local filesystems
 - Remote data sources
 - Cloud storage providers
-- Other network locations
+- Other network locations -->
 
-**Incremental & Updatable Uploads**: Rather than treating each upload as independent, Guppy supports incremental uploads that only transfer what has changed since the last upload, dramatically reducing bandwidth and time for large, evolving datasets.
+<!-- [Not yet implemented:] **Incremental & Updatable Uploads**: Rather than treating each upload as independent, Guppy supports incremental uploads that only transfer what has changed since the last upload, dramatically reducing bandwidth and time for large, evolving datasets. -->
 
 **Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
 
 ### Space Concepts
 
-In Guppy, a "space" represents more than just a collection of uploads. Each space is configured with a set of data sources, and Guppy treats uploads intelligently:
+In Guppy, a Storacha space is associated with settings and one or more data sources. First, `guppy upload sources add <space-did> <data-path>`, then `guppy upload <space-did>`. The configuration for a space, as well as all intermediate progress, is stored in a database (`~/.storacha/preparation.db`, configurable with the `--db` option).
+
+<!-- [Not yet implemented:] In Guppy, a "space" represents more than just a collection of uploads. Each space is configured with a set of data sources, and Guppy treats uploads intelligently:
 
 - **Initial Upload**: The first upload from a data source captures the complete dataset
 - **Subsequent Uploads**: All following uploads are treated as "updates" that only include changes (additions, modifications, deletions) since the last upload
@@ -84,7 +69,7 @@ This approach makes Guppy particularly well-suited for scenarios like:
 - Regular backups of large databases
 - Synchronizing evolving datasets
 - Enterprise content management systems
-- Any situation where large amounts of data change incrementally over time
+- Any situation where large amounts of data change incrementally over time -->
 
 ## How to
 
