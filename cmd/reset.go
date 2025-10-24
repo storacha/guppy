@@ -15,7 +15,7 @@ var resetCmd = &cobra.Command{
 		80),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient()
+		c := cmdutil.MustGetClient(storePath)
 		return c.Reset()
 	},
 }

@@ -37,7 +37,7 @@ var loginCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient()
+		c := cmdutil.MustGetClient(storePath)
 
 		authOk, err := c.RequestAccess(cmd.Context(), accountDid.String())
 		if err != nil {

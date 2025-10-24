@@ -18,6 +18,7 @@ import (
 )
 
 var uploadDbPath string
+var storePath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
@@ -55,7 +56,7 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
 		uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -73,7 +74,13 @@ var uploadCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(uploadCmd)
-	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "db", "", "Path to the preparation database file (default: ~/.storacha/preparation.db)")
+
+	uploadCmd.PersistentFlags().StringVar(
+		&uploadDbPath,
+		"db",
+		filepath.Join(uploadDbPath, "preparation.db"),
+		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
+	)
 }
 
 var uploadSourcesCmd = &cobra.Command{
@@ -122,7 +129,7 @@ var uploadSourcesAddCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption
@@ -210,23 +217,10 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	dbPath := uploadDbPath
-	if dbPath == "" {
-		// Use default path: ~/.storacha/preparation.db
-		homedir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get user home directory: %w", err)
-		}
-
-		storachaDir := filepath.Join(homedir, ".storacha")
-
-		// Create the directory if it doesn't exist
-		if err := os.MkdirAll(storachaDir, 0700); err != nil {
-			return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
-		}
-
-		dbPath = filepath.Join(storachaDir, "preparation.db")
+	storachaDir := filepath.Dir(uploadDbPath)
+	if err := os.MkdirAll(storachaDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
 	}
 
-	return preparation.OpenRepo(ctx, dbPath)
+	return preparation.OpenRepo(ctx, uploadDbPath)
 }
