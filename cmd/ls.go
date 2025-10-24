@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -19,8 +20,10 @@ var lsCmd = &cobra.Command{
 	Use:     "ls <space-did>",
 	Aliases: []string{"list"},
 	Short:   "List uploads in a space",
-	Long: `Lists all uploads in the given space as CIDs, one on each line. With
---shards flag, lists shard CIDs below each upload root CID, indented.`,
+	Long: wordwrap.WrapString(
+		"Lists all uploads in the given space as CIDs, one on each line. With "+
+			"`--shards` flag, lists shard CIDs below each upload root CID, indented.",
+		80),
 	Example: fmt.Sprintf("  %s ls did:key:z6MksCX5PdUgHv83cmDE2DfCrR1WHG9MmZPRKSvTi8Ca297V", rootCmd.Name()),
 	Args:    cobra.ExactArgs(1),
 
@@ -36,7 +39,7 @@ var lsCmd = &cobra.Command{
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(proofs...)
+		c := cmdutil.MustGetClient(storePath, proofs...)
 
 		listOk, err := c.UploadList(
 			cmd.Context(),
