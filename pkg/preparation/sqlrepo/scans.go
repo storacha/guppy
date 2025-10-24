@@ -84,19 +84,28 @@ func (r *Repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 
 // CreateDirectoryChildren links a directory to its children in the repository.
 func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Directory, children []scanmodel.FSEntry) error {
+	if len(children) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	insertQuery := `
 		INSERT INTO directory_children (directory_id, child_id)
 		VALUES ($1, $2)
 	`
 
 	for _, child := range children {
-		_, err := r.db.ExecContext(ctx, insertQuery, parent.ID(), child.ID())
+		_, err := tx.ExecContext(ctx, insertQuery, parent.ID(), child.ID())
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to insert directory child relationship for parent %s, child %s: %w", parent.ID(), child.ID(), err)
 		}
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 // DirectoryChildren retrieves the children of a directory from the repository.

@@ -64,6 +64,15 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 
 // FindOrCreateUploads creates uploads for a given space and source IDs.
 func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, sourceIDs []id.SourceID) ([]*model.Upload, error) {
+	if len(sourceIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	var uploads []*model.Upload
 	for _, sourceID := range sourceIDs {
 		upload, err := model.NewUpload(spaceDID, sourceID)
@@ -104,7 +113,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 			rootFSEntryID *id.FSEntryID,
 			rootCID cid.Cid,
 		) error {
-			row := r.db.QueryRowContext(ctx,
+			row := tx.QueryRowContext(ctx,
 				insertQuery,
 				uploadID,
 				util.DbDID(&spaceDID),
@@ -124,7 +133,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				rootFSEntryID **id.FSEntryID,
 				rootCID *cid.Cid,
 			) error {
-				err := row.Scan(
+				return row.Scan(
 					id,
 					util.DbDID(spaceDID),
 					sourceID,
@@ -133,19 +142,22 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 					rootFSEntryID,
 					util.DbCid(rootCID),
 				)
-				if err != nil {
-					return err
-				}
-				return nil
 			})
-
+			if err != nil {
+				return err
+			}
 			uploads = append(uploads, readUpload)
-
-			return err
+			return nil
 		}, upload)
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to write upload to database for space %s and source %s: %w", spaceDID, sourceID, err)
 		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 
 	return uploads, nil
