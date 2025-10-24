@@ -67,6 +67,7 @@ func TestRequestAccess(t *testing.T) {
 		require.ElementsMatch(
 			t,
 			[]string{
+				"assert/*",
 				"space/*",
 				"blob/*",
 				"index/*",
