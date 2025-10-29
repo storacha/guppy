@@ -37,29 +37,29 @@ func (ts tsScanner) Scan(value any) error {
 	return nil
 }
 
-// DbCid returns a [sql.Scanner] that scans a CID from a `[]byte` DB value (a
+// DbCID returns a [sql.Scanner] that scans a CID from a `[]byte` DB value (a
 // `BLOB`), and a [driver.Valuer] that writes a CID to the DB as a `[]byte` (a
 // `BLOB`), treating [cid.Undef] as `NULL`, and vice versa.
-func DbCid(cid *cid.Cid) dbCid {
-	return dbCid{cid: cid}
+func DbCID(cid *cid.Cid) dbCID {
+	return dbCID{cid: cid}
 }
 
-// dbCid returns a sql.Scanner that scans a CID from a byte slice into the
-type dbCid struct {
+// dbCID returns a sql.Scanner that scans a CID from a byte slice into the
+type dbCID struct {
 	cid *cid.Cid
 }
 
-var _ driver.Valuer = dbCid{}
-var _ sql.Scanner = dbCid{}
+var _ driver.Valuer = dbCID{}
+var _ sql.Scanner = dbCID{}
 
-func (dc dbCid) Value() (driver.Value, error) {
+func (dc dbCID) Value() (driver.Value, error) {
 	if dc.cid == nil || dc.cid.Equals(cid.Undef) {
 		return nil, nil // Value should be `NULL` (returned as `nil`)
 	}
 	return dc.cid.Bytes(), nil
 }
 
-func (dc dbCid) Scan(value any) error {
+func (dc dbCID) Scan(value any) error {
 	if value == nil {
 		*dc.cid = cid.Undef
 		return nil

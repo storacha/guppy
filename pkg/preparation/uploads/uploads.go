@@ -251,11 +251,11 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			if err != nil {
 				return fmt.Errorf("reloading upload: %w", err)
 			}
-			rootCid, err := api.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
+			rootCID, err := api.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
 			if err != nil {
 				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
 			}
-			if err := upload.SetRootCID(rootCid); err != nil {
+			if err := upload.SetRootCID(rootCID); err != nil {
 				return fmt.Errorf("completing DAG generation: %w", err)
 			}
 			if err := api.Repo.UpdateUpload(ctx, upload); err != nil {

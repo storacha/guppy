@@ -79,7 +79,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
-	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, spaceDID)
+	node, err := a.Repo.FindNodeByCIDAndSpaceDID(ctx, nodeCID, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}

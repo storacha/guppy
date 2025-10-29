@@ -49,7 +49,7 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			util.TimestampScanner(createdAt),
 			util.TimestampScanner(updatedAt),
 			rootFSEntryID,
-			util.DbCid(rootCID),
+			util.DbCID(rootCID),
 		)
 		if err != nil {
 			return err
@@ -112,7 +112,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				createdAt.Unix(),
 				updatedAt.Unix(),
 				util.DbID(&rootFSEntryID),
-				util.DbCid(&rootCID),
+				util.DbCID(&rootCID),
 			)
 
 			readUpload, err := model.ReadUploadFromDatabase(func(
@@ -131,7 +131,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 					util.TimestampScanner(createdAt),
 					util.TimestampScanner(updatedAt),
 					rootFSEntryID,
-					util.DbCid(rootCID),
+					util.DbCID(rootCID),
 				)
 				if err != nil {
 					return err
@@ -157,7 +157,7 @@ func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCid(&rootCID))
+			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCID(&rootCID))
 		return err
 	}, upload)
 }
@@ -206,7 +206,7 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
-			util.DbCid(&cid),
+			util.DbCID(&cid),
 		)
 		return err
 	})
