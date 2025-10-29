@@ -46,7 +46,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 
 	// with no shards, creates a new shard and adds the node to it
 
-	openShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	openShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 0)
 	_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1.(cidlink.Link).Cid, 1<<14, space.DID(), "some/path", source.ID(), 0)
@@ -56,7 +56,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 
 	require.False(t, shardClosed)
-	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
 	firstShard := openShards[0]
@@ -79,7 +79,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 
 	require.False(t, shardClosed)
-	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
 	require.Equal(t, firstShard.ID(), openShards[0].ID())
@@ -100,7 +100,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 
 	require.True(t, shardClosed)
-	closedShards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+	closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 	require.NoError(t, err)
 	require.Len(t, closedShards, 1)
 	require.Equal(t, firstShard.ID(), closedShards[0].ID())
@@ -108,7 +108,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	foundNodeCids = nodesInShard(t.Context(), t, db, firstShard.ID())
 	require.ElementsMatch(t, []cid.Cid{nodeCid1.(cidlink.Link).Cid, nodeCid2.(cidlink.Link).Cid}, foundNodeCids)
 
-	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 1)
 	secondShard := openShards[0]
@@ -124,7 +124,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, shardClosed)
 
-	closedShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+	closedShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 	require.NoError(t, err)
 	require.Len(t, closedShards, 2)
 	require.Equal(t, firstShard.ID(), closedShards[0].ID())
@@ -135,7 +135,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	}
 	require.ElementsMatch(t, closedShardIDs, []id.ShardID{firstShard.ID(), secondShard.ID()})
 
-	openShards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+	openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 	require.NoError(t, err)
 	require.Len(t, openShards, 0)
 }

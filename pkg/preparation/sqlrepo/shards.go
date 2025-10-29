@@ -54,7 +54,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 	return shard, nil
 }
 
-func (r *Repo) ShardsForUploadByStatus(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error) {
+func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			id,

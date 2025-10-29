@@ -80,12 +80,12 @@ func TestAddShardsForUpload(t *testing.T) {
 		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid3)
 		require.NoError(t, err)
 
-		shards, err := repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateClosed)
+		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 		require.NoError(t, err)
 		require.Len(t, shards, 1)
 		firstShard := shards[0]
 
-		shards, err = repo.ShardsForUploadByStatus(t.Context(), upload.ID(), model.ShardStateOpen)
+		shards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 		require.NoError(t, err)
 		require.Len(t, shards, 1)
 		secondShard := shards[0]

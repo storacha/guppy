@@ -74,7 +74,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
-	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
@@ -143,7 +143,7 @@ func nodeEncodingLength(node dagsmodel.Node) uint64 {
 }
 
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
-	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
@@ -262,7 +262,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
 	}
 
-	shards, err := a.Repo.ShardsForUploadByStatus(ctx, upload.ID(), model.ShardStateAdded)
+	shards, err := a.Repo.ShardsForUploadByState(ctx, upload.ID(), model.ShardStateAdded)
 	if err != nil {
 		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
 	}
