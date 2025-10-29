@@ -64,8 +64,7 @@ var uploadCmd = &cobra.Command{
 
 		if len(uploads) == 0 {
 			fmt.Printf("No sources found for space. Add a source first with:\n\n$ %s %s <path>\n\n", uploadSourcesAddCmd.CommandPath(), spaceDID)
-			cmd.SilenceErrors = true
-			return fmt.Errorf("no uploads found for space %s", spaceDID)
+			return cmdutil.HandledCliError(fmt.Errorf("no uploads found for space %s", spaceDID))
 		}
 
 		return ui.RunUploadUI(ctx, repo, api, uploads)
