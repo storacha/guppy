@@ -8,6 +8,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 // timestampScanner returns a [sql.Scanner] that scans a timestamp (as an
@@ -43,10 +44,6 @@ func DbCid(cid *cid.Cid) dbCid {
 	return dbCid{cid: cid}
 }
 
-func DbDID(did *did.DID) dbDID {
-	return dbDID{did: did}
-}
-
 // dbCid returns a sql.Scanner that scans a CID from a byte slice into the
 type dbCid struct {
 	cid *cid.Cid
@@ -57,7 +54,7 @@ var _ sql.Scanner = dbCid{}
 
 func (dc dbCid) Value() (driver.Value, error) {
 	if dc.cid == nil || dc.cid.Equals(cid.Undef) {
-		return nil, nil // Return nil for undefined CID
+		return nil, nil // Value should be `NULL` (returned as `nil`)
 	}
 	return dc.cid.Bytes(), nil
 }
@@ -78,6 +75,51 @@ func (dc dbCid) Scan(value any) error {
 		return fmt.Errorf("unsupported type for cid scanning: %T (%v)", v, v)
 	}
 	return nil
+}
+
+// DbID returns a [sql.Scanner] that scans an [id.ID] (a UUID) from a `[]byte`
+// DB value (a `BLOB`), and a [driver.Valuer] that writes an [id.ID] to the DB
+// as a `[]byte` (a `BLOB`), treating [id.Nil] as `NULL`, and vice versa.
+func DbID(id *id.ID) dbID {
+	return dbID{id: id}
+}
+
+// dbID returns a sql.Scanner that scans a CID from a byte slice into the
+type dbID struct {
+	id *id.ID
+}
+
+var _ driver.Valuer = dbID{}
+var _ sql.Scanner = dbID{}
+
+func (dc dbID) Value() (driver.Value, error) {
+	if dc.id == nil || *dc.id == id.Nil {
+		return nil, nil // Value should be `NULL` (returned as `nil`)
+	}
+	return (*dc.id)[:], nil
+}
+
+func (dc dbID) Scan(value any) error {
+	if value == nil {
+		*dc.id = id.Nil
+		return nil
+	}
+	switch v := value.(type) {
+	case []byte:
+		if len(v) != 16 {
+			return fmt.Errorf("failed to cast to id: invalid length %d", len(v))
+		}
+		var i id.ID
+		copy(i[:], v)
+		*dc.id = i
+	default:
+		return fmt.Errorf("unsupported type for id scanning: %T (%v)", v, v)
+	}
+	return nil
+}
+
+func DbDID(did *did.DID) dbDID {
+	return dbDID{did: did}
 }
 
 type dbDID struct {

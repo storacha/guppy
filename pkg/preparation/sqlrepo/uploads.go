@@ -39,7 +39,7 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		sourceID *id.SourceID,
 		createdAt,
 		updatedAt *time.Time,
-		rootFSEntryID **id.FSEntryID,
+		rootFSEntryID *id.FSEntryID,
 		rootCID *cid.Cid,
 	) error {
 		err := row.Scan(
@@ -101,7 +101,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 			sourceID id.SourceID,
 			createdAt,
 			updatedAt time.Time,
-			rootFSEntryID *id.FSEntryID,
+			rootFSEntryID id.FSEntryID,
 			rootCID cid.Cid,
 		) error {
 			row := r.db.QueryRowContext(ctx,
@@ -111,7 +111,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				sourceID,
 				createdAt.Unix(),
 				updatedAt.Unix(),
-				Null(rootFSEntryID),
+				util.DbID(&rootFSEntryID),
 				util.DbCid(&rootCID),
 			)
 
@@ -121,7 +121,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				sourceID *id.SourceID,
 				createdAt,
 				updatedAt *time.Time,
-				rootFSEntryID **id.FSEntryID,
+				rootFSEntryID *id.FSEntryID,
 				rootCID *cid.Cid,
 			) error {
 				err := row.Scan(
@@ -154,10 +154,10 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 // UpdateUpload implements uploads.Repo.
 func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, root_fs_entry_id = $6, root_cid = $7 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
+	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), Null(rootFSEntryID), util.DbCid(&rootCID))
+			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCid(&rootCID))
 		return err
 	}, upload)
 }
