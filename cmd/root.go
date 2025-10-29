@@ -26,6 +26,8 @@ var rootCmd = &cobra.Command{
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
 	},
+	// We handle errors ourselves when they're returned from ExecuteContext.
+	SilenceErrors: true,
 }
 
 func init() {
