@@ -39,7 +39,7 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 		sourceID *id.SourceID,
 		createdAt,
 		updatedAt *time.Time,
-		rootFSEntryID **id.FSEntryID,
+		rootFSEntryID *id.FSEntryID,
 		rootCID *cid.Cid,
 	) error {
 		err := row.Scan(
@@ -49,7 +49,7 @@ func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.
 			util.TimestampScanner(createdAt),
 			util.TimestampScanner(updatedAt),
 			rootFSEntryID,
-			util.DbCid(rootCID),
+			util.DbCID(rootCID),
 		)
 		if err != nil {
 			return err
@@ -101,7 +101,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 			sourceID id.SourceID,
 			createdAt,
 			updatedAt time.Time,
-			rootFSEntryID *id.FSEntryID,
+			rootFSEntryID id.FSEntryID,
 			rootCID cid.Cid,
 		) error {
 			row := r.db.QueryRowContext(ctx,
@@ -111,8 +111,8 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				sourceID,
 				createdAt.Unix(),
 				updatedAt.Unix(),
-				Null(rootFSEntryID),
-				util.DbCid(&rootCID),
+				util.DbID(&rootFSEntryID),
+				util.DbCID(&rootCID),
 			)
 
 			readUpload, err := model.ReadUploadFromDatabase(func(
@@ -121,7 +121,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 				sourceID *id.SourceID,
 				createdAt,
 				updatedAt *time.Time,
-				rootFSEntryID **id.FSEntryID,
+				rootFSEntryID *id.FSEntryID,
 				rootCID *cid.Cid,
 			) error {
 				err := row.Scan(
@@ -131,7 +131,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 					util.TimestampScanner(createdAt),
 					util.TimestampScanner(updatedAt),
 					rootFSEntryID,
-					util.DbCid(rootCID),
+					util.DbCID(rootCID),
 				)
 				if err != nil {
 					return err
@@ -154,10 +154,10 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 // UpdateUpload implements uploads.Repo.
 func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, root_fs_entry_id = $6, root_cid = $7 WHERE id = $1`
-	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error {
+	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), Null(rootFSEntryID), util.DbCid(&rootCID))
+			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCID(&rootCID))
 		return err
 	}, upload)
 }
@@ -206,7 +206,7 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
-			util.DbCid(&cid),
+			util.DbCID(&cid),
 		)
 		return err
 	})

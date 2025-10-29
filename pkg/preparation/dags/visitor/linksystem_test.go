@@ -108,7 +108,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	})
 
 	t.Run("stores and calls back with matching CID", func(t *testing.T) {
-		var callbackCids []cid.Cid
+		var callbackCIDs []cid.Cid
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 		spaceDID := testutil.RandomDID(t)
@@ -120,7 +120,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 			reader,
 			spaceDID,
 			func(node model.Node, data []byte) error {
-				callbackCids = append(callbackCids, node.CID())
+				callbackCIDs = append(callbackCIDs, node.CID())
 				return nil
 			},
 		)
@@ -129,10 +129,10 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		c := l.(cidlink.Link).Cid
-		node, err := repo.FindNodeByCidAndSpaceDID(t.Context(), c, spaceDID)
+		node, err := repo.FindNodeByCIDAndSpaceDID(t.Context(), c, spaceDID)
 		require.NoError(t, err)
 		require.NotNilf(t, node, "expected a stored node with returned CID %s", c)
-		require.Containsf(t, callbackCids, c, "expected callback with CID %s", c)
+		require.Containsf(t, callbackCIDs, c, "expected callback with CID %s", c)
 	})
 }
 

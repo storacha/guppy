@@ -65,7 +65,7 @@ var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
 func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
-	closedShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
+	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
@@ -246,7 +246,7 @@ func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadI
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
 	}
 
-	shards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateAdded)
+	shards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateAdded)
 	if err != nil {
 		return fmt.Errorf("failed to get shards for upload %s: %w", uploadID, err)
 	}

@@ -349,10 +349,10 @@ var _ http.RoundTripper = (*receiptsTransport)(nil)
 
 func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	path := req.URL.Path
-	invCid := path[10:]
-	rcpt, ok := r.receipts[invCid]
+	invCID := path[10:]
+	rcpt, ok := r.receipts[invCID]
 	if !ok {
-		return nil, fmt.Errorf("no receipt for invocation %s", invCid)
+		return nil, fmt.Errorf("no receipt for invocation %s", invCID)
 	}
 
 	msg, err := message.Build(nil, []receipt.AnyReceipt{rcpt})

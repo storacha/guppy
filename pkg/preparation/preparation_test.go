@@ -208,10 +208,11 @@ func TestExecuteUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
-			"a":           randomBytes(1 << 16),
-			"dir1/b":      randomBytes(1 << 16),
-			"dir1/c":      randomBytes(1 << 16),
-			"dir1/dir2/d": randomBytes(1 << 16),
+			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
+			"dir1/b":      randomBytes((1 << 16) - 128),
+			"a":           randomBytes((1 << 16) - 128),
+			"dir1/c":      randomBytes((1 << 16) - 128),
+			"dir1/dir2/d": randomBytes((1 << 16) - 128),
 		}
 
 		testFs := prepareFs(t, fsData)
@@ -234,9 +235,9 @@ func TestExecuteUpload(t *testing.T) {
 
 		upload := createUpload(t, repo, space.DID(), api)
 
-		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
-		require.NotEmpty(t, returnedRootCid, "expected non-empty root CID")
+		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added")
@@ -286,7 +287,7 @@ func TestExecuteUpload(t *testing.T) {
 		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
 		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
 		require.True(t, ok, "expected root link to be a CID link")
-		require.Equal(t, rootCIDLink.Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
+		require.Equal(t, rootCIDLink.Cid, returnedRootCID, "expected returned root CID to match the one in the `upload/add`")
 
 		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
@@ -314,10 +315,11 @@ func TestExecuteUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
-			"a":           randomBytes(1 << 16),
-			"dir1/b":      randomBytes(1 << 16),
-			"dir1/c":      randomBytes(1 << 16),
-			"dir1/dir2/d": randomBytes(1 << 16),
+			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
+			"dir1/b":      randomBytes((1 << 16) - 128),
+			"a":           randomBytes((1 << 16) - 128),
+			"dir1/c":      randomBytes((1 << 16) - 128),
+			"dir1/dir2/d": randomBytes((1 << 16) - 128),
 		}
 
 		testFs := prepareFs(t, fsData)
@@ -371,9 +373,9 @@ func TestExecuteUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		// The second time, it should succeed
-		returnedRootCid, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err, "expected upload to succeed on retry")
-		require.NotEmpty(t, returnedRootCid, "expected non-empty root CID")
+		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
@@ -390,7 +392,7 @@ func TestExecuteUpload(t *testing.T) {
 		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
 		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
 		require.True(t, ok, "expected root link to be a CID link")
-		require.Equal(t, rootCIDLink.Cid, returnedRootCid, "expected returned root CID to match the one in the `upload/add`")
+		require.Equal(t, rootCIDLink.Cid, returnedRootCID, "expected returned root CID to match the one in the `upload/add`")
 
 		foundData := filesData(t.Context(), t, rootCIDLink.Cid, indexCIDLink.Cid, putBlobs)
 
@@ -430,13 +432,13 @@ func prepareFs(t *testing.T, files map[string][]byte) afero.IOFS {
 	return memIOFS
 }
 
-func filesData(ctx context.Context, t *testing.T, rootCid cid.Cid, indexCid cid.Cid, shards ctestutil.BlobMap) map[string][]byte {
-	bs, err := newIndexAndShardsBlockstore(indexCid, shards)
+func filesData(ctx context.Context, t *testing.T, rootCID cid.Cid, indexCID cid.Cid, shards ctestutil.BlobMap) map[string][]byte {
+	bs, err := newIndexAndShardsBlockstore(indexCID, shards)
 	require.NoError(t, err)
 
 	blockserv := blockservice.New(bs, nil)
 	dagserv := merkledag.NewDAGService(blockserv)
-	rootNode, err := dagserv.Get(ctx, rootCid)
+	rootNode, err := dagserv.Get(ctx, rootCID)
 	require.NoError(t, err)
 	rootFileNode, err := unixfile.NewUnixfsFile(ctx, dagserv, rootNode)
 	require.NoError(t, err)
@@ -468,14 +470,14 @@ type indexAndShardsBlockstore struct {
 
 var _ carblockstore.Blockstore = (*indexAndShardsBlockstore)(nil)
 
-func newIndexAndShardsBlockstore(indexCid cid.Cid, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
-	if indexCid.Prefix().Codec != uint64(multicodec.Car) {
-		return nil, fmt.Errorf("expected index link CID to have codec 0x%x (CAR), got 0x%x", multicodec.Car, indexCid.Prefix().Codec)
+func newIndexAndShardsBlockstore(indexCID cid.Cid, shards ctestutil.BlobMap) (*indexAndShardsBlockstore, error) {
+	if indexCID.Prefix().Codec != uint64(multicodec.Car) {
+		return nil, fmt.Errorf("expected index link CID to have codec 0x%x (CAR), got 0x%x", multicodec.Car, indexCID.Prefix().Codec)
 	}
 
-	indexDigest := indexCid.Hash()
+	indexDigest := indexCID.Hash()
 	if !shards.Has(indexDigest) {
-		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCid, indexDigest.B58String())
+		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCID, indexDigest.B58String())
 	}
 
 	index, err := blobindex.Extract(bytes.NewReader(shards.Get(indexDigest)))
