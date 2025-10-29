@@ -115,6 +115,13 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		if err != nil {
 			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
+		hasRoom, err := roomInShard(shard, node, space)
+		if err != nil {
+			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
+		}
+		if !hasRoom {
+			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
+		}
 	}
 
 	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())

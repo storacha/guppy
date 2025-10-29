@@ -208,10 +208,11 @@ func TestExecuteUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
-			"a":           randomBytes(1 << 16),
-			"dir1/b":      randomBytes(1 << 16),
-			"dir1/c":      randomBytes(1 << 16),
-			"dir1/dir2/d": randomBytes(1 << 16),
+			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
+			"dir1/b":      randomBytes((1 << 16) - 128),
+			"a":           randomBytes((1 << 16) - 128),
+			"dir1/c":      randomBytes((1 << 16) - 128),
+			"dir1/dir2/d": randomBytes((1 << 16) - 128),
 		}
 
 		testFs := prepareFs(t, fsData)
@@ -314,10 +315,11 @@ func TestExecuteUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
-			"a":           randomBytes(1 << 16),
-			"dir1/b":      randomBytes(1 << 16),
-			"dir1/c":      randomBytes(1 << 16),
-			"dir1/dir2/d": randomBytes(1 << 16),
+			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
+			"dir1/b":      randomBytes((1 << 16) - 128),
+			"a":           randomBytes((1 << 16) - 128),
+			"dir1/c":      randomBytes((1 << 16) - 128),
+			"dir1/dir2/d": randomBytes((1 << 16) - 128),
 		}
 
 		testFs := prepareFs(t, fsData)
