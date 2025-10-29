@@ -62,22 +62,22 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
-		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
-		nodeCid2 := testutil.RandomCID(t).(cidlink.Link).Cid
-		nodeCid3 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCID3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
 		// Add enough nodes to close one shard and create a second one.
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid2)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid3)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3)
 		require.NoError(t, err)
 
 		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
@@ -192,11 +192,11 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
-		nodeCid1 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCid1, 1, spaceDID, "some/path", source.ID(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCid1)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
 		require.NoError(t, err)
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)

@@ -60,11 +60,11 @@ func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 		if len(data) != int(node.Size()) {
 			return nil, fs.ErrInvalid
 		}
-		foundCid, err := node.CID().Prefix().Sum(data)
+		foundCID, err := node.CID().Prefix().Sum(data)
 		if err != nil {
 			return nil, err
 		}
-		if !foundCid.Equals(node.CID()) {
+		if !foundCID.Equals(node.CID()) {
 			return nil, fs.ErrInvalid
 		}
 	}

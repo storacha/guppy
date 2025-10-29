@@ -68,7 +68,7 @@ func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model
 	var links []*model.Link
 	for rows.Next() {
 		link, err := model.ReadLinkFromDatabase(func(name *string, tSize *uint64, hash, parent *cid.Cid, spaceDID *did.DID, order *uint64) error {
-			return rows.Scan(name, tSize, util.DbCid(hash), util.DbCid(parent), util.DbDID(spaceDID), order)
+			return rows.Scan(name, tSize, util.DbCID(hash), util.DbCID(parent), util.DbDID(spaceDID), order)
 		})
 		if err != nil {
 			return nil, err
@@ -104,7 +104,7 @@ func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 			util.DbDID(spaceDID),
 			util.TimestampScanner(createdAt),
 			util.TimestampScanner(updatedAt),
-			util.DbCid(cid),
+			util.DbCID(cid),
 			kind,
 		)
 		if err != nil {
@@ -192,7 +192,7 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 		var path string
 		var size uint64
 		var cid cid.Cid
-		if err := rows.Scan(&path, &size, util.DbCid(&cid)); err != nil {
+		if err := rows.Scan(&path, &size, util.DbCID(&cid)); err != nil {
 			return nil, err
 		}
 		link := model.LinkParams{
@@ -250,7 +250,7 @@ type RowScanner interface {
 
 func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-		return scanner.Scan(util.DbCid(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
+		return scanner.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -377,7 +377,7 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
-			util.DbCid(&cidValue),
+			util.DbCID(&cidValue),
 			fsEntryID,
 		)
 		return err
@@ -389,9 +389,9 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 		return nil
 	}
 
-	var dbCids []any
+	var dbCIDs []any
 	for _, c := range nodeCIDs {
-		dbCids = append(dbCids, util.DbCid(&c))
+		dbCIDs = append(dbCIDs, util.DbCID(&c))
 	}
 
 	placeholders := strings.Repeat("?,", len(nodeCIDs)-1) + "?"
@@ -407,7 +407,7 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 		SET cid = NULL
 		WHERE cid IN (%s)
 		  AND space_did = ?`, placeholders),
-		append(dbCids, util.DbDID(&spaceDID))...,
+		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to clear nodes from dag_scans for space %s: %w", spaceDID, err)
@@ -419,7 +419,7 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 		SET root_cid = NULL
 		WHERE root_cid IN (%s)
 		  AND space_did = ?`, placeholders),
-		append(dbCids, util.DbDID(&spaceDID))...,
+		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to clear nodes from uploads for space %s: %w", spaceDID, err)
@@ -430,7 +430,7 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 		DELETE FROM nodes
 		WHERE cid IN (%s)
 		  AND space_did = ?`, placeholders),
-		append(dbCids, util.DbDID(&spaceDID))...,
+		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to delete node for space %s: %w", spaceDID, err)

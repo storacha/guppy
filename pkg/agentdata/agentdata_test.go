@@ -32,7 +32,7 @@ func TestRoundTripAgentData(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, agentData.Principal, agentDataReturned.Principal)
-	require.Equal(t, delegationsCids(agentData), delegationsCids(agentDataReturned))
+	require.Equal(t, delegationsCIDs(agentData), delegationsCIDs(agentDataReturned))
 }
 
 func TestWriteReadAgentData(t *testing.T) {
@@ -55,5 +55,5 @@ func TestWriteReadAgentData(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, agentData.Principal, agentDataReturned.Principal)
-	require.Equal(t, delegationsCids(agentData), delegationsCids(agentDataReturned))
+	require.Equal(t, delegationsCIDs(agentData), delegationsCIDs(agentDataReturned))
 }

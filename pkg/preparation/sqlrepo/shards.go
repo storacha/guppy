@@ -160,7 +160,7 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
     UPDATE shards 
     SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?)
     WHERE id = ?`,
-		offset, util.DbCid(&nodeCID), shardID)
+		offset, util.DbCID(&nodeCID), shardID)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	return tx.Commit()
 }
 
-func (r *Repo) FindNodeByCidAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
+func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
 	findQuery := `
 		SELECT
 			cid,
@@ -214,7 +214,7 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 	for rows.Next() {
 		var shardOffset uint64
 		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCid(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset, &shardOffset)
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset, &shardOffset)
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
