@@ -31,8 +31,6 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(uploadCmd)
-
 	// default storacha dir: ~/.storacha
 	homedir, err := os.UserHomeDir()
 	if err != nil {
