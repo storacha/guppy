@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/message"
@@ -45,6 +46,121 @@ func TestFetch(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			msg, err := message.Build(nil, []receipt.AnyReceipt{rcpt})
+			require.NoError(t, err)
+			res, err := response.Encode(msg)
+			require.NoError(t, err)
+			_, err = io.Copy(w, res.Body())
+			require.NoError(t, err)
+		}))
+		defer server.Close()
+
+		endpoint, err := url.Parse(server.URL)
+		require.NoError(t, err)
+
+		client := receiptclient.New(endpoint)
+		result, err := client.Fetch(t.Context(), inv.Link())
+		require.NoError(t, err)
+		require.Equal(t, inv.Link(), result.Ran().Link())
+	})
+
+	t.Run("found in ucan/conclude invocation", func(t *testing.T) {
+		inv, err := invocation.Invoke(
+			testutil.Alice,
+			testutil.Service,
+			ucan.NewCapability(
+				"test/receipt",
+				testutil.Alice.DID().String(),
+				ucan.NoCaveats{},
+			),
+		)
+		require.NoError(t, err)
+
+		rcpt, err := receipt.Issue(
+			testutil.Alice,
+			result.Ok[ok.Unit, failure.IPLDBuilderFailure](ok.Unit{}),
+			ran.FromInvocation(inv),
+		)
+		require.NoError(t, err)
+
+		ccInv, err := ucancap.Conclude.Invoke(
+			testutil.Alice,
+			testutil.Service,
+			testutil.Alice.DID().String(),
+			ucancap.ConcludeCaveats{
+				Receipt: rcpt.Root().Link(),
+			},
+		)
+		require.NoError(t, err)
+
+		// attach the receipt to the conclude invocation
+		for b, err := range rcpt.Blocks() {
+			require.NoError(t, err)
+			require.NoError(t, ccInv.Attach(b))
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			msg, err := message.Build([]invocation.Invocation{ccInv}, nil)
+			require.NoError(t, err)
+			res, err := response.Encode(msg)
+			require.NoError(t, err)
+			_, err = io.Copy(w, res.Body())
+			require.NoError(t, err)
+		}))
+		defer server.Close()
+
+		endpoint, err := url.Parse(server.URL)
+		require.NoError(t, err)
+
+		client := receiptclient.New(endpoint)
+		result, err := client.Fetch(t.Context(), inv.Link())
+		require.NoError(t, err)
+		require.Equal(t, inv.Link(), result.Ran().Link())
+	})
+
+	t.Run("found in ucan/conclude receipt", func(t *testing.T) {
+		inv, err := invocation.Invoke(
+			testutil.Alice,
+			testutil.Service,
+			ucan.NewCapability(
+				"test/receipt",
+				testutil.Alice.DID().String(),
+				ucan.NoCaveats{},
+			),
+		)
+		require.NoError(t, err)
+
+		rcpt, err := receipt.Issue(
+			testutil.Alice,
+			result.Ok[ok.Unit, failure.IPLDBuilderFailure](ok.Unit{}),
+			ran.FromInvocation(inv),
+		)
+		require.NoError(t, err)
+
+		ccInv, err := ucancap.Conclude.Invoke(
+			testutil.Alice,
+			testutil.Service,
+			testutil.Alice.DID().String(),
+			ucancap.ConcludeCaveats{
+				Receipt: rcpt.Root().Link(),
+			},
+		)
+		require.NoError(t, err)
+
+		// attach the receipt to the conclude invocation
+		for b, err := range rcpt.Blocks() {
+			require.NoError(t, err)
+			require.NoError(t, ccInv.Attach(b))
+		}
+
+		ccRcpt, err := receipt.Issue(
+			testutil.Service,
+			result.Ok[ok.Unit, failure.IPLDBuilderFailure](ok.Unit{}),
+			ran.FromInvocation(ccInv),
+		)
+		require.NoError(t, err)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			msg, err := message.Build(nil, []receipt.AnyReceipt{ccRcpt})
 			require.NoError(t, err)
 			res, err := response.Encode(msg)
 			require.NoError(t, err)
