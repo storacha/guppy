@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/storacha/go-libstoracha/capabilities/types"
+	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/transport"
 	"github.com/storacha/go-ucanto/transport/car"
 	ucanhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 )
 
 var ErrNotFound = errors.New("receipt not found")
@@ -88,6 +90,27 @@ func (c *Client) Fetch(ctx context.Context, task ucan.Link) (receipt.AnyReceipt,
 
 	rcptlnk, ok := msg.Get(task)
 	if !ok {
+		// This could be an agent message that contains a ucan/conclude invocation
+		// that contains the receipt.
+		for _, root := range msg.Invocations() {
+			inv, ok, err := msg.Invocation(root)
+			if err != nil || !ok || len(inv.Capabilities()) != 1 {
+				continue
+			}
+			cap := inv.Capabilities()[0]
+			match, err := ucancap.Conclude.Match(validator.NewSource(cap, inv))
+			if err != nil {
+				continue
+			}
+			reader := receipt.NewAnyReceiptReader(types.Converters...)
+			rcpt, err := reader.Read(match.Value().Nb().Receipt, msg.Blocks())
+			if err != nil {
+				continue
+			}
+			if rcpt.Ran().Link().String() == task.String() {
+				return rcpt, nil
+			}
+		}
 		return nil, errors.New("receipt not found in agent message")
 	}
 
