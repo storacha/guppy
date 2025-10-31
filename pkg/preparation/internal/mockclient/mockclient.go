@@ -10,6 +10,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multihash"
+	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/capabilities/upload"
@@ -28,6 +29,7 @@ type MockClient struct {
 	SpaceBlobAddInvocations       []spaceBlobAddInvocation
 	SpaceIndexAddInvocations      []spaceIndexAddInvocation
 	SpaceBlobReplicateInvocations []spaceBlobReplicateInvocation
+	FilecoinOfferInvocations      []filecoinOfferInvocation
 	UploadAddInvocations          []uploadAddInvocation
 }
 
@@ -48,6 +50,12 @@ type spaceBlobReplicateInvocation struct {
 	Blob               types.Blob
 	ReplicaCount       uint
 	LocationCommitment delegation.Delegation
+}
+
+type filecoinOfferInvocation struct {
+	Space   did.DID
+	Content ipld.Link
+	Piece   ipld.Link
 }
 
 type uploadAddInvocation struct {
@@ -84,6 +92,16 @@ func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, spa
 	})
 
 	return nil
+}
+
+func (m *MockClient) FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link) (filecoincap.OfferOk, error) {
+	m.FilecoinOfferInvocations = append(m.FilecoinOfferInvocations, filecoinOfferInvocation{
+		Space:   space,
+		Content: content,
+		Piece:   piece,
+	})
+
+	return filecoincap.OfferOk{Piece: piece}, nil
 }
 
 func (m *MockClient) SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error) {
