@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
+	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/transport"
@@ -97,25 +100,54 @@ func (c *Client) Fetch(ctx context.Context, task ucan.Link) (receipt.AnyReceipt,
 			if err != nil || !ok || len(inv.Capabilities()) != 1 {
 				continue
 			}
-			cap := inv.Capabilities()[0]
-			match, err := ucancap.Conclude.Match(validator.NewSource(cap, inv))
+			rcpt, err := extractConcludeReceipt(task, inv, msg.Blocks())
 			if err != nil {
 				continue
 			}
-			reader := receipt.NewAnyReceiptReader(types.Converters...)
-			rcpt, err := reader.Read(match.Value().Nb().Receipt, msg.Blocks())
+			return rcpt, nil
+		}
+		// This could be an agent message that contains a receipt for a
+		// ucan/conclude invocation that contains the receipt.
+		for _, root := range msg.Receipts() {
+			concludeRcpt, ok, err := msg.Receipt(root)
+			if err != nil || !ok {
+				continue
+			}
+			inv, ok := concludeRcpt.Ran().Invocation()
+			if !ok {
+				continue
+			}
+			rcpt, err := extractConcludeReceipt(task, inv, msg.Blocks())
 			if err != nil {
 				continue
 			}
-			if rcpt.Ran().Link().String() == task.String() {
-				return rcpt, nil
-			}
+			return rcpt, nil
 		}
 		return nil, errors.New("receipt not found in agent message")
 	}
 
 	reader := receipt.NewAnyReceiptReader(types.Converters...)
 	return reader.Read(rcptlnk, msg.Blocks())
+}
+
+// extractConcludeReceipt extracts the receipt for the passed task from the
+// passed invocation, if it is an invocation of `ucan/conclude`.
+func extractConcludeReceipt(task ipld.Link, inv invocation.Invocation, blocks iter.Seq2[ipld.Block, error]) (receipt.AnyReceipt, error) {
+	var err error
+	cap := inv.Capabilities()[0]
+	match, err := ucancap.Conclude.Match(validator.NewSource(cap, inv))
+	if err != nil {
+		return nil, err
+	}
+	reader := receipt.NewAnyReceiptReader(types.Converters...)
+	rcpt, err := reader.Read(match.Value().Nb().Receipt, blocks)
+	if err != nil {
+		return nil, err
+	}
+	if rcpt.Ran().Link().String() != task.String() {
+		return nil, fmt.Errorf("receipt is not for task: %s", task)
+	}
+	return rcpt, nil
 }
 
 type pollConfig struct {

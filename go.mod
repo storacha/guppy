@@ -15,7 +15,7 @@ require (
 	github.com/multiformats/go-varint v0.1.0
 	github.com/spf13/afero v1.12.0
 	github.com/storacha/go-libstoracha v0.2.8
-	github.com/storacha/go-ucanto v0.6.7-0.20251031130612-a2d468774250
+	github.com/storacha/go-ucanto v0.6.7
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.25.7 // indirect
 	golang.org/x/sync v0.16.0
