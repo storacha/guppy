@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"io"
 
+	commcid "github.com/filecoin-project/go-fil-commcid"
+	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/capabilities/upload"
@@ -24,11 +28,14 @@ import (
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
+var log = logging.Logger("preparation/storacha")
+
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
 type Client interface {
 	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
 	SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error
+	FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link) (filecoincap.OfferOk, error)
 	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
 	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error)
 }
@@ -59,12 +66,28 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 	for _, shard := range closedShards {
 		car, err := a.CarForShard(ctx, shard.ID())
 		if err != nil {
-			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.CID(), err)
+			return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 		}
 
-		digest, locationCommitment, err := a.Client.SpaceBlobAdd(ctx, car, spaceDID)
+		addReader, addWriter := io.Pipe()
+		commpCalc := &commp.Calc{}
+
+		go func() {
+			defer addWriter.Close()
+			mw := io.MultiWriter(addWriter, commpCalc)
+			_, err := io.Copy(mw, car)
+			if err != nil {
+				addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
+			}
+		}()
+
+		digest, locationCommitment, err := a.Client.SpaceBlobAdd(ctx, addReader, spaceDID)
 		if err != nil {
-			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.CID(), spaceDID, err)
+			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+		}
+		err = shard.Added(digest)
+		if err != nil {
+			return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
 		}
 
 		_, _, err = a.Client.SpaceBlobReplicate(
@@ -78,10 +101,32 @@ func (a API) SpaceBlobAddShardsForUpload(ctx context.Context, uploadID id.Upload
 			locationCommitment,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to replicate shard %s: %w", shard.CID(), err)
+			return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
 		}
 
-		shard.Added(digest)
+		// On shards too small to compute a CommP, just skip the `filecoin/offer`.
+		switch {
+		case shard.Size() < commp.MinPiecePayload:
+			log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), commp.MinPiecePayload)
+		case shard.Size() > commp.MaxPiecePayload:
+			log.Warnf("skipping `filecoin/offer` for shard %s: size %d is above maximum %d", shard.ID(), shard.Size(), commp.MaxPiecePayload)
+		default:
+			pieceDigest, _, err := commpCalc.Digest()
+			if err != nil {
+				return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+			}
+
+			shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
+			if err != nil {
+				return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
+			}
+
+			_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID})
+			if err != nil {
+				return fmt.Errorf("failed to offer shard %s: %w", shard.CID(), err)
+			}
+		}
+
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
 			return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.CID(), err)
 		}
