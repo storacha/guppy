@@ -31,7 +31,7 @@ import (
 // padding to every "CAR" to make sure it's definitely long enough.
 var padding = bytes.Repeat([]byte{0}, 65)
 
-func TestSpaceBlobAddShardsForUpload(t *testing.T) {
+func TestAddShardsForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
@@ -91,7 +91,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		secondShard := shards[0]
 
 		// Upload shards that are ready to go.
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// Reload shards
@@ -135,7 +135,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// Reload second shard
@@ -201,7 +201,7 @@ func TestSpaceBlobAddShardsForUpload(t *testing.T) {
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
 
-		err = api.SpaceBlobAddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// It should `space/blob/add`...
