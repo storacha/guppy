@@ -220,17 +220,17 @@ type statsMsg struct {
 
 func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
 	return tea.Tick(10*time.Millisecond, func(t time.Time) tea.Msg {
-		addedShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateAdded)
+		addedShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateAdded)
 		if err != nil {
 			return fmt.Errorf("getting added shards for upload %s: %w", uploadID, err)
 		}
 
-		closedShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateClosed)
+		closedShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
 		if err != nil {
 			return fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err)
 		}
 
-		openShards, err := repo.ShardsForUploadByStatus(ctx, uploadID, shardsmodel.ShardStateOpen)
+		openShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateOpen)
 		if err != nil {
 			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
 		}

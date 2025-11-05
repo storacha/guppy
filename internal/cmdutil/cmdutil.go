@@ -205,3 +205,8 @@ func ParseSize(s string) (uint64, error) {
 
 	return size, nil
 }
+
+// handledCliError is an error which has already been presented to the user. If
+// a handledCliError is returned from a command, the process should exit with
+// a non-zero exit code, but no further error message should be printed.
+type HandledCliError error

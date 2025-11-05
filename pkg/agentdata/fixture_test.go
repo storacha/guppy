@@ -48,7 +48,7 @@ func newDelegation() (delegation.Delegation, error) {
 	)
 }
 
-func delegationsCids(d agentdata.AgentData) []ipld.Link {
+func delegationsCIDs(d agentdata.AgentData) []ipld.Link {
 	cids := make([]ipld.Link, len(d.Delegations))
 	for i, d := range d.Delegations {
 		cids[i] = d.Link()

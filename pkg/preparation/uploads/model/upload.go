@@ -15,9 +15,9 @@ type Upload struct {
 	spaceDID      did.DID
 	sourceID      id.SourceID
 	createdAt     time.Time
-	updatedAt     time.Time     // The last time the upload was updated
-	rootFSEntryID *id.FSEntryID // The ID of the root file system entry associated with this upload, if any
-	rootCID       cid.Cid       // The root CID of the upload, if applicable
+	updatedAt     time.Time    // The last time the upload was updated
+	rootFSEntryID id.FSEntryID // The ID of the root file system entry associated with this upload, if any
+	rootCID       cid.Cid      // The root CID of the upload, if applicable
 }
 
 // ID returns the unique identifier of the upload.
@@ -41,14 +41,14 @@ func (u *Upload) CreatedAt() time.Time {
 }
 
 func (u *Upload) HasRootFSEntryID() bool {
-	return u.rootFSEntryID != nil
+	return u.rootFSEntryID != id.Nil
 }
 
 func (u *Upload) RootFSEntryID() id.FSEntryID {
-	if u.rootFSEntryID == nil {
+	if u.rootFSEntryID == id.Nil {
 		return id.Nil // Return an empty FSEntryID if rootFSEntryID is not set
 	}
-	return *u.rootFSEntryID
+	return u.rootFSEntryID
 }
 
 func (u *Upload) RootCID() cid.Cid {
@@ -56,7 +56,7 @@ func (u *Upload) RootCID() cid.Cid {
 }
 
 func (u *Upload) SetRootFSEntryID(rootFSEntryID id.FSEntryID) error {
-	u.rootFSEntryID = &rootFSEntryID
+	u.rootFSEntryID = rootFSEntryID
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -71,7 +71,7 @@ func (u *Upload) SetRootCID(rootCID cid.Cid) error {
 // it needs to be scanned again.
 func (u *Upload) Invalidate() error {
 	u.rootCID = cid.Undef
-	u.rootFSEntryID = nil
+	u.rootFSEntryID = id.Nil
 	u.updatedAt = time.Now()
 	return nil
 }
@@ -111,7 +111,7 @@ func NewUpload(spaceDID did.DID, sourceID id.SourceID) (*Upload, error) {
 }
 
 // UploadWriter is a function type that defines the signature for writing uploads to a database row
-type UploadWriter func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, rootFSEntryID *id.FSEntryID, rootCID cid.Cid) error
+type UploadWriter func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt time.Time, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error
 
 // WriteUploadToDatabase writes an upload to the database using the provided writer function.
 func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
@@ -119,7 +119,7 @@ func WriteUploadToDatabase(writer UploadWriter, upload *Upload) error {
 }
 
 // UploadScanner is a function type that defines the signature for scanning uploads from a database row
-type UploadScanner func(id *id.UploadID, spaceDID *did.DID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, rootFSEntryID **id.FSEntryID, rootCID *cid.Cid) error
+type UploadScanner func(id *id.UploadID, spaceDID *did.DID, sourceID *id.SourceID, createdAt *time.Time, updatedAt *time.Time, rootFSEntryID *id.FSEntryID, rootCID *cid.Cid) error
 
 // ReadUploadFromDatabase reads an upload from the database using the provided scanner function.
 func ReadUploadFromDatabase(scanner UploadScanner) (*Upload, error) {

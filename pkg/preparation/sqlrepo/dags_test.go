@@ -28,8 +28,8 @@ func TestDAGScan(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, otherScans, 0)
 
-		dagCid := testutil.RandomCID(t)
-		dagScan.Complete(dagCid.(cidlink.Link).Cid)
+		dagCID := testutil.RandomCID(t)
+		dagScan.Complete(dagCID.(cidlink.Link).Cid)
 		err = repo.UpdateDAGScan(t.Context(), dagScan)
 		require.NoError(t, err)
 
@@ -37,7 +37,7 @@ func TestDAGScan(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, foundScans, 1)
 		require.Equal(t, dagScan.FsEntryID(), foundScans[0].FsEntryID())
-		require.Equal(t, dagCid.(cidlink.Link).Cid, foundScans[0].CID())
+		require.Equal(t, dagCID.(cidlink.Link).Cid, foundScans[0].CID())
 		otherScans, err = repo.IncompleteDAGScansForUpload(t.Context(), uploadID)
 		require.NoError(t, err)
 		require.Len(t, otherScans, 0)

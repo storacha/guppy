@@ -74,12 +74,12 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
-	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
-	node, err := a.Repo.FindNodeByCidAndSpaceDID(ctx, nodeCID, spaceDID)
+	node, err := a.Repo.FindNodeByCIDAndSpaceDID(ctx, nodeCID, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}
@@ -115,6 +115,13 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		if err != nil {
 			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
+		hasRoom, err := roomInShard(shard, node, space)
+		if err != nil {
+			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
+		}
+		if !hasRoom {
+			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
+		}
 	}
 
 	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())
@@ -143,7 +150,7 @@ func nodeEncodingLength(node dagsmodel.Node) uint64 {
 }
 
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
-	openShards, err := a.Repo.ShardsForUploadByStatus(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
@@ -262,7 +269,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
 	}
 
-	shards, err := a.Repo.ShardsForUploadByStatus(ctx, upload.ID(), model.ShardStateAdded)
+	shards, err := a.Repo.ShardsForUploadByState(ctx, upload.ID(), model.ShardStateAdded)
 	if err != nil {
 		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
 	}
