@@ -1,13 +1,14 @@
-//go:build wip
+//go:build dev
 
 package cmd
 
 import (
 	"errors"
 
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/guppy/cmd/internal/upload/demo"
-	"github.com/storacha/guppy/cmd/internal/upload/repo"
+	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var uploadDemoFlags struct {
@@ -18,16 +19,19 @@ var uploadDemoFlags struct {
 var uploadDemoCmd = &cobra.Command{
 	Use:     "upload-demo <space-name>",
 	Aliases: []string{"up-demo"},
-	Short:   "WIP - Demo uploading data to the service using a fake filesystem",
-	Long: `Runs a demo upload using a fake filesystem. A "space" is selected based on a
-given string, which is simply hashed into a private key. That is, the name
-itself is meaningless, but using the same name will result in the same space
-being used, which allows testing resuming failed or interrupted uploads.`,
+	Short:   "Demo uploading data to the service using a fake filesystem",
+	Long: wordwrap.WrapString(
+		`Runs a demo upload using a fake filesystem. A "space" is selected based `+
+			`on a given string, which is simply hashed into a private key. That is, `+
+			`the name itself is meaningless, but using the same name will result in `+
+			`the same space being used, which allows testing resuming failed or `+
+			`interrupted uploads.`,
+		80),
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, _, err := repo.Make(ctx, "guppy-demo.db")
+		repo, err := preparation.OpenRepo(ctx, "demo.db")
 		if err != nil {
 			return err
 		}

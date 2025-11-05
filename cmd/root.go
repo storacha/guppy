@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
@@ -23,6 +26,23 @@ var rootCmd = &cobra.Command{
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
 	},
+}
+
+func init() {
+	rootCmd.AddCommand(uploadCmd)
+
+	// default storacha dir: ~/.storacha
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		panic(fmt.Errorf("failed to get user home directory: %w", err))
+	}
+	defaultStorachaDir := filepath.Join(homedir, ".storacha")
+
+	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storachaDir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
+
+	// We could make this configurable in the future, but for now it seems like
+	// too many options for likely no value.
+	storePath = filepath.Join(defaultStorachaDir, "store.json")
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.

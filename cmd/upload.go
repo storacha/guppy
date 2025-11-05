@@ -1,5 +1,3 @@
-//go:build wip
-
 package cmd
 
 import (
@@ -9,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
@@ -19,12 +18,19 @@ import (
 )
 
 var uploadDbPath string
+var storePath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
 	Aliases: []string{"up"},
-	Short:   "WIP - Upload data to the service",
-	Args:    cobra.ExactArgs(1),
+	Short:   "Upload data to a Storacha space",
+	Long: wordwrap.WrapString(
+		"Uploads data to a Storacha space. This will produce one upload in the "+
+			"space for each source added to the space with `upload sources add`. If "+
+			"no sources have been added to the space yet, the command will exit "+
+			"with an error.",
+		80),
+	Args: cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -50,7 +56,7 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
 		uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -68,7 +74,13 @@ var uploadCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(uploadCmd)
-	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "db", "", "Path to the preparation database file (default: ~/.storacha/preparation.db)")
+
+	uploadCmd.PersistentFlags().StringVar(
+		&uploadDbPath,
+		"db",
+		filepath.Join(uploadDbPath, "preparation.db"),
+		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
+	)
 }
 
 var uploadSourcesCmd = &cobra.Command{
@@ -84,9 +96,13 @@ var uploadSourcesAddShardSize string
 var uploadSourcesAddCmd = &cobra.Command{
 	Use:   "add <space> <path>",
 	Short: "Add a source to a space",
-	Long: `Adds a source to a space. A source is currently a path on the local filesystem,
-but this may be expanded in the future to include other types of data sources.
-` + "`upload`" + ` will upload data from all sources associated with a space.`,
+	Long: wordwrap.WrapString(
+		"Adds a source to a space. A source is currently a path on the local "+
+			"filesystem, but this may be expanded in the future to include other "+
+			"types of data sources. `upload` will upload data from all sources "+
+			"associated with a space. Sources are associated with the space locally "+
+			"for future local upload commands; no association is made remotely.",
+		80),
 	Args: cobra.ExactArgs(2),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -113,7 +129,7 @@ but this may be expanded in the future to include other types of data sources.
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient())
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption
@@ -201,23 +217,10 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	dbPath := uploadDbPath
-	if dbPath == "" {
-		// Use default path: ~/.storacha/preparation.db
-		homedir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get user home directory: %w", err)
-		}
-
-		storachaDir := filepath.Join(homedir, ".storacha")
-
-		// Create the directory if it doesn't exist
-		if err := os.MkdirAll(storachaDir, 0700); err != nil {
-			return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
-		}
-
-		dbPath = filepath.Join(storachaDir, "preparation.db")
+	storachaDir := filepath.Dir(uploadDbPath)
+	if err := os.MkdirAll(storachaDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
 	}
 
-	return preparation.OpenRepo(ctx, dbPath)
+	return preparation.OpenRepo(ctx, uploadDbPath)
 }
