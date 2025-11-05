@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -9,20 +8,20 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
-// MaxShardSize is the maximum allowed size for a shard, set to 4GB
-const MaxShardSize = 4 << 30
+// MaxShardSize is the maximum allowed size for a shard
+const MaxShardSize = 1 << 29 // 512MB
 
-// MinShardSize is the minimum allowed size for a shard, set to 128 bytes
+// MinShardSize is the minimum allowed size for a shard
 const MinShardSize = 128
 
-// DefaultShardSize is the default size for a shard, set to 512MB
-const DefaultShardSize = 512 << 20 // default shard size = 512MB
+// DefaultShardSize is the default size for a shard
+const DefaultShardSize = MaxShardSize
 
 // ErrShardSizeTooLarge indicates that the shard size is larger than the maximum allowed size.
-var ErrShardSizeTooLarge = errors.New("Shard size must be less than 4GB")
+var ErrShardSizeTooLarge = fmt.Errorf("Shard size must at most %d bytes", MaxShardSize)
 
 // ErrShardSizeTooSmall indicates that the shard size is smaller than the minimum allowed size.
-var ErrShardSizeTooSmall = errors.New("Shard size must be at least 128 bytes")
+var ErrShardSizeTooSmall = fmt.Errorf("Shard size must be at least %d bytes", MinShardSize)
 
 // Space represents the space for an upload or uploads
 type Space struct {
@@ -73,7 +72,7 @@ func validateSpace(u *Space) (*Space, error) {
 	if u.name == "" {
 		return nil, types.ErrEmpty{Field: "name"}
 	}
-	if u.shardSize >= MaxShardSize {
+	if u.shardSize > MaxShardSize {
 		return nil, ErrShardSizeTooLarge
 	}
 	if u.shardSize < MinShardSize {

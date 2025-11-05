@@ -200,7 +200,7 @@ func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption
 
 		attempts++
 		if *conf.retries > -1 && (attempts-1) >= *conf.retries {
-			return nil, fmt.Errorf("receipt was not found after %d attempts", attempts)
+			return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, attempts)
 		}
 
 		// wait for the configured interval, or the context to be canceled
