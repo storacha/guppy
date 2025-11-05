@@ -161,7 +161,7 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 func init() {
 	uploadSourcesCmd.AddCommand(uploadSourcesAddCmd)
-	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shardSize", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
+	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shard-size", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
 }
 
 var uploadSourcesListCmd = &cobra.Command{
