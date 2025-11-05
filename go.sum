@@ -561,8 +561,8 @@ github.com/spf13/pflag v1.0.5/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An
 github.com/spf13/pflag v1.0.6 h1:jFzHGLGAlb3ruxLB8MhbI6A8+AQX/2eW4qeyNZXNp2o=
 github.com/spf13/pflag v1.0.6/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
 github.com/spf13/viper v1.8.1/go.mod h1:o0Pch8wJ9BVSWGQMbra6iw0oQ5oktSIBaujf1rJH9Ns=
-github.com/storacha/go-libstoracha v0.2.8 h1:vQ+kCnRruzAekAiW4nJ0JnQrH4NbareSEydX+Laviv0=
-github.com/storacha/go-libstoracha v0.2.8/go.mod h1:zzeqIZhBBuWR2dkGygYqv4Bhg3JsvHuuvDCcdXCwGhg=
+github.com/storacha/go-libstoracha v0.4.0 h1:QkJKOE4zQ13p478tMr6C5pY3VHQxqaBE8kGDiY3TqTQ=
+github.com/storacha/go-libstoracha v0.4.0/go.mod h1:PLTFCREzKlZMY9cuZDCJUh2DiCWLKQEyTQhYM1muy9M=
 github.com/storacha/go-ucanto v0.6.7 h1:rKNCyt9n4FwzCXIb+FDQ2Lcic+yNQK10PkGi4VipoM0=
 github.com/storacha/go-ucanto v0.6.7/go.mod h1:O35Ze4x18EWtz3ftRXXd/mTZ+b8OQVjYYrnadJ/xNjg=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

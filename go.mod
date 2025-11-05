@@ -14,7 +14,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.1.0
 	github.com/spf13/afero v1.12.0
-	github.com/storacha/go-libstoracha v0.2.8
+	github.com/storacha/go-libstoracha v0.4.0
 	github.com/storacha/go-ucanto v0.6.7
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.25.7 // indirect
@@ -134,7 +134,7 @@ require (
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
 	github.com/multiformats/go-multiaddr v0.16.0 // indirect
-	github.com/multiformats/go-multibase v0.2.0 // indirect
+	github.com/multiformats/go-multibase v0.2.0
 	github.com/onsi/ginkgo/v2 v2.23.3 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pion/webrtc/v4 v4.0.14 // indirect
