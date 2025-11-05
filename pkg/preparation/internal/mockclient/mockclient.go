@@ -42,7 +42,9 @@ type spaceBlobAddInvocation struct {
 
 type spaceIndexAddInvocation struct {
 	Space     did.DID
-	IndexLink ipld.Link
+	IndexCID  cid.Cid
+	IndexSize uint64
+	RootCID   cid.Cid
 }
 
 type spaceBlobReplicateInvocation struct {
@@ -85,10 +87,12 @@ func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space 
 	return digest, location, nil
 }
 
-func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error {
+func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize uint64, rootCID cid.Cid, space did.DID) error {
 	m.SpaceIndexAddInvocations = append(m.SpaceIndexAddInvocations, spaceIndexAddInvocation{
 		Space:     space,
-		IndexLink: indexLink,
+		IndexCID:  indexCID,
+		IndexSize: indexSize,
+		RootCID:   rootCID,
 	})
 
 	return nil

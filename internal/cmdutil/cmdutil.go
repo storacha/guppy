@@ -206,7 +206,17 @@ func ParseSize(s string) (uint64, error) {
 	return size, nil
 }
 
-// handledCliError is an error which has already been presented to the user. If
-// a handledCliError is returned from a command, the process should exit with
+func NewHandledCliError(err error) HandledCliError {
+	return HandledCliError{err}
+}
+
+// HandledCliError is an error which has already been presented to the user. If
+// a HandledCliError is returned from a command, the process should exit with
 // a non-zero exit code, but no further error message should be printed.
-type HandledCliError error
+type HandledCliError struct {
+	error
+}
+
+func (e HandledCliError) Unwrap() error {
+	return e.error
+}

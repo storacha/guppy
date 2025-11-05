@@ -24,11 +24,10 @@ import (
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/receipt/ran"
 	"github.com/storacha/go-ucanto/core/result"
-	"github.com/storacha/go-ucanto/core/result/failure"
-	fdm "github.com/storacha/go-ucanto/core/result/failure/datamodel"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client/internal/failure"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
@@ -122,6 +121,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	_, failErr := result.Unwrap(res)
 	if failErr != nil {
+		fmt.Printf("failErr: %#v", failErr)
 		return nil, nil, fmt.Errorf("`space/blob/add` failed: %w", failErr)
 	}
 
@@ -166,12 +166,12 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		return nil, nil, fmt.Errorf("mandatory ucan/conclude tasks not received in space/blob/add receipt")
 	}
 
-	var allocateRcpt receipt.Receipt[blobcap.AllocateOk, fdm.FailureModel]
-	var legacyAllocateRcpt receipt.Receipt[w3sblobcap.AllocateOk, fdm.FailureModel]
+	var allocateRcpt receipt.Receipt[blobcap.AllocateOk, failure.FailureModel]
+	var legacyAllocateRcpt receipt.Receipt[w3sblobcap.AllocateOk, failure.FailureModel]
 	// TK: Why not use receipt.Rebind here?
 	var putRcpt receipt.AnyReceipt
-	var acceptRcpt receipt.Receipt[blobcap.AcceptOk, fdm.FailureModel]
-	var legacyAcceptRcpt receipt.Receipt[w3sblobcap.AcceptOk, fdm.FailureModel]
+	var acceptRcpt receipt.Receipt[blobcap.AcceptOk, failure.FailureModel]
+	var legacyAcceptRcpt receipt.Receipt[w3sblobcap.AcceptOk, failure.FailureModel]
 	for _, concludeFx := range concludeFxs {
 		concludeRcpt, err := getConcludeReceipt(concludeFx)
 		if err != nil {
@@ -183,14 +183,14 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			ability := allocateTask.Capabilities()[0].Can()
 			switch ability {
 			case blobcap.AllocateAbility:
-				allocateRcpt, err = receipt.Rebind[blobcap.AllocateOk, fdm.FailureModel](concludeRcpt, blobcap.AllocateOkType(), fdm.FailureType(), captypes.Converters...)
+				allocateRcpt, err = receipt.Rebind[blobcap.AllocateOk, failure.FailureModel](concludeRcpt, blobcap.AllocateOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
 					return nil, nil, fmt.Errorf("bad allocate receipt in conclude fx: %w", err)
 				}
 			case w3sblobcap.AllocateAbility:
-				legacyAllocateRcpt, err = receipt.Rebind[w3sblobcap.AllocateOk, fdm.FailureModel](concludeRcpt, w3sblobcap.AllocateOkType(), fdm.FailureType(), captypes.Converters...)
+				legacyAllocateRcpt, err = receipt.Rebind[w3sblobcap.AllocateOk, failure.FailureModel](concludeRcpt, w3sblobcap.AllocateOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad allocate receipt in conclude fx: %w", err)
+					return nil, nil, fmt.Errorf("bad (legacy) allocate receipt in conclude fx: %w", err)
 				}
 			default:
 				return nil, nil, fmt.Errorf("unexpected capability in allocate task: %s", ability)
@@ -201,14 +201,14 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			ability := acceptTask.Capabilities()[0].Can()
 			switch ability {
 			case blobcap.AcceptAbility:
-				acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, fdm.FailureModel](concludeRcpt, blobcap.AcceptOkType(), fdm.FailureType(), captypes.Converters...)
+				acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, failure.FailureModel](concludeRcpt, blobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
 					return nil, nil, fmt.Errorf("bad accept receipt in conclude fx: %w", err)
 				}
 			case w3sblobcap.AcceptAbility:
-				legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, fdm.FailureModel](concludeRcpt, w3sblobcap.AcceptOkType(), fdm.FailureType(), captypes.Converters...)
+				legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, failure.FailureModel](concludeRcpt, w3sblobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad accept receipt in conclude fx: %w", err)
+					return nil, nil, fmt.Errorf("bad (legacy) accept receipt in conclude fx: %w", err)
 				}
 			default:
 				return nil, nil, fmt.Errorf("unexpected capability in accept task: %s", ability)
@@ -304,7 +304,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	if site == nil {
 		if !legacyAccept {
-			acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, fdm.FailureModel](anyAcceptRcpt, blobcap.AcceptOkType(), fdm.FailureType(), captypes.Converters...)
+			acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, failure.FailureModel](anyAcceptRcpt, blobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 			if err != nil {
 				return nil, nil, fmt.Errorf("fetching accept receipt: %w", err)
 			}
@@ -317,7 +317,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			site = acceptOk.Site
 			rcptBlocks = acceptRcpt.Blocks()
 		} else {
-			legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, fdm.FailureModel](anyAcceptRcpt, w3sblobcap.AcceptOkType(), fdm.FailureType(), captypes.Converters...)
+			legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, failure.FailureModel](anyAcceptRcpt, w3sblobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 			if err != nil {
 				return nil, nil, fmt.Errorf("fetching legacy accept receipt: %w", err)
 			}
@@ -506,7 +506,7 @@ func (c *Client) sendPutReceipt(ctx context.Context, putTask invocation.Invocati
 		return fmt.Errorf("receipt not found: %s", httpPutConcludeInvocation.Link())
 	}
 
-	reader, err := receipt.NewReceiptReaderFromTypes[ucancap.ConcludeOk, fdm.FailureModel](ucancap.ConcludeOkType(), fdm.FailureType(), captypes.Converters...)
+	reader, err := receipt.NewReceiptReaderFromTypes[ucancap.ConcludeOk, failure.FailureModel](ucancap.ConcludeOkType(), failure.FailureType(), captypes.Converters...)
 	if err != nil {
 		return fmt.Errorf("generating receipt reader: %w", err)
 	}

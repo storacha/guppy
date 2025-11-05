@@ -22,7 +22,7 @@ To bring your own pre-authorized identity, instantiate the client with the optio
 
 ### CLI
 
-The CLI will automatically generate an identity for you and store it in `~/.storacha/store.json`, or in another directory given with `--storachaDir`. Like the library, there are two ways to authenticate the CLI client: interactively, or by authorizing in advance.
+The CLI will automatically generate an identity for you and store it in `~/.storacha/store.json`, or in another directory given with `--storacha-dir`. Like the library, there are two ways to authenticate the CLI client: interactively, or by authorizing in advance.
 
 To authorize interactively, use `go run ./cmd login` and follow the prompts.
 

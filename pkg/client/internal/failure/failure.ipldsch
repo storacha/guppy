@@ -1,0 +1,29 @@
+type Failure struct {
+  name optional String
+  message String
+  stack optional String
+
+  audience optional UCANPrincipal
+  capability optional Capability
+  cause optional Failure
+  causes optional [Failure]
+  claimed optional ParsedCapability
+  delegated optional Any
+  delegation optional Delegation
+  delegationErrors optional [Failure]
+  did optional DID
+  expiredAt optional Int
+  failedProofs optional [Failure]
+  invalidProofs optional [Failure]
+  issuer optional UCANPrincipal
+  link optional Link
+  unknownCapabilities optional [Capability]
+  validAt optional Int
+  isError optional Bool (rename "error")
+}
+
+type UCANPrincipal any
+type Capability any
+type ParsedCapability any
+type Delegation any
+type DID bytes

@@ -7,12 +7,19 @@ import (
 	"io"
 	"os"
 
+	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
+	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	rsasigner "github.com/storacha/go-ucanto/principal/rsa/signer"
 )
+
+var log = logging.Logger("agentdata")
 
 type AgentData struct {
 	Principal   principal.Signer
@@ -21,17 +28,26 @@ type AgentData struct {
 
 type agentDataSerialized struct {
 	Principal   []byte
-	Delegations [][]byte
+	Delegations []string
 }
 
 func (ad AgentData) MarshalJSON() ([]byte, error) {
-	delegations := make([][]byte, 0, len(ad.Delegations))
+	delegations := make([]string, 0, len(ad.Delegations))
 	for _, d := range ad.Delegations {
 		b, err := io.ReadAll(d.Archive())
 		if err != nil {
 			return nil, fmt.Errorf("reading delegation archive: %w", err)
 		}
-		delegations = append(delegations, b)
+		digest, err := multihash.Sum(b, uint64(multicodec.Identity), -1)
+		if err != nil {
+			return nil, fmt.Errorf("creating multihash: %w", err)
+		}
+		cid := cid.NewCidV1(uint64(multicodec.Car), digest)
+		b64, err := cid.StringOfBase(multibase.Base64)
+		if err != nil {
+			return nil, fmt.Errorf("encoding delegation cid to base64: %w", err)
+		}
+		delegations = append(delegations, b64)
 	}
 
 	return json.Marshal(agentDataSerialized{
@@ -73,8 +89,22 @@ func (ad *AgentData) UnmarshalJSON(b []byte) error {
 	// Delegations
 
 	ad.Delegations = make([]delegation.Delegation, len(s.Delegations))
-	for i, db := range s.Delegations {
-		d, err := delegation.Extract(db)
+	for i, b64 := range s.Delegations {
+		cid, err := cid.Decode(b64)
+		if err != nil {
+			return fmt.Errorf("decoding delegation cid %d: %w", i, err)
+		}
+		if cid.Prefix().Codec != uint64(multicodec.Car) {
+			return fmt.Errorf("invalid delegation codec %d for delegation %d, expected CAR (%d)", cid.Prefix().Codec, i, multicodec.Car)
+		}
+		if cid.Prefix().MhType != uint64(multicodec.Identity) {
+			return fmt.Errorf("invalid delegation multihash type %d for delegation %d, expected Identity (%d)", cid.Prefix().MhType, i, multicodec.Identity)
+		}
+		decoded, err := multihash.Decode(cid.Hash())
+		if err != nil {
+			return fmt.Errorf("decoding delegation multihash %d: %w", i, err)
+		}
+		d, err := delegation.Extract(decoded.Digest)
 		if err != nil {
 			return fmt.Errorf("decoding delegation %d: %w", i, err)
 		}
@@ -100,6 +130,9 @@ func ReadFromFile(path string) (AgentData, error) {
 	}
 
 	var ad AgentData
-	json.Unmarshal(b, &ad)
+	err = json.Unmarshal(b, &ad)
+	if err != nil {
+		return AgentData{}, err
+	}
 	return ad, nil
 }

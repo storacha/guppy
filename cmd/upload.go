@@ -64,7 +64,7 @@ var uploadCmd = &cobra.Command{
 
 		if len(uploads) == 0 {
 			fmt.Printf("No sources found for space. Add a source first with:\n\n$ %s %s <path>\n\n", uploadSourcesAddCmd.CommandPath(), spaceDID)
-			return cmdutil.HandledCliError(fmt.Errorf("no uploads found for space %s", spaceDID))
+			return cmdutil.NewHandledCliError(fmt.Errorf("no uploads found for space %s", spaceDID))
 		}
 
 		return ui.RunUploadUI(ctx, repo, api, uploads)
@@ -161,7 +161,7 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 func init() {
 	uploadSourcesCmd.AddCommand(uploadSourcesAddCmd)
-	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shardSize", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
+	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shard-size", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
 }
 
 var uploadSourcesListCmd = &cobra.Command{

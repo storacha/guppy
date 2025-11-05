@@ -41,7 +41,7 @@ var (
 // implemented by [client.Client].
 type Client interface {
 	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
-	SpaceIndexAdd(ctx context.Context, indexLink ipld.Link, space did.DID) error
+	SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize uint64, rootCID cid.Cid, space did.DID) error
 	FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link) (filecoincap.OfferOk, error)
 	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
 	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error)
@@ -201,6 +201,10 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
 	}
+	if upload.RootCID() == cid.Undef {
+		return fmt.Errorf("no root CID set yet on upload %s", upload.ID())
+	}
+
 	indexReaders, err := a.IndexesForUpload(ctx, upload)
 	if err != nil {
 		return fmt.Errorf("failed to get index for upload %s: %w", uploadID, err)
@@ -231,7 +235,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 		}
 
 		indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
-		err = a.Client.SpaceIndexAdd(ctx, cidlink.Link{Cid: indexCID}, spaceDID)
+		err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
 		if err != nil {
 			return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)
 		}

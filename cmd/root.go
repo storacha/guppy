@@ -31,8 +31,6 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(uploadCmd)
-
 	// default storacha dir: ~/.storacha
 	homedir, err := os.UserHomeDir()
 	if err != nil {
@@ -40,7 +38,7 @@ func init() {
 	}
 	defaultStorachaDir := filepath.Join(homedir, ".storacha")
 
-	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storachaDir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
+	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storacha-dir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
 
 	// We could make this configurable in the future, but for now it seems like
 	// too many options for likely no value.

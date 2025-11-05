@@ -245,6 +245,11 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.Len(t, uploads, 1)
 		upload := uploads[0]
 
+		rootCID := testutil.RandomCID(t).(cidlink.Link).Cid
+		upload.SetRootCID(rootCID)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
 		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
@@ -265,10 +270,12 @@ func TestAddIndexesForUpload(t *testing.T) {
 			require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[i].Space)
 			require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[i].ReplicaCount)
 
-			cid, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(blob)
+			indexCID, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(blob)
 			require.NoError(t, err)
 
-			require.Equal(t, cidlink.Link{Cid: cid}, client.SpaceIndexAddInvocations[i].IndexLink)
+			require.Equal(t, indexCID, client.SpaceIndexAddInvocations[i].IndexCID)
+			require.Equal(t, uint64(len(blob)), client.SpaceIndexAddInvocations[i].IndexSize)
+			require.Equal(t, rootCID, client.SpaceIndexAddInvocations[i].RootCID)
 		}
 	})
 }
