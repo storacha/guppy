@@ -22,6 +22,9 @@ var _ dags.Repo = (*Repo)(nil)
 
 // CreateLinks creates links in the repository for the given parent CID and link parameters.
 func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID, linkParams []model.LinkParams) error {
+	if len(linkParams) == 0 {
+		return nil
+	}
 	links := make([]*model.Link, 0, len(linkParams))
 	for i, p := range linkParams {
 		link, err := model.NewLink(p, parent, spaceDID, uint64(i))
@@ -30,6 +33,13 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 		}
 		links = append(links, link)
 	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	insertQuery := `
 		INSERT INTO links (
 			name,
@@ -40,7 +50,7 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
   	  ordering
 		) VALUES (?, ?, ?, ?, ?, ?)`
 	for _, link := range links {
-		_, err := r.db.ExecContext(
+		_, err := tx.ExecContext(
 			ctx,
 			insertQuery,
 			link.Name(),
@@ -51,10 +61,10 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 			link.Order(),
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert link: %w", err)
+			return fmt.Errorf("failed to insert link %s for parent %s: %w", link.Name(), parent, err)
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model.Link, error) {
