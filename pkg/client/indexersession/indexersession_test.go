@@ -67,7 +67,8 @@ func TestIndexerSession(t *testing.T) {
 		Length: 2048,
 	})
 
-	session := indexersession.New(newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index}))
+	mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
+	session := indexersession.New(mockIndexer)
 
 	location, err := session.Locate(t.Context(), blockHash)
 	require.NoError(t, err)
@@ -82,6 +83,12 @@ func TestIndexerSession(t *testing.T) {
 		Offset: 10,
 		Length: 2048,
 	}, location.Position)
+
+	require.Len(t, mockIndexer.Queries, 1)
+
+	location, err = session.Locate(t.Context(), blockHash)
+	require.NoError(t, err)
+	require.Len(t, mockIndexer.Queries, 1)
 }
 
 // urls parses strings into url.URLs and panics on error.
@@ -97,7 +104,7 @@ func urls(strs ...string) []url.URL {
 	return result
 }
 
-func newMockIndexerClient(claims []delegation.Delegation, indexes []blobindex.ShardedDagIndexView) indexersession.IndexerClient {
+func newMockIndexerClient(claims []delegation.Delegation, indexes []blobindex.ShardedDagIndexView) *mockIndexerClient {
 	return &mockIndexerClient{
 		claims:  claims,
 		indexes: indexes,
@@ -107,11 +114,15 @@ func newMockIndexerClient(claims []delegation.Delegation, indexes []blobindex.Sh
 type mockIndexerClient struct {
 	claims  []delegation.Delegation
 	indexes []blobindex.ShardedDagIndexView
+
+	Queries []types.Query
 }
 
 var _ indexersession.IndexerClient = (*mockIndexerClient)(nil)
 
 func (m *mockIndexerClient) QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error) {
+	m.Queries = append(m.Queries, query)
+
 	var indexBlocks []block.Block
 	for _, index := range m.indexes {
 		indexReader, err := blobindex.Archive(index)

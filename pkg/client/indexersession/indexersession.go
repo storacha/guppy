@@ -17,12 +17,18 @@ import (
 
 func New(indexer IndexerClient) *IndexerSession {
 	return &IndexerSession{
-		indexer: indexer,
+		indexer:   indexer,
+		urls:      blobindex.NewMultihashMap[[]url.URL](-1),
+		positions: blobindex.NewMultihashMap[blobindex.Position](-1),
+		shards:    blobindex.NewMultihashMap[mh.Multihash](-1),
 	}
 }
 
 type IndexerSession struct {
-	indexer IndexerClient
+	indexer   IndexerClient
+	urls      blobindex.MultihashMap[[]url.URL]
+	positions blobindex.MultihashMap[blobindex.Position]
+	shards    blobindex.MultihashMap[mh.Multihash]
 }
 
 type IndexerClient interface {
@@ -44,26 +50,50 @@ type Location struct {
 
 // TK: Should take a space?
 func (s *IndexerSession) Locate(ctx context.Context, hash mh.Multihash) (Location, error) {
+	location := s.getCached(hash)
+
+	if location.Urls == nil {
+		if err := s.query(ctx, hash); err != nil {
+			return Location{}, err
+		}
+		location = s.getCached(hash)
+	}
+
+	if location.Urls == nil {
+		return Location{}, &NotFoundError{Hash: hash}
+	}
+
+	return location, nil
+}
+
+func (s *IndexerSession) getCached(hash mh.Multihash) Location {
+	if s.positions.Has(hash) && s.shards.Has(hash) && s.urls.Has(s.shards.Get(hash)) {
+		return Location{
+			Urls:     s.urls.Get(s.shards.Get(hash)),
+			Position: s.positions.Get(hash),
+		}
+	}
+
+	return Location{}
+}
+
+func (s *IndexerSession) query(ctx context.Context, hash mh.Multihash) error {
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
 		Hashes: []mh.Multihash{hash},
 	})
 	if err != nil {
-		return Location{}, fmt.Errorf("querying claims for %s: %w", hash.String(), err)
+		return fmt.Errorf("querying claims for %s: %w", hash.String(), err)
 	}
 
 	bs, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(result.Blocks()))
 	if err != nil {
-		return Location{}, err
+		return err
 	}
-
-	urls := blobindex.NewMultihashMap[[]url.URL](-1)
-	positions := blobindex.NewMultihashMap[blobindex.Position](-1)
-	shards := blobindex.NewMultihashMap[mh.Multihash](-1)
 
 	for _, link := range result.Claims() {
 		d, err := delegation.NewDelegationView(link, bs)
 		if err != nil {
-			return Location{}, err
+			return err
 		}
 
 		match, err := assert.Location.Match(source{
@@ -78,41 +108,34 @@ func (s *IndexerSession) Locate(ctx context.Context, hash mh.Multihash) (Locatio
 		claimHash := cap.Nb().Content.Hash()
 
 		var knownLocations []url.URL
-		if urls.Has(claimHash) {
-			knownLocations = urls.Get(claimHash)
+		if s.urls.Has(claimHash) {
+			knownLocations = s.urls.Get(claimHash)
 		}
-		urls.Set(claimHash, append(knownLocations, cap.Nb().Location...))
+		s.urls.Set(claimHash, append(knownLocations, cap.Nb().Location...))
 	}
 
 	for _, link := range result.Indexes() {
 		indexBlock, ok, err := bs.Get(link)
 		if err != nil {
-			return Location{}, fmt.Errorf("getting index block: %w", err)
+			return fmt.Errorf("getting index block: %w", err)
 		}
 		if !ok {
-			return Location{}, fmt.Errorf("index block not found: %s", link.String())
+			return fmt.Errorf("index block not found: %s", link.String())
 		}
 		index, err := blobindex.Extract(bytes.NewReader(indexBlock.Bytes()))
 		if err != nil {
-			return Location{}, fmt.Errorf("extracting index: %w", err)
+			return fmt.Errorf("extracting index: %w", err)
 		}
 
 		for shardHash, shardMap := range index.Shards().Iterator() {
 			for sliceHash, position := range shardMap.Iterator() {
-				positions.Set(sliceHash, position)
-				shards.Set(sliceHash, shardHash)
+				s.positions.Set(sliceHash, position)
+				s.shards.Set(sliceHash, shardHash)
 			}
 		}
 	}
 
-	if positions.Has(hash) && shards.Has(hash) && urls.Has(shards.Get(hash)) {
-		return Location{
-			Urls:     urls.Get(shards.Get(hash)),
-			Position: positions.Get(hash),
-		}, nil
-	}
-
-	return Location{}, &NotFoundError{Hash: hash}
+	return nil
 }
 
 type source struct {
