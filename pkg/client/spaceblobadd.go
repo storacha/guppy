@@ -49,6 +49,12 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 	}
 }
 
+type AddedBlob struct {
+	Multihash multihash.Multihash
+	Location  delegation.Delegation
+	PDPAccept *invocation.Invocation
+}
+
 // SpaceBlobAdd adds a blob to the service. The issuer needs proof of
 // `space/blob/add` delegated capability.
 //
@@ -64,7 +70,7 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 //
 // Returns the multihash of the added blob and the location commitment that contains details about where the
 // blob can be located, or an error if something went wrong.
-func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...SpaceBlobAddOption) (AddedBlob, error) {
 	ctx, span := tracer.Start(ctx, "space-blob-add", trace.WithAttributes(
 		attribute.String("space", space.String()),
 	))
@@ -85,7 +91,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	contentBytes, err := io.ReadAll(content)
 	if err != nil {
 		readSpan.End()
-		return nil, nil, fmt.Errorf("reading content: %w", err)
+		return AddedBlob{}, fmt.Errorf("reading content: %w", err)
 	}
 	readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
 	readSpan.End()
@@ -96,7 +102,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	contentHash, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
 	if err != nil {
 		hashSpan.End()
-		return nil, nil, fmt.Errorf("computing content multihash: %w", err)
+		return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
 	}
 	hashSpan.End()
 
@@ -116,13 +122,13 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		spaceblobcap.AddOkType(),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invoking and executing `space/blob/add`: %w", err)
+		return AddedBlob{}, fmt.Errorf("invoking and executing `space/blob/add`: %w", err)
 	}
 
 	_, failErr := result.Unwrap(res)
 	if failErr != nil {
 		fmt.Printf("failErr: %#v", failErr)
-		return nil, nil, fmt.Errorf("`space/blob/add` failed: %w", failErr)
+		return AddedBlob{}, fmt.Errorf("`space/blob/add` failed: %w", failErr)
 	}
 
 	var allocateTask, putTask, acceptTask invocation.Invocation
@@ -157,13 +163,13 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	switch {
 	case allocateTask == nil:
-		return nil, nil, fmt.Errorf("mandatory blob/allocate task not received in space/blob/add receipt")
+		return AddedBlob{}, fmt.Errorf("mandatory blob/allocate task not received in space/blob/add receipt")
 	case putTask == nil:
-		return nil, nil, fmt.Errorf("mandatory http/put task not received in space/blob/add receipt")
+		return AddedBlob{}, fmt.Errorf("mandatory http/put task not received in space/blob/add receipt")
 	case acceptTask == nil:
-		return nil, nil, fmt.Errorf("mandatory blob/accept task not received in space/blob/add receipt")
+		return AddedBlob{}, fmt.Errorf("mandatory blob/accept task not received in space/blob/add receipt")
 	case len(concludeFxs) == 0:
-		return nil, nil, fmt.Errorf("mandatory ucan/conclude tasks not received in space/blob/add receipt")
+		return AddedBlob{}, fmt.Errorf("mandatory ucan/conclude tasks not received in space/blob/add receipt")
 	}
 
 	var allocateRcpt receipt.Receipt[blobcap.AllocateOk, failure.FailureModel]
@@ -175,7 +181,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	for _, concludeFx := range concludeFxs {
 		concludeRcpt, err := getConcludeReceipt(concludeFx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("reading ucan/conclude receipt: %w", err)
+			return AddedBlob{}, fmt.Errorf("reading ucan/conclude receipt: %w", err)
 		}
 
 		switch concludeRcpt.Ran().Link() {
@@ -185,15 +191,15 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			case blobcap.AllocateAbility:
 				allocateRcpt, err = receipt.Rebind[blobcap.AllocateOk, failure.FailureModel](concludeRcpt, blobcap.AllocateOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad allocate receipt in conclude fx: %w", err)
+					return AddedBlob{}, fmt.Errorf("bad allocate receipt in conclude fx: %w", err)
 				}
 			case w3sblobcap.AllocateAbility:
 				legacyAllocateRcpt, err = receipt.Rebind[w3sblobcap.AllocateOk, failure.FailureModel](concludeRcpt, w3sblobcap.AllocateOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad (legacy) allocate receipt in conclude fx: %w", err)
+					return AddedBlob{}, fmt.Errorf("bad (legacy) allocate receipt in conclude fx: %w", err)
 				}
 			default:
-				return nil, nil, fmt.Errorf("unexpected capability in allocate task: %s", ability)
+				return AddedBlob{}, fmt.Errorf("unexpected capability in allocate task: %s", ability)
 			}
 		case putTask.Link():
 			putRcpt = concludeRcpt
@@ -203,15 +209,15 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 			case blobcap.AcceptAbility:
 				acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, failure.FailureModel](concludeRcpt, blobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad accept receipt in conclude fx: %w", err)
+					return AddedBlob{}, fmt.Errorf("bad accept receipt in conclude fx: %w", err)
 				}
 			case w3sblobcap.AcceptAbility:
 				legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, failure.FailureModel](concludeRcpt, w3sblobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 				if err != nil {
-					return nil, nil, fmt.Errorf("bad (legacy) accept receipt in conclude fx: %w", err)
+					return AddedBlob{}, fmt.Errorf("bad (legacy) accept receipt in conclude fx: %w", err)
 				}
 			default:
-				return nil, nil, fmt.Errorf("unexpected capability in accept task: %s", ability)
+				return AddedBlob{}, fmt.Errorf("unexpected capability in accept task: %s", ability)
 			}
 		default:
 			log.Warnf("ignoring receipt for unexpected task: %s", concludeRcpt.Ran().Link())
@@ -224,7 +230,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	case allocateRcpt != nil:
 		allocateOk, err := result.Unwrap(result.MapError(allocateRcpt.Out(), failure.FromFailureModel))
 		if err != nil {
-			return nil, nil, fmt.Errorf("blob allocation failed: %w", err)
+			return AddedBlob{}, fmt.Errorf("blob allocation failed: %w", err)
 		}
 
 		address := allocateOk.Address
@@ -236,7 +242,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	case legacyAllocateRcpt != nil:
 		allocateOk, err := result.Unwrap(result.MapError(legacyAllocateRcpt.Out(), failure.FromFailureModel))
 		if err != nil {
-			return nil, nil, fmt.Errorf("blob allocation failed: %w", err)
+			return AddedBlob{}, fmt.Errorf("blob allocation failed: %w", err)
 		}
 
 		address := allocateOk.Address
@@ -246,25 +252,25 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 
 	default:
-		return nil, nil, fmt.Errorf("mandatory receipts not received in space/blob/add receipt")
+		return AddedBlob{}, fmt.Errorf("mandatory receipts not received in space/blob/add receipt")
 	}
 
 	if url != nil && headers != nil {
 		if err := putBlob(ctx, putClient, url, headers, contentBytes); err != nil {
-			return nil, nil, fmt.Errorf("putting blob: %w", err)
+			return AddedBlob{}, fmt.Errorf("putting blob: %w", err)
 		}
 	}
 
 	// invoke `ucan/conclude` with `http/put` receipt
 	if putRcpt == nil {
 		if err := c.sendPutReceipt(ctx, putTask); err != nil {
-			return nil, nil, fmt.Errorf("sending put receipt: %w", err)
+			return AddedBlob{}, fmt.Errorf("sending put receipt: %w", err)
 		}
 	} else {
 		putOk, _ := result.Unwrap(putRcpt.Out())
 		if putOk == nil {
 			if err := c.sendPutReceipt(ctx, putTask); err != nil {
-				return nil, nil, fmt.Errorf("sending put receipt: %w", err)
+				return AddedBlob{}, fmt.Errorf("sending put receipt: %w", err)
 			}
 		}
 	}
@@ -272,21 +278,23 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	// ensure the blob has been accepted
 	var anyAcceptRcpt receipt.AnyReceipt
 	var site ucan.Link
+	var pdpAcceptLink *ucan.Link
 	var rcptBlocks iter.Seq2[ipld.Block, error]
 	if acceptRcpt == nil && legacyAcceptRcpt == nil {
 		anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 		if err != nil {
-			return nil, nil, fmt.Errorf("polling accept: %w", err)
+			return AddedBlob{}, fmt.Errorf("polling accept: %w", err)
 		}
 	} else if acceptRcpt != nil {
 		acceptOk, failErr := result.Unwrap(result.MapError(acceptRcpt.Out(), failure.FromFailureModel))
 		if failErr != nil {
 			anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
-				return nil, nil, fmt.Errorf("polling accept: %w", err)
+				return AddedBlob{}, fmt.Errorf("polling accept: %w", err)
 			}
 		} else {
 			site = acceptOk.Site
+			pdpAcceptLink = acceptOk.PDP
 			rcptBlocks = acceptRcpt.Blocks()
 		}
 	} else if legacyAcceptRcpt != nil {
@@ -294,7 +302,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		if failErr != nil {
 			anyAcceptRcpt, err = c.receiptsClient.Poll(ctx, acceptTask.Link(), receiptclient.WithRetries(5))
 			if err != nil {
-				return nil, nil, fmt.Errorf("polling accept: %w", err)
+				return AddedBlob{}, fmt.Errorf("polling accept: %w", err)
 			}
 		} else {
 			site = acceptOk.Site
@@ -306,25 +314,26 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		if !legacyAccept {
 			acceptRcpt, err = receipt.Rebind[blobcap.AcceptOk, failure.FailureModel](anyAcceptRcpt, blobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 			if err != nil {
-				return nil, nil, fmt.Errorf("fetching accept receipt: %w", err)
+				return AddedBlob{}, fmt.Errorf("fetching accept receipt: %w", err)
 			}
 
 			acceptOk, err := result.Unwrap(result.MapError(acceptRcpt.Out(), failure.FromFailureModel))
 			if err != nil {
-				return nil, nil, fmt.Errorf("blob/accept failed: %w", err)
+				return AddedBlob{}, fmt.Errorf("blob/accept failed: %w", err)
 			}
 
 			site = acceptOk.Site
+			pdpAcceptLink = acceptOk.PDP
 			rcptBlocks = acceptRcpt.Blocks()
 		} else {
 			legacyAcceptRcpt, err = receipt.Rebind[w3sblobcap.AcceptOk, failure.FailureModel](anyAcceptRcpt, w3sblobcap.AcceptOkType(), failure.FailureType(), captypes.Converters...)
 			if err != nil {
-				return nil, nil, fmt.Errorf("fetching legacy accept receipt: %w", err)
+				return AddedBlob{}, fmt.Errorf("fetching legacy accept receipt: %w", err)
 			}
 
 			acceptOk, err := result.Unwrap(result.MapError(legacyAcceptRcpt.Out(), failure.FromFailureModel))
 			if err != nil {
-				return nil, nil, fmt.Errorf("web3.storage/blob/accept failed: %w", err)
+				return AddedBlob{}, fmt.Errorf("web3.storage/blob/accept failed: %w", err)
 			}
 
 			site = acceptOk.Site
@@ -332,17 +341,28 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 	}
 
-	locationBlocks, err := blockstore.NewBlockStore(blockstore.WithBlocksIterator(rcptBlocks))
+	blksReader, err := blockstore.NewBlockStore(blockstore.WithBlocksIterator(rcptBlocks))
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading location commitment blocks: %w", err)
+		return AddedBlob{}, fmt.Errorf("reading location commitment blocks: %w", err)
 	}
 
-	location, err := delegation.NewDelegationView(site, locationBlocks)
+	location, err := delegation.NewDelegationView(site, blksReader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating location delegation: %w", err)
+		return AddedBlob{}, fmt.Errorf("creating location delegation: %w", err)
 	}
 
-	return contentHash, location, nil
+	var pdpAccept *invocation.Invocation
+	if pdpAcceptLink != nil {
+		*pdpAccept, err = invocation.NewInvocationView(*pdpAcceptLink, blksReader)
+		if err != nil {
+			return AddedBlob{}, fmt.Errorf("creating pdp accept delegation: %w", err)
+		}
+	}
+	return AddedBlob{
+		Multihash: contentHash,
+		Location:  location,
+		PDPAccept: pdpAccept,
+	}, nil
 }
 
 func getConcludeReceipt(concludeFx invocation.Invocation) (receipt.AnyReceipt, error) {
