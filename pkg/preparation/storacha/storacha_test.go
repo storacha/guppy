@@ -131,6 +131,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		shardPieceLink := cidlink.Link{Cid: shardPieceCID}
 
 		require.Equal(t, shardPieceLink, client.FilecoinOfferInvocations[0].Piece)
+		require.Equal(t, *client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())

@@ -13,7 +13,6 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
@@ -40,9 +39,9 @@ var (
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
 type Client interface {
-	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error)
+	SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (client.AddedBlob, error)
 	SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize uint64, rootCID cid.Cid, space did.DID) error
-	FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link) (filecoincap.OfferOk, error)
+	FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link, opts ...client.FilecoinOfferOption) (filecoincap.OfferOk, error)
 	UploadAdd(ctx context.Context, space did.DID, root ipld.Link, shards []ipld.Link) (upload.AddOk, error)
 	SpaceBlobReplicate(ctx context.Context, space did.DID, blob types.Blob, replicaCount uint, locationCommitment delegation.Delegation) (spaceblobcap.ReplicateOk, fx.Effects, error)
 }
@@ -110,12 +109,12 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		}
 	}()
 
-	digest, locationCommitment, err := a.spaceBlobAdd(ctx, addReader, spaceDID)
+	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID)
 	if err != nil {
 		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 	}
 
-	err = shard.Added(digest)
+	err = shard.Added(addedBlob.Multihash)
 	if err != nil {
 		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
 	}
@@ -123,12 +122,16 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	span.SetAttributes(attribute.String("shard.digest", shard.Digest().String()))
 	span.SetAttributes(attribute.String("shard.cid", shard.CID().String()))
 
-	err = a.spaceBlobReplicate(ctx, shard, spaceDID, locationCommitment)
+	err = a.spaceBlobReplicate(ctx, shard, spaceDID, addedBlob.Location)
 	if err != nil {
 		return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
 	}
 
-	err = a.filecoinOffer(ctx, shard, spaceDID, commpCalc)
+	opts := []client.FilecoinOfferOption{}
+	if addedBlob.PDPAccept != nil {
+		opts = append(opts, client.WithPDPAcceptInvocation(*addedBlob.PDPAccept))
+	}
+	err = a.filecoinOffer(ctx, shard, spaceDID, commpCalc, opts...)
 	if err != nil {
 		return err
 	}
@@ -140,7 +143,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	return nil
 }
 
-func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID) (multihash.Multihash, delegation.Delegation, error) {
+func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID) (client.AddedBlob, error) {
 	ctx, span := tracer.Start(ctx, "space-blob-add")
 	defer span.End()
 
@@ -164,7 +167,7 @@ func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, s
 	return err
 }
 
-func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, commpCalc *commp.Calc) error {
+func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, commpCalc *commp.Calc, opts ...client.FilecoinOfferOption) error {
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
 
@@ -188,7 +191,7 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 		return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
 	}
 
-	_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID})
+	_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID}, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to offer shard %s: %w", shard.CID(), err)
 	}
@@ -215,7 +218,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
 		}
 
-		indexDigest, locationCommitment, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
+		addedBlob, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
 		if err != nil {
 			return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
 		}
@@ -224,17 +227,17 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			ctx,
 			spaceDID,
 			types.Blob{
-				Digest: indexDigest,
+				Digest: addedBlob.Multihash,
 				Size:   uint64(len(indexBytes)),
 			},
 			3,
-			locationCommitment,
+			addedBlob.Location,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to replicate index: %w", err)
 		}
 
-		indexCID := cid.NewCidV1(uint64(multicodec.Car), indexDigest)
+		indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Multihash)
 		err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
 		if err != nil {
 			return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)

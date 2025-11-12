@@ -31,13 +31,13 @@ func TestSpaceBlobAdd(t *testing.T) {
 
 	testBlob := bytes.NewReader([]byte("test"))
 
-	returnedDigest, _, err := c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(putClient))
+	addedBlob, err := c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(putClient))
 	require.NoError(t, err)
 
 	digest, err := multihash.Sum([]byte("test"), multihash.SHA2_256, -1)
 	require.NoError(t, err)
 
-	require.Equal(t, digest, returnedDigest)
+	require.Equal(t, digest, addedBlob.Multihash)
 	require.Equal(t, []byte("test"), testutil.ReceivedBlobs(putClient).Get(digest))
 	require.Equal(t, 1, testutil.ReceivedBlobs(putClient).Size())
 }

@@ -11,13 +11,16 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multihash"
 	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
+	pdpcap "github.com/storacha/go-libstoracha/capabilities/pdp"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
+	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/stretchr/testify/require"
@@ -37,7 +40,8 @@ type spaceBlobAddInvocation struct {
 	Space     did.DID
 	BlobAdded []byte
 
-	ReturnedLocation delegation.Delegation
+	ReturnedPDPAccept *invocation.Invocation
+	ReturnedLocation  delegation.Delegation
 }
 
 type spaceIndexAddInvocation struct {
@@ -58,6 +62,7 @@ type filecoinOfferInvocation struct {
 	Space   did.DID
 	Content ipld.Link
 	Piece   ipld.Link
+	Options *client.FilecoinOfferOptions
 }
 
 type uploadAddInvocation struct {
@@ -68,23 +73,39 @@ type uploadAddInvocation struct {
 
 var _ storacha.Client = (*MockClient)(nil)
 
-func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (multihash.Multihash, delegation.Delegation, error) {
+func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
 	contentBytes, err := io.ReadAll(content)
 	require.NoError(m.T, err, "reading content for SpaceBlobAdd")
 
 	location := testutil.RandomLocationDelegation(m.T)
 
-	m.SpaceBlobAddInvocations = append(m.SpaceBlobAddInvocations, spaceBlobAddInvocation{
-		Space:     space,
-		BlobAdded: contentBytes,
-
-		ReturnedLocation: location,
-	})
-
 	digest, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
 	require.NoError(m.T, err, "summing digest for SpaceBlobAdd")
 
-	return digest, location, nil
+	dummyPrincipal, err := ed25519signer.Generate()
+	require.NoError(m.T, err)
+
+	pdpAcceptInv, err := pdpcap.Accept.Invoke(
+		dummyPrincipal,
+		dummyPrincipal.DID(),
+		space.DID().String(),
+		pdpcap.AcceptCaveats{
+			Blob: digest,
+		},
+	)
+	require.NoError(m.T, err)
+	m.SpaceBlobAddInvocations = append(m.SpaceBlobAddInvocations, spaceBlobAddInvocation{
+		Space:             space,
+		BlobAdded:         contentBytes,
+		ReturnedPDPAccept: (*invocation.Invocation)(&pdpAcceptInv),
+		ReturnedLocation:  location,
+	})
+
+	return client.AddedBlob{
+		Multihash: digest,
+		Location:  location,
+		PDPAccept: (*invocation.Invocation)(&pdpAcceptInv),
+	}, nil
 }
 
 func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize uint64, rootCID cid.Cid, space did.DID) error {
@@ -98,11 +119,12 @@ func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexS
 	return nil
 }
 
-func (m *MockClient) FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link) (filecoincap.OfferOk, error) {
+func (m *MockClient) FilecoinOffer(ctx context.Context, space did.DID, content ipld.Link, piece ipld.Link, opts ...client.FilecoinOfferOption) (filecoincap.OfferOk, error) {
 	m.FilecoinOfferInvocations = append(m.FilecoinOfferInvocations, filecoinOfferInvocation{
 		Space:   space,
 		Content: content,
 		Piece:   piece,
+		Options: client.NewFilecoinOfferOptions(opts),
 	})
 
 	return filecoincap.OfferOk{Piece: piece}, nil
