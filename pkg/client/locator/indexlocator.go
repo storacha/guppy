@@ -1,10 +1,10 @@
-package indexersession
+package locator
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
 
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
@@ -12,24 +12,29 @@ import (
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/ucan"
+	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
 
-func New(indexer IndexerClient) *IndexerSession {
-	return &IndexerSession{
-		indexer:   indexer,
-		urls:      blobindex.NewMultihashMap[[]url.URL](-1),
-		positions: blobindex.NewMultihashMap[blobindex.Position](-1),
-		shards:    blobindex.NewMultihashMap[mh.Multihash](-1),
+func NewIndexLocator(indexer IndexerClient, delegations []delegation.Delegation) *indexLocator {
+	return &indexLocator{
+		indexer:     indexer,
+		delegations: delegations,
+		commitments: blobindex.NewMultihashMap[[]ucan.Capability[assert.LocationCaveats]](-1),
+		positions:   blobindex.NewMultihashMap[blobindex.Position](-1),
+		shards:      blobindex.NewMultihashMap[mh.Multihash](-1),
 	}
 }
 
-type IndexerSession struct {
-	indexer   IndexerClient
-	urls      blobindex.MultihashMap[[]url.URL]
-	positions blobindex.MultihashMap[blobindex.Position]
-	shards    blobindex.MultihashMap[mh.Multihash]
+type indexLocator struct {
+	indexer     IndexerClient
+	delegations []delegation.Delegation
+	commitments blobindex.MultihashMap[[]ucan.Capability[assert.LocationCaveats]]
+	positions   blobindex.MultihashMap[blobindex.Position]
+	shards      blobindex.MultihashMap[mh.Multihash]
 }
+
+var _ Locator = (*indexLocator)(nil)
 
 type IndexerClient interface {
 	QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error)
@@ -43,45 +48,46 @@ func (e NotFoundError) Error() string {
 	return fmt.Sprintf("no locations found for block %s", e.Hash.String())
 }
 
-type Location struct {
-	Urls     []url.URL
-	Position blobindex.Position
-}
-
 // TK: Should take a space?
-func (s *IndexerSession) Locate(ctx context.Context, hash mh.Multihash) (Location, error) {
+func (s *indexLocator) Locate(ctx context.Context, hash mh.Multihash) (Location, error) {
 	location := s.getCached(hash)
 
-	if location.Urls == nil {
+	if location.Commitments == nil {
 		if err := s.query(ctx, hash); err != nil {
 			return Location{}, err
 		}
 		location = s.getCached(hash)
 	}
 
-	if location.Urls == nil {
+	if location.Commitments == nil {
 		return Location{}, &NotFoundError{Hash: hash}
 	}
 
 	return location, nil
 }
 
-func (s *IndexerSession) getCached(hash mh.Multihash) Location {
-	if s.positions.Has(hash) && s.shards.Has(hash) && s.urls.Has(s.shards.Get(hash)) {
+func (s *indexLocator) getCached(hash mh.Multihash) Location {
+	if s.positions.Has(hash) && s.shards.Has(hash) && s.commitments.Has(s.shards.Get(hash)) {
 		return Location{
-			Urls:     s.urls.Get(s.shards.Get(hash)),
-			Position: s.positions.Get(hash),
+			Shard:       s.shards.Get(hash),
+			Commitments: s.commitments.Get(s.shards.Get(hash)),
+			Position:    s.positions.Get(hash),
 		}
 	}
 
 	return Location{}
 }
 
-func (s *IndexerSession) query(ctx context.Context, hash mh.Multihash) error {
+func (s *indexLocator) query(ctx context.Context, hash mh.Multihash) error {
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
-		Hashes: []mh.Multihash{hash},
+		Hashes:      []mh.Multihash{hash},
+		Delegations: s.delegations,
 	})
 	if err != nil {
+		var failedResponseErr indexclient.ErrFailedResponse
+		if ok := errors.As(err, &failedResponseErr); ok {
+			return fmt.Errorf("indexer responded with status %d: %s", failedResponseErr.StatusCode, failedResponseErr.Body)
+		}
 		return fmt.Errorf("querying claims for %s: %w", hash.String(), err)
 	}
 
@@ -107,11 +113,11 @@ func (s *IndexerSession) query(ctx context.Context, hash mh.Multihash) error {
 		cap := match.Value()
 		claimHash := cap.Nb().Content.Hash()
 
-		var knownLocations []url.URL
-		if s.urls.Has(claimHash) {
-			knownLocations = s.urls.Get(claimHash)
+		var knownCommitments []ucan.Capability[assert.LocationCaveats]
+		if s.commitments.Has(claimHash) {
+			knownCommitments = s.commitments.Get(claimHash)
 		}
-		s.urls.Set(claimHash, append(knownLocations, cap.Nb().Location...))
+		s.commitments.Set(claimHash, append(knownCommitments, cap))
 	}
 
 	for _, link := range result.Indexes() {

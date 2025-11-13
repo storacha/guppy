@@ -1,11 +1,10 @@
-package indexersession_test
+package locator_test
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"iter"
-	"net/url"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -20,17 +19,18 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld/block"
 	"github.com/storacha/go-ucanto/core/ipld/hash/sha256"
-	"github.com/storacha/guppy/pkg/client/indexersession"
+	"github.com/storacha/guppy/pkg/client/locator"
+	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/indexing-service/pkg/types"
 	"github.com/stretchr/testify/require"
 )
 
-func TestIndexerSession(t *testing.T) {
+func TestLocator(t *testing.T) {
 	blockHash := testutil.RandomMultihash(t)
 	rootLink := testutil.RandomCID(t)
 	shardHash := testutil.RandomMultihash(t)
-	space := testutil.RandomDID(t)
 
+	space := testutil.RandomSigner(t)
 	provider1 := testutil.RandomSigner(t)
 	provider2 := testutil.RandomSigner(t)
 
@@ -39,9 +39,9 @@ func TestIndexerSession(t *testing.T) {
 		provider1.DID(),
 		provider1.DID().String(),
 		assertcap.LocationCaveats{
-			Space:   space,
+			Space:   space.DID(),
 			Content: captypes.FromHash(shardHash),
-			Location: urls(
+			Location: ctestutil.Urls(
 				"https://storage1.example.com/block/abc123",
 				"https://storage2.example.com/block/abc123",
 			),
@@ -53,9 +53,9 @@ func TestIndexerSession(t *testing.T) {
 		provider2.DID(),
 		provider2.DID().String(),
 		assertcap.LocationCaveats{
-			Space:   space,
+			Space:   space.DID(),
 			Content: captypes.FromHash(shardHash),
-			Location: urls(
+			Location: ctestutil.Urls(
 				"https://storage3.example.com/block/abc123",
 			),
 		},
@@ -67,17 +67,27 @@ func TestIndexerSession(t *testing.T) {
 		Length: 2048,
 	})
 
+	// These could be any kind of delegations; we just need to see that they get
+	// sent to the indexer, whatever they are.
+	requiredDelegations := []delegation.Delegation{
+		testutil.RandomLocationDelegation(t),
+		testutil.RandomEqualsDelegation(t),
+	}
+
 	mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
-	session := indexersession.New(mockIndexer)
+	session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
 
 	location, err := session.Locate(t.Context(), blockHash)
 	require.NoError(t, err)
 
-	require.ElementsMatch(t, urls(
+	require.Len(t, location.Commitments, 2)
+	require.ElementsMatch(t, ctestutil.Urls(
 		"https://storage1.example.com/block/abc123",
 		"https://storage2.example.com/block/abc123",
+	), location.Commitments[0].Nb().Location)
+	require.ElementsMatch(t, ctestutil.Urls(
 		"https://storage3.example.com/block/abc123",
-	), location.Urls)
+	), location.Commitments[1].Nb().Location)
 
 	require.Equal(t, blobindex.Position{
 		Offset: 10,
@@ -85,23 +95,14 @@ func TestIndexerSession(t *testing.T) {
 	}, location.Position)
 
 	require.Len(t, mockIndexer.Queries, 1)
+	require.Equal(t, types.Query{
+		Hashes:      []multihash.Multihash{blockHash},
+		Delegations: requiredDelegations,
+	}, mockIndexer.Queries[0])
 
 	location, err = session.Locate(t.Context(), blockHash)
 	require.NoError(t, err)
 	require.Len(t, mockIndexer.Queries, 1)
-}
-
-// urls parses strings into url.URLs and panics on error.
-func urls(strs ...string) []url.URL {
-	var result []url.URL
-	for _, s := range strs {
-		u, err := url.Parse(s)
-		if err != nil {
-			panic(err)
-		}
-		result = append(result, *u)
-	}
-	return result
 }
 
 func newMockIndexerClient(claims []delegation.Delegation, indexes []blobindex.ShardedDagIndexView) *mockIndexerClient {
@@ -118,7 +119,7 @@ type mockIndexerClient struct {
 	Queries []types.Query
 }
 
-var _ indexersession.IndexerClient = (*mockIndexerClient)(nil)
+var _ locator.IndexerClient = (*mockIndexerClient)(nil)
 
 func (m *mockIndexerClient) QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error) {
 	m.Queries = append(m.Queries, query)
