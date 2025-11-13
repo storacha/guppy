@@ -19,6 +19,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld/block"
 	"github.com/storacha/go-ucanto/core/ipld/hash/sha256"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/indexing-service/pkg/types"
@@ -77,7 +78,7 @@ func TestLocator(t *testing.T) {
 	mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
 	session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
 
-	location, err := session.Locate(t.Context(), blockHash)
+	location, err := session.Locate(t.Context(), space.DID(), blockHash)
 	require.NoError(t, err)
 
 	require.Len(t, location.Commitments, 2)
@@ -98,9 +99,12 @@ func TestLocator(t *testing.T) {
 	require.Equal(t, types.Query{
 		Hashes:      []multihash.Multihash{blockHash},
 		Delegations: requiredDelegations,
+		Match: types.Match{
+			Subject: []did.DID{space.DID()},
+		},
 	}, mockIndexer.Queries[0])
 
-	location, err = session.Locate(t.Context(), blockHash)
+	location, err = session.Locate(t.Context(), space.DID(), blockHash)
 	require.NoError(t, err)
 	require.Len(t, mockIndexer.Queries, 1)
 }
