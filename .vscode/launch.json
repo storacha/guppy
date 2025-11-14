@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Retrieve Command",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}",
+      "args": [
+        "retrieve",
+        "did:key:z6Mkw7UfzzD8HA76BAH9DJTmy4hVvHBN1qcgURFuqZHXbxd3",
+        "bafybeiby6meced5s4thavmjc2n4jcekc76jqr5fg6wtceyfjalzp4fefwq",
+        "out"
+      ]
+    }
+  ]
+}
