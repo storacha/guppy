@@ -11,11 +11,10 @@ import (
 )
 
 type Locator interface {
-	Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) (Location, error)
+	Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) ([]Location, error)
 }
 
 type Location struct {
-	Shard       mh.Multihash
-	Commitments []ucan.Capability[assert.LocationCaveats]
-	Position    blobindex.Position
+	Commitment ucan.Capability[assert.LocationCaveats]
+	Position   blobindex.Position
 }

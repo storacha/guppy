@@ -22,8 +22,7 @@ func NewIndexLocator(indexer IndexerClient, delegations []delegation.Delegation)
 		indexer:     indexer,
 		delegations: delegations,
 		commitments: make(map[string][]ucan.Capability[assert.LocationCaveats]),
-		positions:   make(map[string]blobindex.Position),
-		shards:      make(map[string]mh.Multihash),
+		inclusions:  make(map[string][]inclusion),
 	}
 }
 
@@ -31,8 +30,12 @@ type indexLocator struct {
 	indexer     IndexerClient
 	delegations []delegation.Delegation
 	commitments map[string][]ucan.Capability[assert.LocationCaveats]
-	positions   map[string]blobindex.Position
-	shards      map[string]mh.Multihash
+	inclusions  map[string][]inclusion
+}
+
+type inclusion struct {
+	shard    mh.Multihash
+	position blobindex.Position
 }
 
 func cacheKey(spaceDID did.DID, hash mh.Multihash) string {
@@ -53,46 +56,42 @@ func (e NotFoundError) Error() string {
 	return fmt.Sprintf("no locations found for block %s", e.Hash.String())
 }
 
-func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) (Location, error) {
-	location := s.getCached(spaceDID, hash)
+func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) ([]Location, error) {
+	locations, ok := s.getCached(spaceDID, hash)
 
-	if location.Commitments == nil {
+	if !ok {
 		if err := s.query(ctx, spaceDID, hash); err != nil {
-			return Location{}, err
+			return nil, err
 		}
-		location = s.getCached(spaceDID, hash)
+		locations, ok = s.getCached(spaceDID, hash)
+		if !ok {
+			return nil, &NotFoundError{Hash: hash}
+		}
 	}
 
-	if location.Commitments == nil {
-		return Location{}, &NotFoundError{Hash: hash}
-	}
-
-	return location, nil
+	return locations, nil
 }
 
-func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) Location {
-	hashKey := cacheKey(spaceDID, hash)
-	shard, hasShardInfo := s.shards[hashKey]
-	if !hasShardInfo {
-		return Location{}
+func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) ([]Location, bool) {
+	inclusions, hasInclusions := s.inclusions[cacheKey(spaceDID, hash)]
+	if !hasInclusions {
+		return nil, false
 	}
 
-	position, hasPosition := s.positions[hashKey]
-	if !hasPosition {
-		return Location{}
+	var locations []Location
+	for _, inclusion := range inclusions {
+		shardCommitments, hasCommitments := s.commitments[cacheKey(spaceDID, inclusion.shard)]
+		if hasCommitments {
+			for _, commitment := range shardCommitments {
+				locations = append(locations, Location{
+					Commitment: commitment,
+					Position:   inclusion.position,
+				})
+			}
+		}
 	}
 
-	shardKey := cacheKey(spaceDID, shard)
-	commitments, hasCommitments := s.commitments[shardKey]
-	if !hasCommitments {
-		return Location{}
-	}
-
-	return Location{
-		Shard:       shard,
-		Commitments: commitments,
-		Position:    position,
-	}
+	return locations, len(locations) > 0
 }
 
 func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Multihash) error {
@@ -134,8 +133,7 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 		claimHash := cap.Nb().Content.Hash()
 
 		claimKey := cacheKey(spaceDID, claimHash)
-		knownCommitments := s.commitments[claimKey]
-		s.commitments[claimKey] = append(knownCommitments, cap)
+		s.commitments[claimKey] = append(s.commitments[claimKey], cap)
 	}
 
 	for _, link := range result.Indexes() {
@@ -153,9 +151,10 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 
 		for shardHash, shardMap := range index.Shards().Iterator() {
 			for sliceHash, position := range shardMap.Iterator() {
-				sliceKey := cacheKey(spaceDID, sliceHash)
-				s.positions[sliceKey] = position
-				s.shards[sliceKey] = shardHash
+				s.inclusions[cacheKey(spaceDID, sliceHash)] = append(s.inclusions[cacheKey(spaceDID, sliceHash)], inclusion{
+					shard:    shardHash,
+					position: position,
+				})
 			}
 		}
 	}

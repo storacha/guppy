@@ -78,24 +78,27 @@ func TestLocator(t *testing.T) {
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
-		session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
 
-		location, err := session.Locate(t.Context(), space.DID(), blockHash)
+		locations, err := locator.Locate(t.Context(), space.DID(), blockHash)
 		require.NoError(t, err)
 
-		require.Len(t, location.Commitments, 2)
+		require.Len(t, locations, 2)
 		require.ElementsMatch(t, ctestutil.Urls(
 			"https://storage1.example.com/block/abc123",
 			"https://storage2.example.com/block/abc123",
-		), location.Commitments[0].Nb().Location)
-		require.ElementsMatch(t, ctestutil.Urls(
-			"https://storage3.example.com/block/abc123",
-		), location.Commitments[1].Nb().Location)
-
+		), locations[0].Commitment.Nb().Location)
 		require.Equal(t, blobindex.Position{
 			Offset: 10,
 			Length: 2048,
-		}, location.Position)
+		}, locations[0].Position)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage3.example.com/block/abc123",
+		), locations[1].Commitment.Nb().Location)
+		require.Equal(t, blobindex.Position{
+			Offset: 10,
+			Length: 2048,
+		}, locations[1].Position)
 
 		require.Len(t, mockIndexer.Queries, 1)
 		require.Equal(t, types.Query{
@@ -106,7 +109,7 @@ func TestLocator(t *testing.T) {
 			},
 		}, mockIndexer.Queries[0])
 
-		location, err = session.Locate(t.Context(), space.DID(), blockHash)
+		locations, err = locator.Locate(t.Context(), space.DID(), blockHash)
 		require.NoError(t, err)
 		require.Len(t, mockIndexer.Queries, 1)
 	})
@@ -152,30 +155,34 @@ func TestLocator(t *testing.T) {
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim}, []blobindex.ShardedDagIndexView{index})
-		session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
 
 		// First, locate block1
-		location1, err := session.Locate(t.Context(), space.DID(), block1Hash)
+		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
 		require.NoError(t, err)
-		require.Equal(t, shardHash, location1.Shard)
+		require.Len(t, locations1, 1)
 		require.Equal(t, blobindex.Position{
 			Offset: 0,
 			Length: 1024,
-		}, location1.Position)
-		require.Len(t, location1.Commitments, 1)
+		}, locations1[0].Position)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage.example.com/shard/xyz",
+		), locations1[0].Commitment.Nb().Location)
 
 		// Verify that we made one query
 		require.Len(t, mockIndexer.Queries, 1)
 
 		// Now locate block2, which should be served from cache
-		location2, err := session.Locate(t.Context(), space.DID(), block2Hash)
+		locations2, err := locator.Locate(t.Context(), space.DID(), block2Hash)
 		require.NoError(t, err)
-		require.Equal(t, shardHash, location2.Shard)
+		require.Len(t, locations2, 1)
 		require.Equal(t, blobindex.Position{
 			Offset: 1024,
 			Length: 2048,
-		}, location2.Position)
-		require.Len(t, location2.Commitments, 1)
+		}, locations2[0].Position)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage.example.com/shard/xyz",
+		), locations2[0].Commitment.Nb().Location)
 
 		// Verify that we STILL have only one query - block2 came from cache
 		require.Len(t, mockIndexer.Queries, 1, "Second block should be served from cache without making a new query")
@@ -242,20 +249,20 @@ func TestLocator(t *testing.T) {
 		session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
 
 		// Locate the block for space1
-		location1, err := session.Locate(t.Context(), space1.DID(), blockHash)
+		locations1, err := session.Locate(t.Context(), space1.DID(), blockHash)
 		require.NoError(t, err)
-		require.Len(t, location1.Commitments, 1)
+		require.Len(t, locations1, 1)
 		require.ElementsMatch(t, ctestutil.Urls(
 			"https://storage1.example.com/space1/block",
-		), location1.Commitments[0].Nb().Location)
+		), locations1[0].Commitment.Nb().Location)
 
 		// Locate the block for space2 - should get different location
-		location2, err := session.Locate(t.Context(), space2.DID(), blockHash)
+		locations2, err := session.Locate(t.Context(), space2.DID(), blockHash)
 		require.NoError(t, err)
-		require.Len(t, location2.Commitments, 1)
+		require.Len(t, locations2, 1)
 		require.ElementsMatch(t, ctestutil.Urls(
 			"https://storage2.example.com/space2/block",
-		), location2.Commitments[0].Nb().Location)
+		), locations2[0].Commitment.Nb().Location)
 
 		// Verify both queries were made (cache didn't incorrectly return space1's result for space2)
 		require.Equal(t, 2, mockIndexer.queryCount, "Cache should be space-scoped, requiring separate queries for each space")
