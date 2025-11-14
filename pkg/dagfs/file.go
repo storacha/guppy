@@ -7,29 +7,31 @@ import (
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 )
 
-type file struct {
-	name      string
-	fsNode    *unixfs.FSNode
-	dagReader uio.DagReader
+type ufsFile struct {
+	name   string
+	fsNode *unixfs.FSNode
+	uio.DagReader
 }
 
-var _ fs.File = (*file)(nil)
+var _ fs.File = (*ufsFile)(nil)
 
-func (f *file) Stat() (fs.FileInfo, error) {
-	return &dirEntryFileInfo{
-		name:   f.name,
-		fsNode: f.fsNode,
+func (uf *ufsFile) Stat() (fs.FileInfo, error) {
+	return &ufsDirEntryFileInfo{
+		name:   uf.name,
+		fsNode: uf.fsNode,
 	}, nil
 }
 
-func (f *file) Read(p []byte) (int, error) {
-	return f.dagReader.Read(p)
+type rawFile struct {
+	name string
+	uio.DagReader
 }
 
-func (f *file) Close() error {
-	return f.dagReader.Close()
-}
+var _ fs.File = (*rawFile)(nil)
 
-func (f *file) Seek(offset int64, whence int) (int64, error) {
-	return f.dagReader.Seek(offset, whence)
+func (rf *rawFile) Stat() (fs.FileInfo, error) {
+	return &rawDirEntryFileInfo{
+		name: rf.name,
+		size: rf.DagReader.Size(),
+	}, nil
 }

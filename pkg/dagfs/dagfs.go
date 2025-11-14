@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path"
 
+	"github.com/ipfs/boxo/ipld/merkledag"
 	"github.com/ipfs/boxo/ipld/unixfs"
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 	"github.com/ipfs/go-cid"
@@ -49,10 +50,7 @@ func (dfs *dagFS) open(fullPath string) (fs.File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get root node: %w", err)
 		}
-
-		name := fullPath
-
-		return dfs.openNode(rootNode, name)
+		return dfs.openNode(rootNode, fullPath)
 	} else {
 		dirPath, name := path.Split(fullPath)
 		dirPath = path.Clean(dirPath)
@@ -89,31 +87,48 @@ func (dfs *dagFS) open(fullPath string) (fs.File, error) {
 }
 
 func (dfs *dagFS) openNode(node ipldfmt.Node, name string) (fs.File, error) {
-	fsNode, err := unixfs.ExtractFSNode(node)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract UnixFS node: %w", err)
-	}
-
-	if fsNode.IsDir() {
-		uioDir, err := uio.NewDirectoryFromNode(dfs.dagService, node)
+	switch node := node.(type) {
+	case *merkledag.ProtoNode:
+		fsNode, err := unixfs.ExtractFSNode(node)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create directory from root node: %w", err)
+			return nil, fmt.Errorf("failed to extract UnixFS node: %w", err)
 		}
-		return &dir{
-			ctx:        dfs.ctx,
-			uioDir:     uioDir,
-			name:       name,
-			dagService: dfs.dagService,
-		}, nil
-	} else {
-		uioFile, err := uio.NewDagReader(dfs.ctx, node, dfs.dagService)
+
+		if fsNode.IsDir() {
+			uioDir, err := uio.NewDirectoryFromNode(dfs.dagService, node)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create directory from root node: %w", err)
+			}
+			return &dir{
+				ctx:        dfs.ctx,
+				uioDir:     uioDir,
+				name:       name,
+				dagService: dfs.dagService,
+			}, nil
+		} else {
+			dagReader, err := uio.NewDagReader(dfs.ctx, node, dfs.dagService)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create file reader: %w", err)
+			}
+			return &ufsFile{
+				name:      name,
+				fsNode:    fsNode,
+				DagReader: dagReader,
+			}, nil
+		}
+
+	case *merkledag.RawNode:
+		dagReader, err := uio.NewDagReader(dfs.ctx, node, dfs.dagService)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file reader: %w", err)
 		}
-		return &file{
+		return &rawFile{
 			name:      name,
-			fsNode:    fsNode,
-			dagReader: uioFile,
+			DagReader: dagReader,
 		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported node type for file %s: %T", name, node)
 	}
+
 }
