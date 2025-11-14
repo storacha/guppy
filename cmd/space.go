@@ -498,7 +498,7 @@ func saveDelegationToFile(del delegation.Delegation, filepath string) error {
 
 func init() {
 	rootCmd.AddCommand(spaceCmd)
-	
+
 	spaceCmd.AddCommand(spaceCreateCmd)
 	spaceCmd.AddCommand(spaceLsCmd)
 	spaceCmd.AddCommand(spaceUseCmd)
