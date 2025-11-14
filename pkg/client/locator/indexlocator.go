@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
@@ -29,6 +30,7 @@ func NewIndexLocator(indexer IndexerClient, delegations []delegation.Delegation)
 type indexLocator struct {
 	indexer     IndexerClient
 	delegations []delegation.Delegation
+	mu          sync.RWMutex
 	commitments map[string][]ucan.Capability[assert.LocationCaveats]
 	inclusions  map[string][]inclusion
 }
@@ -73,6 +75,9 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Mul
 }
 
 func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) ([]Location, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	inclusions, hasInclusions := s.inclusions[cacheKey(spaceDID, hash)]
 	if !hasInclusions {
 		return nil, false
@@ -114,6 +119,9 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 	if err != nil {
 		return err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, link := range result.Claims() {
 		d, err := delegation.NewDelegationView(link, bs)
