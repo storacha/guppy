@@ -36,8 +36,10 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment
 		return nil, fmt.Errorf("parsing DID of storage provider `%s`: %w", locationCommitment.With(), err)
 	}
 
-	// TK: Trim these down
-	delegations := c.Proofs()
+	delegations := c.Proofs(CapabilityQuery{
+		Can:  contentcap.Retrieve.Can(),
+		With: space.String(),
+	})
 	prfs := make([]delegation.Proof, 0, len(delegations))
 	for _, del := range delegations {
 		prfs = append(prfs, delegation.FromDelegation(del))
