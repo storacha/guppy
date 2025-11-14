@@ -59,14 +59,14 @@ func (e NotFoundError) Error() string {
 }
 
 func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) ([]Location, error) {
-	locations, ok := s.getCached(spaceDID, hash)
+	locations, inclusionsKnown := s.getCached(spaceDID, hash)
 
-	if !ok {
-		if err := s.query(ctx, spaceDID, hash); err != nil {
+	if len(locations) == 0 {
+		if err := s.query(ctx, spaceDID, hash, inclusionsKnown); err != nil {
 			return nil, err
 		}
-		locations, ok = s.getCached(spaceDID, hash)
-		if !ok {
+		locations, _ = s.getCached(spaceDID, hash)
+		if len(locations) == 0 {
 			return nil, &NotFoundError{Hash: hash}
 		}
 	}
@@ -74,6 +74,13 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Mul
 	return locations, nil
 }
 
+// getCached retrieves cached locations for the given spaceDID and hash. It
+// returns the locations and a boolean indicating whether the the block is
+// already known to be in any shard. If the second return value is false, the
+// caller should perform a full query to the indexer to attempt to discover new
+// locations. If true, if the locations slice is empty, the caller can perform a
+// location-only query to fetch the remaining location information (or to
+// confirm that there are no locations).
 func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) ([]Location, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -96,16 +103,24 @@ func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) ([]Locatio
 		}
 	}
 
-	return locations, len(locations) > 0
+	return locations, true
 }
 
-func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Multihash) error {
+func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Multihash, omitIndexes bool) error {
+	var queryType types.QueryType
+	if omitIndexes {
+		queryType = types.QueryTypeLocation
+	} else {
+		queryType = types.QueryTypeStandard
+	}
+
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
 		Hashes:      []mh.Multihash{hash},
 		Delegations: s.delegations,
 		Match: types.Match{
 			Subject: []did.DID{spaceDID},
 		},
+		Type: queryType,
 	})
 	if err != nil {
 		var failedResponseErr indexclient.ErrFailedResponse
