@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 
+	"github.com/ipfs/boxo/ipld/merkledag"
 	"github.com/ipfs/boxo/ipld/unixfs"
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 	ipldfmt "github.com/ipfs/go-ipld-format"
@@ -42,7 +43,7 @@ func (d *dir) Stat() (fs.FileInfo, error) {
 		d.fsNode = fsNode
 	}
 
-	return &dirEntryFileInfo{
+	return &ufsDirEntryFileInfo{
 		name:   d.name,
 		fsNode: d.fsNode,
 	}, nil
@@ -58,6 +59,7 @@ func (d *dir) Close() error {
 }
 
 func (d *dir) ReadDir(n int) ([]fs.DirEntry, error) {
+	// TK: Any need to do this?
 	if d.links == nil {
 		links, err := d.uioDir.Links(d.ctx)
 		if err != nil {
@@ -88,14 +90,28 @@ func (d *dir) ReadDir(n int) ([]fs.DirEntry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node for link %s: %w", link.Name, err)
 		}
-		fsNode, err := unixfs.ExtractFSNode(node)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract FSNode for link %s: %w", link.Name, err)
+
+		switch node := node.(type) {
+		case *merkledag.ProtoNode:
+			// This is a ProtoNode with UnixFS metadata
+			fsNode, err := unixfs.ExtractFSNode(node)
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract FSNode for link %s: %w", link.Name, err)
+			}
+			entries = append(entries, &ufsDirEntryFileInfo{
+				name:   link.Name,
+				fsNode: fsNode,
+			})
+
+		case *merkledag.RawNode:
+			entries = append(entries, &rawDirEntryFileInfo{
+				name: link.Name,
+				size: link.Size,
+			})
+
+		default:
+			return nil, fmt.Errorf("unsupported node type for link %s: %T", link.Name, node)
 		}
-		entries = append(entries, &dirEntryFileInfo{
-			name:   link.Name,
-			fsNode: fsNode,
-		})
 	}
 
 	d.offset += count

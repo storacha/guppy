@@ -7,45 +7,90 @@ import (
 	"github.com/ipfs/boxo/ipld/unixfs"
 )
 
-type dirEntryFileInfo struct {
+type ufsDirEntryFileInfo struct {
 	name   string
 	fsNode *unixfs.FSNode
 }
 
-var _ fs.DirEntry = (*dirEntryFileInfo)(nil)
-var _ fs.FileInfo = (*dirEntryFileInfo)(nil)
+var _ fs.DirEntry = (*ufsDirEntryFileInfo)(nil)
+var _ fs.FileInfo = (*ufsDirEntryFileInfo)(nil)
 
-func (de *dirEntryFileInfo) Name() string {
-	return de.name
+func (ude *ufsDirEntryFileInfo) Name() string {
+	return ude.name
 }
 
-func (de *dirEntryFileInfo) IsDir() bool {
-	return de.fsNode.IsDir()
+func (ude *ufsDirEntryFileInfo) IsDir() bool {
+	return ude.fsNode.IsDir()
 }
 
-func (de *dirEntryFileInfo) Type() fs.FileMode {
-	if de.IsDir() {
+func (ude *ufsDirEntryFileInfo) Type() fs.FileMode {
+	if ude.IsDir() {
 		return fs.ModeDir
 	}
 	return 0
 }
 
-func (de *dirEntryFileInfo) Size() int64 {
-	return int64(de.fsNode.FileSize())
+func (ude *ufsDirEntryFileInfo) Size() int64 {
+	return int64(ude.fsNode.FileSize())
 }
 
-func (de *dirEntryFileInfo) Mode() fs.FileMode {
-	return de.fsNode.Mode()
+func (ude *ufsDirEntryFileInfo) Mode() fs.FileMode {
+	return ude.fsNode.Mode()
 }
 
-func (de *dirEntryFileInfo) ModTime() time.Time {
-	return de.fsNode.ModTime()
+func (ude *ufsDirEntryFileInfo) ModTime() time.Time {
+	return ude.fsNode.ModTime()
 }
 
-func (de *dirEntryFileInfo) Sys() interface{} {
+func (ude *ufsDirEntryFileInfo) Sys() interface{} {
 	return nil
 }
 
-func (de *dirEntryFileInfo) Info() (fs.FileInfo, error) {
-	return de, nil
+func (ude *ufsDirEntryFileInfo) Info() (fs.FileInfo, error) {
+	return ude, nil
+}
+
+type rawDirEntryFileInfo struct {
+	name string
+	// For raw nodes without UnixFS metadata
+	size uint64
+}
+
+var _ fs.DirEntry = (*rawDirEntryFileInfo)(nil)
+var _ fs.FileInfo = (*rawDirEntryFileInfo)(nil)
+
+func (rde *rawDirEntryFileInfo) Name() string {
+	return rde.name
+}
+
+func (rde *rawDirEntryFileInfo) IsDir() bool {
+	// Raw nodes are always files
+	return false
+}
+
+func (rde *rawDirEntryFileInfo) Type() fs.FileMode {
+	// Raw nodes are always files
+	return 0
+}
+
+func (rde *rawDirEntryFileInfo) Size() int64 {
+	return int64(rde.size)
+}
+
+func (rde *rawDirEntryFileInfo) Mode() fs.FileMode {
+	// Default mode for raw nodes (regular file with 0644 permissions)
+	return 0644
+}
+
+func (rde *rawDirEntryFileInfo) ModTime() time.Time {
+	// Raw nodes don't have modification time
+	return time.Time{}
+}
+
+func (rde *rawDirEntryFileInfo) Sys() interface{} {
+	return nil
+}
+
+func (rde *rawDirEntryFileInfo) Info() (fs.FileInfo, error) {
+	return rde, nil
 }
