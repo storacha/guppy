@@ -19,14 +19,17 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/transport/car"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const defaultServiceName = "staging.up.warm.storacha.network"
+const defaultIndexerName = "staging.indexer.warm.storacha.network"
 
 // envSigner returns a principal.Signer from the environment variable
 // GUPPY_PRIVATE_KEY, if any.
@@ -145,6 +148,35 @@ func MustGetReceiptsURL() *url.URL {
 	}
 
 	return receiptsURL
+}
+
+func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
+	indexerURLStr := os.Getenv("STORACHA_INDEXING_SERVICE_URL") // use env var preferably
+	if indexerURLStr == "" {
+		indexerURLStr = fmt.Sprintf("https://%s", defaultIndexerName)
+	}
+
+	indexerURL, err := url.Parse(indexerURLStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	indexerDIDStr := os.Getenv("STORACHA_INDEXING_SERVICE_DID")
+	if indexerDIDStr == "" {
+		indexerDIDStr = fmt.Sprintf("did:web:%s", defaultIndexerName)
+	}
+
+	indexerPrincipal, err := did.Parse(indexerDIDStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	client, err := indexclient.New(indexerPrincipal, *indexerURL, indexclient.WithHTTPClient(tracedHttpClient))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return client, indexerPrincipal
 }
 
 func MustGetProof(path string) delegation.Delegation {
