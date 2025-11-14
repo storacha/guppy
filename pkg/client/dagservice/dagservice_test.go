@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	dag "github.com/ipfs/boxo/ipld/merkledag"
 	"github.com/ipfs/go-cid"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
@@ -23,49 +24,80 @@ import (
 func TestDAGService(t *testing.T) {
 	space := testutil.RandomDID(t)
 
-	testData := testutil.RandomBytes(t, 1024)
-
-	// Create a CID from the test data with DAG-CBOR codec
-	hash, err := mh.Sum(testData, mh.SHA2_256, -1)
-	require.NoError(t, err)
-	blockCID := cid.NewCidV1(cid.DagCBOR, hash)
-
-	location := locator.Location{
-		Commitment: ucan.NewCapability(
-			assertcap.Location.Can(),
-			space.String(),
-			assertcap.LocationCaveats{
-				Space:   space.DID(),
-				Content: captypes.FromHash(hash),
-				Location: ctestutil.Urls(
-					"https://storage1.example.com/block/abc123",
-					"https://storage2.example.com/block/abc123",
-				),
-			},
-		),
-		Position: blobindex.Position{
-			Offset: 512,
-			Length: 256,
+	testCases := []struct {
+		name      string
+		codec     uint64
+		blockData []byte
+	}{
+		{
+			name:  "DAG-PB node",
+			codec: cid.DagProtobuf,
+			blockData: func() []byte {
+				// Create a simple DAG-PB node
+				node := dag.NodeWithData(testutil.RandomBytes(t, 64))
+				data, err := node.Marshal()
+				require.NoError(t, err)
+				return data
+			}(),
+		},
+		{
+			name:      "raw node",
+			codec:     cid.Raw,
+			blockData: testutil.RandomBytes(t, 256),
 		},
 	}
 
-	lctr := newStubLocatorWithCommitment()
-	lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The block data should be embedded in a larger shard
+			shardData := testutil.RandomBytes(t, 1024)
+			offset := uint64(512)
+			length := uint64(len(tc.blockData))
+			copy(shardData[offset:offset+length], tc.blockData)
 
-	retriever := stubRetriever{data: make(map[string][]byte)}
-	key, err := commitmentKey(location.Commitment)
-	require.NoError(t, err)
-	retriever.data[key] = testData
+			// Create a CID from the block data
+			hash, err := mh.Sum(tc.blockData, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			blockCID := cid.NewCidV1(tc.codec, hash)
 
-	ds := dagservice.NewDAGService(
-		lctr,
-		retriever,
-		space,
-	)
+			location := locator.Location{
+				Commitment: ucan.NewCapability(
+					assertcap.Location.Can(),
+					space.String(),
+					assertcap.LocationCaveats{
+						Space:   space.DID(),
+						Content: captypes.FromHash(hash),
+						Location: ctestutil.Urls(
+							"https://storage1.example.com/block/abc123",
+							"https://storage2.example.com/block/abc123",
+						),
+					},
+				),
+				Position: blobindex.Position{
+					Offset: offset,
+					Length: length,
+				},
+			}
 
-	node, err := ds.Get(t.Context(), blockCID)
-	require.NoError(t, err)
-	require.Equal(t, blockCID, node.Cid())
+			lctr := newStubLocatorWithCommitment()
+			lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
+
+			retriever := stubRetriever{data: make(map[string][]byte)}
+			key, err := commitmentKey(location.Commitment)
+			require.NoError(t, err)
+			retriever.data[key] = shardData
+
+			ds := dagservice.NewDAGService(
+				lctr,
+				retriever,
+				space,
+			)
+
+			node, err := ds.Get(t.Context(), blockCID)
+			require.NoError(t, err)
+			require.Equal(t, blockCID, node.Cid())
+		})
+	}
 }
 
 func newStubLocatorWithCommitment() stubLocator {
