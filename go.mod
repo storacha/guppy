@@ -14,7 +14,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.1.0
 	github.com/spf13/afero v1.12.0
-	github.com/storacha/go-libstoracha v0.5.2-0.20251117153830-735cda646fad
+	github.com/storacha/go-libstoracha v0.5.2-0.20251117155844-b4b67870f480
 	github.com/storacha/go-ucanto v0.6.7
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7 // indirect
@@ -121,7 +121,7 @@ require (
 	github.com/ipfs/go-ipfs-util v0.0.3 // indirect
 	github.com/ipfs/go-ipld-cbor v0.2.0
 	github.com/ipfs/go-ipld-format v0.6.1
-	github.com/ipfs/go-ipld-legacy v0.2.1
+	github.com/ipfs/go-ipld-legacy v0.2.1 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-merkledag v0.11.0 // indirect
 	github.com/ipfs/go-metrics-interface v0.3.0 // indirect

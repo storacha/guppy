@@ -10,7 +10,7 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	ipldfmt "github.com/ipfs/go-ipld-format"
-	ipldlegacy "github.com/ipfs/go-ipld-legacy"
+	"github.com/multiformats/go-multicodec"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/capabilities/assert"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
@@ -81,21 +81,21 @@ func (d *dagService) Get(ctx context.Context, c cid.Cid) (ipldfmt.Node, error) {
 	switch codec {
 	case cid.DagProtobuf:
 		// DAG-PB must use DecodeProtobufBlock to get a ProtoNode
-		return dag.DecodeProtobufBlock(block)
+		node, err := dag.DecodeProtobufBlock(block)
+		if err != nil {
+			return nil, fmt.Errorf("decoding DAG-PB block %s: %w", c, err)
+		}
+		return node, nil
 	case cid.Raw:
 		// Raw blocks decode to RawNode
-		return dag.DecodeRawBlock(block)
+		node, err := dag.DecodeRawBlock(block)
+		if err != nil {
+			return nil, fmt.Errorf("decoding raw block %s: %w", c, err)
+		}
+		return node, nil
 	default:
-		// For other codecs (DAG-CBOR, DAG-JSON, etc.), use a generic wrapper
-		return decodeGenericBlock(ctx, block)
+		return nil, fmt.Errorf("unsupported codec %s (0x%x) for block %s", multicodec.Code(codec), codec, c)
 	}
-}
-
-// decodeGenericBlock decodes blocks for codecs that don't have specific
-// legacy format implementations (DAG-CBOR, DAG-JSON, etc.)
-func decodeGenericBlock(ctx context.Context, block blocks.Block) (ipldfmt.Node, error) {
-	decoder := ipldlegacy.NewDecoder()
-	return decoder.DecodeNode(ctx, block)
 }
 
 func (d *dagService) GetMany(context.Context, []cid.Cid) <-chan *ipldfmt.NodeOption {
