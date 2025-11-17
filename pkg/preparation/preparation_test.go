@@ -207,12 +207,16 @@ func TestExecuteUpload(t *testing.T) {
 		require.NoError(t, err, "failed to enable foreign keys")
 		repo := sqlrepo.New(db)
 
+		aBytes := randomBytes((1 << 16) - 128)
 		fsData := map[string][]byte{
-			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
+			// These numbers are tuned to create 6 shards at a shard size of 1<<16.
+			"a":           aBytes,
 			"dir1/b":      randomBytes((1 << 16) - 128),
-			"a":           randomBytes((1 << 16) - 128),
 			"dir1/c":      randomBytes((1 << 16) - 128),
 			"dir1/dir2/d": randomBytes((1 << 16) - 128),
+
+			// Make one file identical to another to test deduplication.
+			"dir1/dir2/a-again": aBytes,
 		}
 
 		testFs := prepareFs(t, fsData)

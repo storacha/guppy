@@ -233,7 +233,6 @@ func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID di
 		  AND size = ?
 		  AND space_did = ?
 			AND ((ufsdata = ?) OR (? IS NULL AND ufsdata IS NULL))
-		  AND path = ?
 		  AND source_id = ?
 		  AND offset = ?
 	`
@@ -245,7 +244,6 @@ func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID di
 		util.DbDID(&spaceDID),
 		// Twice for NULL check
 		ufsData, ufsData,
-		path,
 		sourceID,
 		offset,
 	)
