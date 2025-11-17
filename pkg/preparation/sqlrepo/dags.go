@@ -218,7 +218,7 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 	return links, nil
 }
 
-func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID did.DID, ufsData []byte, path *string, sourceID id.SourceID, offset *uint64) (model.Node, error) {
+func (r *Repo) findNode(ctx context.Context, c cid.Cid) (model.Node, error) {
 	findQuery := `
 		SELECT
 			cid,
@@ -230,22 +230,11 @@ func (r *Repo) findNode(ctx context.Context, c cid.Cid, size uint64, spaceDID di
 			offset
 		FROM nodes
 		WHERE cid = ?
-		  AND size = ?
-		  AND space_did = ?
-			AND ((ufsdata = ?) OR (? IS NULL AND ufsdata IS NULL))
-		  AND source_id = ?
-		  AND offset = ?
 	`
 	row := r.db.QueryRowContext(
 		ctx,
 		findQuery,
 		c.Bytes(),
-		size,
-		util.DbDID(&spaceDID),
-		// Twice for NULL check
-		ufsData, ufsData,
-		sourceID,
-		offset,
 	)
 	return r.getNodeFromRow(row)
 }
@@ -278,7 +267,7 @@ func (r *Repo) createNode(ctx context.Context, node model.Node) error {
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
 func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
-	node, err := r.findNode(ctx, cid, size, spaceDID, nil, &path, sourceID, &offset)
+	node, err := r.findNode(ctx, cid)
 	if err != nil {
 		return nil, false, err
 	}
@@ -308,7 +297,7 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 // If a node with the same CID, size, and ufsdata already exists, it returns that node.
 // If not, it creates a new UnixFS node with the provided parameters.
 func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte) (*model.UnixFSNode, bool, error) {
-	node, err := r.findNode(ctx, cid, size, spaceDID, ufsdata, nil, id.Nil, nil)
+	node, err := r.findNode(ctx, cid)
 	if err != nil {
 		return nil, false, err
 	}
