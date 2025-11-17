@@ -50,7 +50,7 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 }
 
 type AddedBlob struct {
-	Multihash multihash.Multihash
+	Digest    multihash.Multihash
 	Location  delegation.Delegation
 	PDPAccept invocation.Invocation
 }
@@ -359,7 +359,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 	}
 	return AddedBlob{
-		Multihash: contentHash,
+		Digest:    contentHash,
 		Location:  location,
 		PDPAccept: pdpAccept,
 	}, nil

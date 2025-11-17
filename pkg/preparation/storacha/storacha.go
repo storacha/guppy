@@ -115,7 +115,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 	}
 
-	err = shard.Added(addedBlob.Multihash)
+	err = shard.Added(addedBlob.Digest)
 	if err != nil {
 		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
 	}
@@ -228,7 +228,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			ctx,
 			spaceDID,
 			types.Blob{
-				Digest: addedBlob.Multihash,
+				Digest: addedBlob.Digest,
 				Size:   uint64(len(indexBytes)),
 			},
 			3,
@@ -238,7 +238,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 			return fmt.Errorf("failed to replicate index: %w", err)
 		}
 
-		indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Multihash)
+		indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Digest)
 		err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
 		if err != nil {
 			return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)

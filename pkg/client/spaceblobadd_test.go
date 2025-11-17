@@ -37,7 +37,7 @@ func TestSpaceBlobAdd(t *testing.T) {
 	digest, err := multihash.Sum([]byte("test"), multihash.SHA2_256, -1)
 	require.NoError(t, err)
 
-	require.Equal(t, digest, addedBlob.Multihash)
+	require.Equal(t, digest, addedBlob.Digest)
 	require.Equal(t, []byte("test"), testutil.ReceivedBlobs(putClient).Get(digest))
 	require.Equal(t, 1, testutil.ReceivedBlobs(putClient).Size())
 }
