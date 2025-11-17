@@ -355,7 +355,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	if pdpAcceptLink != nil {
 		pdpAccept, err = invocation.NewInvocationView(*pdpAcceptLink, blksReader)
 		if err != nil {
-			return AddedBlob{}, fmt.Errorf("creating pdp accept delegation: %w", err)
+			return AddedBlob{}, fmt.Errorf("creating `pdp/accept` delegation: %w", err)
 		}
 	}
 	return AddedBlob{
