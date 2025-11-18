@@ -52,7 +52,7 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 type AddedBlob struct {
 	Multihash multihash.Multihash
 	Location  delegation.Delegation
-	PDPAccept *invocation.Invocation
+	PDPAccept invocation.Invocation
 }
 
 // SpaceBlobAdd adds a blob to the service. The issuer needs proof of
@@ -351,9 +351,9 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		return AddedBlob{}, fmt.Errorf("creating location delegation: %w", err)
 	}
 
-	var pdpAccept *invocation.Invocation
+	var pdpAccept invocation.Invocation
 	if pdpAcceptLink != nil {
-		*pdpAccept, err = invocation.NewInvocationView(*pdpAcceptLink, blksReader)
+		pdpAccept, err = invocation.NewInvocationView(*pdpAcceptLink, blksReader)
 		if err != nil {
 			return AddedBlob{}, fmt.Errorf("creating pdp accept delegation: %w", err)
 		}

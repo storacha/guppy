@@ -20,15 +20,16 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -127,9 +128,9 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
 	}
 
-	opts := []client.FilecoinOfferOption{}
+	var opts []client.FilecoinOfferOption
 	if addedBlob.PDPAccept != nil {
-		opts = append(opts, client.WithPDPAcceptInvocation(*addedBlob.PDPAccept))
+		opts = append(opts, client.WithPDPAcceptInvocation(addedBlob.PDPAccept))
 	}
 	err = a.filecoinOffer(ctx, shard, spaceDID, commpCalc, opts...)
 	if err != nil {
