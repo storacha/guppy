@@ -75,8 +75,8 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, hash mh.Mul
 }
 
 // getCached retrieves cached locations for the given spaceDID and hash. It
-// returns the locations and a boolean indicating whether the the block is
-// already known to be in any shard. If the second return value is false, the
+// returns the locations and a boolean indicating whether we know of at least
+// one shard which includes the block. If the second return value is false, the
 // caller should perform a full query to the indexer to attempt to discover new
 // locations. If true, if the locations slice is empty, the caller can perform a
 // location-only query to fetch the remaining location information (or to
