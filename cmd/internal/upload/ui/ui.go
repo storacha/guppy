@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
 	"github.com/ipfs/go-cid"
+	"github.com/mattn/go-isatty"
+
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -304,7 +308,10 @@ func renderBars(bars []bar, width int) string {
 	var remainder int
 	var previousColor lipgloss.Color
 	for _, bar := range bars {
-		eigthBlocks := int(math.Round(float64(bar.value*width*8) / float64(total)))
+		var eigthBlocks = 0
+		if bar.value != 0 {
+			eigthBlocks = int(math.Round(float64(bar.value*width*8) / float64(total)))
+		}
 
 		var pb string
 		if remainder > 0 {
@@ -351,7 +358,16 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 		return fmt.Errorf("no uploads provided to upload UI")
 	}
 
-	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads)).Run()
+	var teaOpts []tea.ProgramOption
+	// if no tty present, don't expect one (e.g. when a debugger is attached)
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		teaOpts = append(teaOpts,
+			tea.WithoutRenderer(),
+			tea.WithInput(io.NopCloser(strings.NewReader(""))),
+			tea.WithOutput(io.Discard),
+		)
+	}
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads), teaOpts...).Run()
 	if err != nil {
 		return fmt.Errorf("command failed to run upload UI: %w", err)
 	}
