@@ -130,13 +130,13 @@ func commitmentKey(commitment ucan.Capability[assertcap.LocationCaveats]) (strin
 	return string(json), err
 }
 
-func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, commitment ucan.Capability[assertcap.LocationCaveats], retrievalOpts ...rclient.Option) ([]byte, error) {
-	key, err := commitmentKey(commitment)
+func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, location locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+	key, err := commitmentKey(location.Commitment)
 	if err != nil {
 		return nil, err
 	}
 	if data, ok := r.data[key]; ok {
-		return data, nil
+		return data[location.Position.Offset : location.Position.Offset+location.Position.Length], nil
 	}
 	return nil, fmt.Errorf("no data for location %s", key)
 }

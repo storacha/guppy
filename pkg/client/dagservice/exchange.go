@@ -43,21 +43,16 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	// Randomly pick one of the available locations
 	location := locations[rand.Intn(len(locations))]
 
-	shardBytes, err := se.retriever.Retrieve(ctx, se.space, location.Commitment)
+	blockBytes, err := se.retriever.Retrieve(ctx, se.space, location)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}
-
-	// Cache the shard
-	se.shards.Set(location.Commitment.Nb().Content.Hash(), shardBytes)
-
-	blockBytes := shardBytes[location.Position.Offset : location.Position.Offset+location.Position.Length]
 
 	// Create a block from the data and CID
 	// This will verify that the data hashes to the expected CID
 	block, err := blocks.NewBlockWithCid(blockBytes, c)
 	if err != nil {
-		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(shardBytes), err)
+		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
 	}
 
 	return block, nil
