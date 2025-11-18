@@ -27,7 +27,7 @@ var retrieveCmd = &cobra.Command{
 	Use:     "retrieve <space> <CID> <output-path>",
 	Aliases: []string{"get"},
 	Short:   "Get a file or directory by its CID",
-	Long:    "Retrieves a file or directory from the local storage by its CID.",
+	Long:    "Retrieves a file or directory from the space by its CID.",
 	Args:    cobra.ExactArgs(3),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
