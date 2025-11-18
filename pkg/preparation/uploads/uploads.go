@@ -176,7 +176,6 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Warn("DAG scan worker for upload ", uploadID, " exiting")
 	defer span.End()
 
 	return Worker(
