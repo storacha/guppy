@@ -15,6 +15,8 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/stretchr/testify/require"
+
 	"github.com/storacha/guppy/pkg/preparation/internal/mockclient"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -24,7 +26,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"github.com/stretchr/testify/require"
 )
 
 // commP is not defined for inputs shorter than 65 bytes, so add 65 bytes of
@@ -131,7 +132,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		shardPieceLink := cidlink.Link{Cid: shardPieceCID}
 
 		require.Equal(t, shardPieceLink, client.FilecoinOfferInvocations[0].Piece)
-		require.Equal(t, *client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
+		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())

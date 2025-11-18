@@ -21,10 +21,11 @@ import (
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
-	"github.com/storacha/guppy/pkg/client"
-	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
+
+	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/preparation/storacha"
 )
 
 type MockClient struct {
@@ -40,7 +41,7 @@ type spaceBlobAddInvocation struct {
 	Space     did.DID
 	BlobAdded []byte
 
-	ReturnedPDPAccept *invocation.Invocation
+	ReturnedPDPAccept invocation.Invocation
 	ReturnedLocation  delegation.Delegation
 }
 
@@ -97,14 +98,14 @@ func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space 
 	m.SpaceBlobAddInvocations = append(m.SpaceBlobAddInvocations, spaceBlobAddInvocation{
 		Space:             space,
 		BlobAdded:         contentBytes,
-		ReturnedPDPAccept: (*invocation.Invocation)(&pdpAcceptInv),
+		ReturnedPDPAccept: pdpAcceptInv,
 		ReturnedLocation:  location,
 	})
 
 	return client.AddedBlob{
 		Multihash: digest,
 		Location:  location,
-		PDPAccept: (*invocation.Invocation)(&pdpAcceptInv),
+		PDPAccept: pdpAcceptInv,
 	}, nil
 }
 
