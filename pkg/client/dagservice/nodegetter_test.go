@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDAGService(t *testing.T) {
+func TestNodeGetter(t *testing.T) {
 	space := testutil.RandomDID(t)
 
 	testCases := []struct {
@@ -87,7 +87,7 @@ func TestDAGService(t *testing.T) {
 			require.NoError(t, err)
 			retriever.data[key] = shardData
 
-			ds := dagservice.NewDAGService(
+			ds := dagservice.NewNodeGetter(
 				lctr,
 				retriever,
 				space,
