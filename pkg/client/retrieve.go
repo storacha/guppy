@@ -8,7 +8,6 @@ import (
 	"math/rand"
 
 	mh "github.com/multiformats/go-multihash"
-	"github.com/storacha/go-libstoracha/capabilities/assert"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/failure"
@@ -18,10 +17,12 @@ import (
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client/locator"
 )
 
-func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment ucan.Capability[assert.LocationCaveats], retrievalOpts ...rclient.Option) ([]byte, error) {
+func (c *Client) Retrieve(ctx context.Context, space did.DID, location locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+	locationCommitment := location.Commitment
+
 	nodeID, err := did.Parse(locationCommitment.With())
 	if err != nil {
 		return nil, fmt.Errorf("parsing DID of storage provider node `%s`: %w", locationCommitment.With(), err)
@@ -44,12 +45,8 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment
 		prfs = append(prfs, delegation.FromDelegation(del))
 	}
 
-	start := locationCommitment.Nb().Range.Offset
-	var length uint64
-	if locationCommitment.Nb().Range.Length != nil {
-		length = *locationCommitment.Nb().Range.Length
-	}
-	end := start + length - 1
+	start := location.Position.Offset
+	end := start + location.Position.Length - 1
 
 	inv, err := contentcap.Retrieve.Invoke(
 		c.Issuer(),
@@ -67,8 +64,6 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment
 	if err != nil {
 		return nil, fmt.Errorf("invoking `space/content/retrieve`: %w", err)
 	}
-
-	log.Warnf("Retrieving content from node %s at %s\n", nodeID, url.String())
 
 	conn, err := rclient.NewConnection(nodeID, &url, retrievalOpts...)
 	if err != nil {
@@ -108,7 +103,7 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment
 	body := hres.Body()
 	defer body.Close()
 
-	expectedHash := locationCommitment.Nb().Content.Hash()
+	expectedHash := location.Digest
 
 	decHash, err := mh.Decode(expectedHash)
 	if err != nil {
