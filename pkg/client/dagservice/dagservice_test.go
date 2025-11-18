@@ -12,7 +12,7 @@ import (
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/testutil"
-	"github.com/storacha/go-ucanto/client/retrieval"
+	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client/dagservice"
@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNodeGetter(t *testing.T) {
+func TestDAGService(t *testing.T) {
 	space := testutil.RandomDID(t)
 
 	testCases := []struct {
@@ -87,7 +87,7 @@ func TestNodeGetter(t *testing.T) {
 			require.NoError(t, err)
 			retriever.data[key] = shardData
 
-			ds := dagservice.NewNodeGetter(
+			ds := dagservice.NewDAGService(
 				lctr,
 				retriever,
 				space,
@@ -130,7 +130,7 @@ func commitmentKey(commitment ucan.Capability[assertcap.LocationCaveats]) (strin
 	return string(json), err
 }
 
-func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, commitment ucan.Capability[assertcap.LocationCaveats], retrievalOpts ...retrieval.Option) ([]byte, error) {
+func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, commitment ucan.Capability[assertcap.LocationCaveats], retrievalOpts ...rclient.Option) ([]byte, error) {
 	key, err := commitmentKey(commitment)
 	if err != nil {
 		return nil, err
