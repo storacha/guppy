@@ -7,7 +7,6 @@ on:
 
 jobs:
   check:
-    name: Run Checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +33,6 @@ jobs:
         run: |
           out=$(gofmt -s -l .)
           if [[ -n "$out" ]]; then
-            echo $out | awk '{print "::error file=" $0 ",line=0,col=0::File is not gofmt-ed."}'
+            echo $out | awk '{print "::error file=" $0 ",line=0,col=0::" $0 " is not gofmt-ed."}'
             exit 1
           fi
