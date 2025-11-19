@@ -136,6 +136,7 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
+	defer log.Debugf("Scan worker for upload %s exiting", uploadID)
 	defer span.End()
 
 	return Worker(
@@ -176,6 +177,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
+	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
 	defer span.End()
 
 	return Worker(
@@ -274,6 +276,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
+	defer log.Debugf("Storacha worker for upload %s exiting", uploadID)
 	defer span.End()
 
 	return Worker(
