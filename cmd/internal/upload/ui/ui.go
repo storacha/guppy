@@ -336,23 +336,6 @@ func renderBars(bars []bar, width int) string {
 
 }
 
-type multiBar struct {
-	bars  []bar
-	width int
-}
-
-func (mb multiBar) Init() tea.Cmd {
-	return nil
-}
-
-func (mb multiBar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	return mb, nil
-}
-
-func (mb multiBar) View() string {
-	return renderBars(mb.bars, mb.width)
-}
-
 func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) error {
 	if len(uploads) == 0 {
 		return fmt.Errorf("no uploads provided to upload UI")

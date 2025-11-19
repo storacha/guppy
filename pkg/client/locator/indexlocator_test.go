@@ -50,6 +50,7 @@ func TestLocator(t *testing.T) {
 				),
 			},
 		)
+		require.NoError(t, err)
 
 		claim2, err := assertcap.Location.Delegate(
 			provider2,
@@ -63,6 +64,7 @@ func TestLocator(t *testing.T) {
 				),
 			},
 		)
+		require.NoError(t, err)
 
 		index := blobindex.NewShardedDagIndexView(rootLink, -1)
 		index.SetSlice(shardHash, blockHash, blobindex.Position{
@@ -109,7 +111,7 @@ func TestLocator(t *testing.T) {
 			},
 		}, mockIndexer.Queries[0])
 
-		locations, err = locator.Locate(t.Context(), space.DID(), blockHash)
+		_, err = locator.Locate(t.Context(), space.DID(), blockHash)
 		require.NoError(t, err)
 		require.Len(t, mockIndexer.Queries, 1)
 	})

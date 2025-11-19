@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
@@ -22,8 +21,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
-
-var log = logging.Logger("preparation")
 
 // By back-of-the-napkin math, this represents about 1MB max per index
 const defaultMaxNodesPerIndex = 26000

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime/schema"
@@ -40,7 +39,6 @@ var (
 
 type Client struct {
 	connection     uclient.Connection
-	receiptsURL    *url.URL
 	receiptsClient *receiptclient.Client
 	data           agentdata.AgentData
 	saveFn         func(agentdata.AgentData) error

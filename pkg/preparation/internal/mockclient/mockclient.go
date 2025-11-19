@@ -103,7 +103,7 @@ func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space 
 	})
 
 	return client.AddedBlob{
-		Digest: digest,
+		Digest:    digest,
 		Location:  location,
 		PDPAccept: pdpAcceptInv,
 	}, nil
