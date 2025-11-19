@@ -50,7 +50,7 @@ func WithPutClient(client *http.Client) SpaceBlobAddOption {
 }
 
 type AddedBlob struct {
-	Multihash multihash.Multihash
+	Digest    multihash.Multihash
 	Location  delegation.Delegation
 	PDPAccept invocation.Invocation
 }
@@ -355,11 +355,11 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	if pdpAcceptLink != nil {
 		pdpAccept, err = invocation.NewInvocationView(*pdpAcceptLink, blksReader)
 		if err != nil {
-			return AddedBlob{}, fmt.Errorf("creating pdp accept delegation: %w", err)
+			return AddedBlob{}, fmt.Errorf("creating `pdp/accept` delegation: %w", err)
 		}
 	}
 	return AddedBlob{
-		Multihash: contentHash,
+		Digest:    contentHash,
 		Location:  location,
 		PDPAccept: pdpAccept,
 	}, nil
