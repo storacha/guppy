@@ -16,13 +16,6 @@ import (
 	"github.com/storacha/guppy/pkg/dagfs"
 )
 
-func must[T any](ret T, err error) T {
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
 var retrieveCmd = &cobra.Command{
 	Use:     "retrieve <space> <CID> <output-path>",
 	Aliases: []string{"get"},
@@ -65,6 +58,9 @@ var retrieveCmd = &cobra.Command{
 			delegation.WithProof(pfs...),
 			delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 		)
+		if err != nil {
+			return fmt.Errorf("delegating %s: %w", contentcap.RetrieveAbility, err)
+		}
 
 		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
 		ds := dagservice.NewDAGService(locator, c, space)

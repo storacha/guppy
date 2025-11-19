@@ -49,6 +49,7 @@ func pbNode(t *testing.T) datamodel.Node {
 		builder.FileSize(b, 128)
 		builder.BlockSizes(b, []uint64{8, 8, 8, 8, 8, 8, 8, 8})
 	})
+	require.NoError(t, err)
 
 	dpbb := dagpb.Type.PBNode.NewBuilder()
 	pbm, err := dpbb.BeginMap(2)

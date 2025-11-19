@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
@@ -20,10 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-var (
-	log    = logging.Logger("preparation/scans")
-	tracer = otel.Tracer("preparation/scans")
-)
+var tracer = otel.Tracer("preparation/scans")
 
 // WalkerFunc is a function type that defines how to walk the file system.
 type WalkerFunc func(fsys fs.FS, root string, visitor walker.FSVisitor) (model.FSEntry, error)

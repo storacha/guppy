@@ -20,7 +20,6 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/testutil"
@@ -88,7 +87,7 @@ func TestFilecoinOffer(t *testing.T) {
 				require.Equal(t, blobPieceLink, capability.Nb().Piece, "expected to have the correct piece link")
 				require.Equal(t, blobPieceLink, offerOk.Piece, "expected to get the correct piece link in the response")
 				require.Equal(t, *capability.Nb().PDP, pdpAcceptInv.Link(), "expected to have the PDP accept invocation link in the capability")
-				bs := uhelpers.Must(blockstore.NewBlockReader(blockstore.WithBlocksIterator(rc.invocation.Blocks())))
+				bs := helpers.Must(blockstore.NewBlockReader(blockstore.WithBlocksIterator(rc.invocation.Blocks())))
 				del, err := delegation.NewDelegationView(pdpAcceptInv.Link(), bs)
 				require.NoError(t, err)
 				require.Len(t, del.Capabilities(), 1, "expected the PDP accept delegation to have exactly one capability")
@@ -127,7 +126,7 @@ func TestFilecoinOffer(t *testing.T) {
 				),
 			)
 
-			c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
+			c := helpers.Must(client.NewClient(client.WithConnection(connection)))
 
 			// Delegate * on the space to the client
 			cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})

@@ -32,7 +32,6 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	carresp "github.com/storacha/go-ucanto/transport/car/response"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
@@ -387,7 +386,7 @@ func WithSpaceBlobAdd() Option {
 				spaceblobcap.Add.Can(),
 				server.Provide(
 					spaceblobcap.Add,
-					uhelpers.Must(SpaceBlobAddHandler(
+					helpers.Must(SpaceBlobAddHandler(
 						func(rcpt receipt.AnyReceipt) {
 							receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
 						},
@@ -447,6 +446,9 @@ func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	digestString := url[len(storageURLPrefix):]
 	digest, err := multihash.FromB58String(digestString)
+	if err != nil {
+		return nil, fmt.Errorf("decoding multihash: %w", err)
+	}
 
 	blob, err := io.ReadAll(req.Body)
 	if err != nil {

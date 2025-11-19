@@ -18,10 +18,10 @@ const MinShardSize = 128
 const DefaultShardSize = MaxShardSize
 
 // ErrShardSizeTooLarge indicates that the shard size is larger than the maximum allowed size.
-var ErrShardSizeTooLarge = fmt.Errorf("Shard size must at most %d bytes", MaxShardSize)
+var ErrShardSizeTooLarge = fmt.Errorf("shard size must at most %d bytes", MaxShardSize)
 
 // ErrShardSizeTooSmall indicates that the shard size is smaller than the minimum allowed size.
-var ErrShardSizeTooSmall = fmt.Errorf("Shard size must be at least %d bytes", MinShardSize)
+var ErrShardSizeTooSmall = fmt.Errorf("shard size must be at least %d bytes", MinShardSize)
 
 // Space represents the space for an upload or uploads
 type Space struct {

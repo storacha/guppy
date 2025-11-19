@@ -5,8 +5,6 @@ import (
 	"errors"
 	"os"
 
-
-
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"

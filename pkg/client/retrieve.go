@@ -9,7 +9,6 @@ import (
 
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/capabilities/assert"
-	"github.com/storacha/go-libstoracha/capabilities/space/content"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	"github.com/storacha/go-libstoracha/failure"
@@ -96,7 +95,7 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, locationCommitment
 		return nil, fmt.Errorf("creating receipt: %w", err)
 	}
 
-	rcpt, err := receipt.Rebind[content.RetrieveOk, failure.FailureModel](anyRcpt, content.RetrieveOkType(), failure.FailureType(), captypes.Converters...)
+	rcpt, err := receipt.Rebind[contentcap.RetrieveOk, failure.FailureModel](anyRcpt, contentcap.RetrieveOkType(), failure.FailureType(), captypes.Converters...)
 	if err != nil {
 		return nil, fmt.Errorf("binding receipt to types: %w", err)
 	}

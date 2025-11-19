@@ -5,13 +5,10 @@ import (
 	"time"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
-
-var log = logging.Logger("preparation/dags/model/dagscan")
 
 // DAGScanState represents the state of a DAG scan.
 type DAGScanState string
@@ -26,15 +23,6 @@ const (
 	// DAGScanStateCanceled indicates that the file system entry has been canceled.
 	DAGScanStateCanceled DAGScanState = "canceled"
 )
-
-func validDAGScanState(state DAGScanState) bool {
-	switch state {
-	case DAGScanStatePending, DAGScanStateCompleted, DAGScanStateFailed, DAGScanStateCanceled:
-		return true
-	default:
-		return false
-	}
-}
 
 func TerminatedState(state DAGScanState) bool {
 	return state == DAGScanStateCompleted || state == DAGScanStateFailed || state == DAGScanStateCanceled

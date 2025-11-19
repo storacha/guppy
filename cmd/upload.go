@@ -36,7 +36,7 @@ var uploadCmd = &cobra.Command{
 		ctx := cmd.Context()
 		space := cmd.Flags().Arg(0)
 		if space == "" {
-			return errors.New("Space cannot be empty")
+			return errors.New("space cannot be empty")
 		}
 		spaceDID, err := did.Parse(space)
 		if err != nil {
@@ -115,12 +115,12 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
-			return errors.New("Space cannot be empty")
+			return errors.New("space cannot be empty")
 		}
 
 		path := cmd.Flags().Arg(1)
 		if path == "" {
-			return errors.New("Path cannot be empty")
+			return errors.New("path cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
@@ -182,7 +182,7 @@ var uploadSourcesListCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
-			return errors.New("Space cannot be empty")
+			return errors.New("space cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
