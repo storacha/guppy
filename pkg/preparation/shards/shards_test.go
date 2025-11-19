@@ -377,8 +377,6 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
-		err = shard1.Close()
-		require.NoError(t, err)
 
 		err = shard2.Close()
 		require.NoError(t, err)
