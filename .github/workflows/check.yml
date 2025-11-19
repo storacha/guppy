@@ -24,11 +24,13 @@ jobs:
         run: go vet ./...
 
       - name: Run staticcheck
+        if: success() || failure()
         uses: dominikh/staticcheck-action@v1.4.0
         with:
           install-go: false
 
       - name: Run gofmt
+        if: success() || failure()
         run: |
           out=$(gofmt -s -l .)
           if [[ -n "$out" ]]; then
