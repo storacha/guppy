@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/filecoin-project/go-data-segment/merkletree"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/ipld/go-ipld-prime/fluent/qp"
 	basicnode "github.com/ipld/go-ipld-prime/node/basic"
@@ -16,11 +17,15 @@ import (
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
 	httpcap "github.com/storacha/go-libstoracha/capabilities/http"
+	pdpcap "github.com/storacha/go-libstoracha/capabilities/pdp"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
+	"github.com/storacha/go-libstoracha/piece/digest"
+	"github.com/storacha/go-libstoracha/piece/piece"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/message"
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
@@ -182,11 +187,28 @@ func invokeAccept(
 	)
 }
 
+func invokePDPAccept(
+	service ucan.Signer,
+	storageProvider ucan.Principal,
+	blobDigest multihash.Multihash,
+) (invocation.IssuedInvocation, error) {
+	return pdpcap.Accept.Invoke(
+		service,
+		storageProvider,
+		storageProvider.DID().String(),
+		pdpcap.AcceptCaveats{
+			Blob: blobDigest,
+		},
+	)
+}
+
 func executeAccept(
 	acceptInv invocation.IssuedInvocation,
 	storageProvider ucan.Signer,
 	spaceDID did.DID,
 	blobDigest multihash.Multihash,
+	pdpAcceptLink datamodel.Link,
+	pdpAcceptInv invocation.IssuedInvocation,
 ) (receipt.AnyReceipt, error) {
 	locationClaim, err := assertcap.Location.Delegate(
 		storageProvider,
@@ -203,15 +225,27 @@ func executeAccept(
 		return nil, fmt.Errorf("creating location claim delegation: %w", err)
 	}
 
+	var pdpAcceptLinkPtr *datamodel.Link
+	if pdpAcceptLink != nil {
+		pdpAcceptLinkPtr = &pdpAcceptLink
+	}
+
 	acceptOk := result.Ok[blobcap.AcceptOk, failure.IPLDBuilderFailure](blobcap.AcceptOk{
 		Site: locationClaim.Link(),
+		PDP:  pdpAcceptLinkPtr,
 	})
+
+	// Build fork effects - always include location claim, optionally include pdp/accept invocation
+	forkEffects := []fx.Effect{fx.FromInvocation(locationClaim)}
+	if pdpAcceptInv != nil {
+		forkEffects = append(forkEffects, fx.FromInvocation(pdpAcceptInv))
+	}
 
 	acceptRcpt, err := receipt.Issue(
 		storageProvider,
 		acceptOk,
 		ran.FromInvocation(acceptInv),
-		receipt.WithFork(fx.FromInvocation(locationClaim)),
+		receipt.WithFork(forkEffects...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("issuing receipt: %w", err)
@@ -219,10 +253,64 @@ func executeAccept(
 	return acceptRcpt, err
 }
 
-// spaceBlobAddHandler returns a mock [server.HandlerFunc] to handles
-// [spaceblobcap.Add] invocations in a test. It calls the given function with
-// each receipt that is issued along the way.
-func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.HandlerFunc[spaceblobcap.AddCaveats, spaceblobcap.AddOk, failure.IPLDBuilderFailure], error) {
+func executePDPAccept(
+	pdpAcceptInv invocation.IssuedInvocation,
+	storageProvider ucan.Signer,
+	blobDigest multihash.Multihash,
+) (receipt.AnyReceipt, error) {
+	// Create mock piece links and inclusion proof for testing
+	// In a real system, these would come from the PDP aggregation service
+
+	// Create mock data commitments (32 bytes each, representing Filecoin commitments)
+	// These are arbitrary but valid for testing purposes
+	aggregateCommitment := make([]byte, 32)
+	for i := range aggregateCommitment {
+		aggregateCommitment[i] = byte(i)
+	}
+
+	individualCommitment := make([]byte, 32)
+	for i := range individualCommitment {
+		individualCommitment[i] = byte(i + 1)
+	}
+
+	// Create piece digests with small unpadded sizes for testing
+	aggregateDigest, err := digest.FromCommitmentAndSize(aggregateCommitment, 1024)
+	if err != nil {
+		return nil, fmt.Errorf("creating mock aggregate piece digest: %w", err)
+	}
+	aggregatePiece := piece.FromPieceDigest(aggregateDigest)
+
+	individualDigest, err := digest.FromCommitmentAndSize(individualCommitment, 512)
+	if err != nil {
+		return nil, fmt.Errorf("creating mock individual piece digest: %w", err)
+	}
+	individualPiece := piece.FromPieceDigest(individualDigest)
+
+	// Create a mock inclusion proof
+	// For testing, we just need valid proof data structure
+	inclusionProof := merkletree.ProofData{
+		Index: 0,
+		Path:  []merkletree.Node{},
+	}
+
+	acceptOk := result.Ok[pdpcap.AcceptOk, ipld.Builder](pdpcap.AcceptOk{
+		Aggregate:      aggregatePiece,
+		InclusionProof: inclusionProof,
+		Piece:          individualPiece,
+	})
+
+	return receipt.Issue(storageProvider, acceptOk, ran.FromInvocation(pdpAcceptInv))
+}
+
+// SpaceBlobAddHandler returns a mock [server.HandlerFunc] to handles
+// [spaceblobcap.Add] invocations in a test. rcptIssued is called with each
+// receipt that is issued along the way. If includePDP is true, the accept
+// receipt will include a (random) PDP accept link; otherwise, the PDP accept
+// link will be nil.
+func SpaceBlobAddHandler(
+	rcptIssued func(rcpt receipt.AnyReceipt),
+	includePDP bool,
+) (server.HandlerFunc[spaceblobcap.AddCaveats, spaceblobcap.AddOk, failure.IPLDBuilderFailure], error) {
 	storageProvider, err := ed25519signer.Generate()
 	if err != nil {
 		return nil, fmt.Errorf("generating storage provider identity: %w", err)
@@ -290,11 +378,39 @@ func SpaceBlobAddHandler(rcptIssued func(rcpt receipt.AnyReceipt)) (server.Handl
 			return nil, nil, fmt.Errorf("invoking accept: %w", err)
 		}
 
+		var pdpAcceptLink datamodel.Link
+		var pdpAcceptInv invocation.IssuedInvocation
+		var pdpAcceptRcpt receipt.AnyReceipt
+		if includePDP {
+			pdpAcceptInv, err = invokePDPAccept(
+				context.ID(),
+				storageProvider,
+				blobDigest,
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invoking pdp/accept: %w", err)
+			}
+
+			pdpAcceptRcpt, err = executePDPAccept(
+				pdpAcceptInv,
+				storageProvider,
+				blobDigest,
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("executing pdp/accept: %w", err)
+			}
+
+			rcptIssued(pdpAcceptRcpt)
+			pdpAcceptLink = pdpAcceptInv.Link()
+		}
+
 		acceptRcpt, err := executeAccept(
 			acceptInv,
 			storageProvider,
 			spaceDID,
 			blobDigest,
+			pdpAcceptLink,
+			pdpAcceptInv,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("executing accept: %w", err)
@@ -377,9 +493,25 @@ func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // different options can't cooperate to share a receipts client. That's
 // solvable, but hasn't been necessary yet.
 func WithSpaceBlobAdd() Option {
+	return withSpaceBlobAdd(false)
+}
+
+// WithSpaceBlobAddPDP is like WithSpaceBlobAdd but includes a PDP accept link in the accept receipt.
+func WithSpaceBlobAddPDP() Option {
+	return withSpaceBlobAdd(true)
+}
+
+func withSpaceBlobAdd(includePDP bool) Option {
 	receiptsTrans := receiptsTransport{
 		receipts: make(map[string]receipt.AnyReceipt),
 	}
+
+	handler := uhelpers.Must(SpaceBlobAddHandler(
+		func(rcpt receipt.AnyReceipt) {
+			receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
+		},
+		includePDP,
+	))
 
 	return ComposeOptions(
 		WithServerOptions(
@@ -387,11 +519,7 @@ func WithSpaceBlobAdd() Option {
 				spaceblobcap.Add.Can(),
 				server.Provide(
 					spaceblobcap.Add,
-					uhelpers.Must(SpaceBlobAddHandler(
-						func(rcpt receipt.AnyReceipt) {
-							receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
-						},
-					)),
+					handler,
 				),
 			),
 			server.WithServiceMethod(
