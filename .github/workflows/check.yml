@@ -33,6 +33,6 @@ jobs:
         run: |
           out=$(gofmt -s -l .)
           if [[ -n "$out" ]]; then
-            echo $out | awk '{print "::error file=" $0 ",line=0,col=0::" $0 " is not gofmt-ed."}'
+            echo $out | awk -F '\n' '{print "::error file=" $0 ",line=0,col=0::" $0 " is not gofmt-ed."}'
             exit 1
           fi
