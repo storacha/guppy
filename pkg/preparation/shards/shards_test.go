@@ -395,8 +395,6 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard3)
 		require.NoError(t, err)
-		err = shard3.Close()
-		require.NoError(t, err)
 
 		rootLink := testutil.RandomCID(t)
 		err = upload.SetRootCID(rootLink.(cidlink.Link).Cid)
