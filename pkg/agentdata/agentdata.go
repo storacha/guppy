@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
@@ -18,8 +17,6 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	rsasigner "github.com/storacha/go-ucanto/principal/rsa/signer"
 )
-
-var log = logging.Logger("agentdata")
 
 type AgentData struct {
 	Principal   principal.Signer

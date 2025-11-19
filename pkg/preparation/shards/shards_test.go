@@ -218,6 +218,7 @@ func TestCarForShard(t *testing.T) {
 		require.NoError(t, err)
 
 		shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
+		require.NoError(t, err)
 
 		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID1, spaceDID, 0 /* irrelevant */)
 		require.NoError(t, err)
@@ -291,6 +292,7 @@ func TestCarForShard(t *testing.T) {
 		require.NoError(t, err)
 
 		shard, err := repo.CreateShard(t.Context(), id.New(), 0 /* irrelevant */)
+		require.NoError(t, err)
 
 		for _, nodeCID := range []cid.Cid{nodeCID1, nodeCID2, nodeCID3, nodeCID4} {
 			err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID, spaceDID, 0 /* irrelevant */)
@@ -367,28 +369,38 @@ func TestIndexForUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		err = shard1.Close()
+		require.NoError(t, err)
+
 		digest1, err := multihash.Encode([]byte("shard1 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
 		err = shard1.Added(digest1)
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
 		err = shard1.Close()
+		require.NoError(t, err)
 
 		err = shard2.Close()
+		require.NoError(t, err)
 		digest2, err := multihash.Encode([]byte("shard2 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
 		err = shard2.Added(digest2)
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
 		err = shard2.Close()
+		require.NoError(t, err)
 
 		err = shard3.Close()
+		require.NoError(t, err)
 		digest3, err := multihash.Encode([]byte("shard3 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
 		err = shard3.Added(digest3)
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard3)
 		require.NoError(t, err)
 		err = shard3.Close()
+		require.NoError(t, err)
 
 		rootLink := testutil.RandomCID(t)
 		err = upload.SetRootCID(rootLink.(cidlink.Link).Cid)

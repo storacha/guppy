@@ -17,7 +17,6 @@ import (
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
-	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/testutil"
@@ -52,7 +51,7 @@ func TestSpaceIndexAdd(t *testing.T) {
 		),
 	)
 
-	c := uhelpers.Must(client.NewClient(client.WithConnection(connection)))
+	c := helpers.Must(client.NewClient(client.WithConnection(connection)))
 
 	// Delegate * on the space to the client
 	cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
@@ -70,7 +69,7 @@ func TestSpaceIndexAdd(t *testing.T) {
 	capability := invokedCapabilities[0]
 
 	require.Equal(t, space.DID().String(), capability.With(), "expected capability to be invoked for the correct space")
-	nb := uhelpers.Must(spaceindexcap.AddCaveatsReader.Read(capability.Nb()))
+	nb := helpers.Must(spaceindexcap.AddCaveatsReader.Read(capability.Nb()))
 	require.Equal(t, indexLink, nb.Index, "expected to add the correct index")
 	require.Equal(t, rootLink, nb.Content, "expected to add the correct content root")
 
@@ -95,7 +94,7 @@ func TestSpaceIndexAdd(t *testing.T) {
 	require.Equal(t, 1, len(authDelegation.Capabilities()))
 	authCapability := authDelegation.Capabilities()[0]
 	require.Equal(t, space.DID().String(), authCapability.With())
-	retrievalCaveats := uhelpers.Must(contentcap.RetrieveCaveatsReader.Read(authCapability.Nb()))
+	retrievalCaveats := helpers.Must(contentcap.RetrieveCaveatsReader.Read(authCapability.Nb()))
 	require.Equal(t, indexLink.(cidlink.Link).Cid.Hash(), retrievalCaveats.Blob.Digest, "expected retrieval auth to be for the correct blob")
 	require.Equal(t, uint64(0), retrievalCaveats.Range.Start, "expected retrieval auth to have correct range start")
 	require.Equal(t, uint64(122), retrievalCaveats.Range.End, "expected retrieval auth to have correct range end")

@@ -73,6 +73,8 @@ func TestSpaceBlobReplicate(t *testing.T) {
 		c := uhelpers.Must(client.NewClient(client.WithConnection(connection), client.WithPrincipal(space)))
 
 		digest, err := multihash.Encode([]byte("test-digest"), multihash.IDENTITY)
+		require.NoError(t, err)
+
 		blob := types.Blob{Digest: digest, Size: 123}
 
 		location := libtestutil.RandomLocationDelegation(t)
