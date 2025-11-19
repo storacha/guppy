@@ -19,7 +19,11 @@ jobs:
         with:
           go-version: '1.24.4'
 
+      - name: Run go mod tidy
+        run: go mod tidy --diff
+
       - name: Run go vet
+        if: success() || failure()
         run: go vet ./...
 
       - name: Run staticcheck
