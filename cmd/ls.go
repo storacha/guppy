@@ -41,21 +41,29 @@ var lsCmd = &cobra.Command{
 
 		c := cmdutil.MustGetClient(storePath, proofs...)
 
-		listOk, err := c.UploadList(
-			cmd.Context(),
-			spaceDID,
-			uploadcap.ListCaveats{})
-		if err != nil {
-			return err
-		}
+		var cursor *string
+		for {
+			listOk, err := c.UploadList(
+				cmd.Context(),
+				spaceDID,
+				uploadcap.ListCaveats{Cursor: cursor})
+			if err != nil {
+				return err
+			}
 
-		for _, r := range listOk.Results {
-			fmt.Printf("%s\n", r.Root)
-			if lsFlags.showShards {
-				for _, s := range r.Shards {
-					fmt.Printf("\t%s\n", s)
+			for _, r := range listOk.Results {
+				fmt.Printf("%s\n", r.Root)
+				if lsFlags.showShards {
+					for _, s := range r.Shards {
+						fmt.Printf("\t%s\n", s)
+					}
 				}
 			}
+
+			if listOk.Cursor == nil {
+				break
+			}
+			cursor = listOk.Cursor
 		}
 
 		return nil
