@@ -384,6 +384,7 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 	}
 
 	fmt.Println("Upload complete!")
+	fmt.Printf("Root CID: %s\n", um.rootCID.String())
 
 	return nil
 }
