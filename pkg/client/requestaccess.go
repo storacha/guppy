@@ -10,9 +10,14 @@ import (
 
 // spaceAccess is the set of capabilities required by the agent to manage a
 // space.
+/*
+space/blob/add -c space/blob/replicate -c space/index/add -c filecoin/offer -c upload/add -c space/content/retrieve <space-did> --base64
+*/
 var spaceAccess = []access.CapabilityRequest{
 	{Can: "assert/*"},
 	{Can: "space/*"},
+	{Can: "space/*"},
+	{Can: "space/content/retrieve"},
 	{Can: "blob/*"},
 	{Can: "index/*"},
 	{Can: "store/*"},

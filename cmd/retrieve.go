@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -10,6 +14,7 @@ import (
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
@@ -70,9 +75,48 @@ var retrieveCmd = &cobra.Command{
 		ds := dagservice.NewDAGService(locator, c, space)
 		retrievedFs := dagfs.New(ctx, ds, cid)
 
-		err = os.CopyFS(outputPath, retrievedFs)
+		rootInfo, err := fs.Stat(retrievedFs, ".")
 		if err != nil {
-			return fmt.Errorf("copying retrieved filesystem: %w", err)
+			return fmt.Errorf("stat retrieved root: %w", err)
+		}
+
+		if rootInfo.IsDir() {
+			if err := os.MkdirAll(outputPath, 0o755); err != nil {
+				return fmt.Errorf("creating output path: %w", err)
+			}
+
+			if err := os.CopyFS(outputPath, retrievedFs); err != nil {
+				return fmt.Errorf("copying retrieved filesystem: %w", err)
+			}
+			return nil
+		}
+
+		// Root CID is a file; write it either to the provided path or inside it if it's a directory.
+		destPath := outputPath
+		if info, err := os.Stat(outputPath); err == nil && info.IsDir() {
+			destPath = filepath.Join(outputPath, cid.String())
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat output path: %w", err)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+			return fmt.Errorf("creating output directory: %w", err)
+		}
+
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening output file: %w", err)
+		}
+		defer out.Close()
+
+		in, err := retrievedFs.Open(".")
+		if err != nil {
+			return fmt.Errorf("opening retrieved file: %w", err)
+		}
+		defer in.Close()
+
+		if _, err := io.Copy(out, in); err != nil {
+			return fmt.Errorf("writing retrieved file: %w", err)
 		}
 
 		return nil

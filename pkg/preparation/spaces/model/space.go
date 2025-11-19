@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
 // MaxShardSize is the maximum allowed size for a shard
-const MaxShardSize = 1 << 29 // 512MB
+const MaxShardSize = 254 * 1024 * 1024 // 254 MiB
 
 // MinShardSize is the minimum allowed size for a shard
 const MinShardSize = 128

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/sources"
@@ -17,7 +18,23 @@ var _ sources.Repo = (*Repo)(nil)
 
 // CreateSource creates a new source in the repository with the given name, path, and options.
 func (r *Repo) CreateSource(ctx context.Context, name string, path string, options ...sourcemodel.SourceOption) (*sourcemodel.Source, error) {
-	src, err := sourcemodel.NewSource(name, path, options...)
+	// resolve the specific path to its absolute path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve absolute path from %s: %w", path, err)
+	}
+
+	// ensure we do not insert duplicate sources pointing at the same path
+	var existingID id.SourceID
+	err = r.db.QueryRowContext(ctx, `SELECT id FROM sources WHERE path = ?`, absPath).Scan(&existingID)
+	switch {
+	case err == nil:
+		return nil, fmt.Errorf("source with path %s already exists", absPath)
+	case !errors.Is(err, sql.ErrNoRows):
+		return nil, fmt.Errorf("failed to check existing sources by path: %w", err)
+	}
+
+	src, err := sourcemodel.NewSource(name, absPath, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create source model: %w", err)
 	}

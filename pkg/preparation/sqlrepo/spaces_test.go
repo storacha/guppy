@@ -38,7 +38,7 @@ func TestAddSourceToSpace(t *testing.T) {
 	source1, err := repo.CreateSource(t.Context(), "source1 name", "source/path")
 	require.NoError(t, err)
 
-	source2, err := repo.CreateSource(t.Context(), "source2 name", "source/path")
+	source2, err := repo.CreateSource(t.Context(), "source2 name", "source2/path")
 	require.NoError(t, err)
 
 	err = repo.AddSourceToSpace(t.Context(), space.DID(), source1.ID())

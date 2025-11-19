@@ -32,14 +32,17 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	// default storacha dir: ~/.storacha
+	logging.SetAllLoggers(logging.LevelInfo)
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
-	defaultStorachaDir := filepath.Join(homedir, ".storacha")
+	defaultStorachaDir := filepath.Join(homedir, ".guppy")
 
 	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storacha-dir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
 
+	// the store needs to exist
+	cobra.CheckErr(os.MkdirAll(defaultStorachaDir, 0700))
 	// We could make this configurable in the future, but for now it seems like
 	// too many options for likely no value.
 	storePath = filepath.Join(defaultStorachaDir, "store.json")

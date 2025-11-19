@@ -19,7 +19,6 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld/block"
 	"github.com/storacha/go-ucanto/core/ipld/hash/sha256"
-	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client/locator"
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
@@ -104,9 +103,6 @@ func TestLocator(t *testing.T) {
 		require.Equal(t, types.Query{
 			Hashes:      []multihash.Multihash{blockHash},
 			Delegations: requiredDelegations,
-			Match: types.Match{
-				Subject: []did.DID{space.DID()},
-			},
 		}, mockIndexer.Queries[0])
 
 		locations, err = locator.Locate(t.Context(), space.DID(), blockHash)
@@ -267,6 +263,44 @@ func TestLocator(t *testing.T) {
 		// Verify both queries were made (cache didn't incorrectly return space1's result for space2)
 		require.Equal(t, 2, mockIndexer.queryCount, "Cache should be space-scoped, requiring separate queries for each space")
 	})
+
+	t.Run("returns location from range claim without index", func(t *testing.T) {
+		blockHash := testutil.RandomMultihash(t)
+		space := testutil.RandomSigner(t)
+		provider := testutil.RandomSigner(t)
+
+		length := uint64(2048)
+		claim, err := assertcap.Location.Delegate(
+			provider,
+			provider.DID(),
+			provider.DID().String(),
+			assertcap.LocationCaveats{
+				Space:   space.DID(),
+				Content: captypes.FromHash(blockHash),
+				Location: ctestutil.Urls(
+					"https://storage.example.com/block/with-range",
+				),
+				Range: &assertcap.Range{
+					Offset: 10,
+					Length: &length,
+				},
+			},
+		)
+		require.NoError(t, err)
+
+		// Indexer returns only the claim with range; no indexes.
+		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim}, nil)
+		loc := locator.NewIndexLocator(mockIndexer, nil)
+
+		locations, err := loc.Locate(t.Context(), space.DID(), blockHash)
+		require.NoError(t, err)
+		require.Len(t, locations, 1)
+
+		require.Equal(t, blobindex.Position{Offset: 10, Length: length}, locations[0].Position)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage.example.com/block/with-range",
+		), locations[0].Commitment.Nb().Location)
+	})
 }
 
 // source is a helper type for matching capabilities
@@ -283,7 +317,8 @@ func (s source) Delegation() delegation.Delegation {
 	return s.delegation
 }
 
-// spaceScopedMockIndexer returns different claims based on the space DID in the query
+// spaceScopedMockIndexer returns claims for multiple spaces so the locator must
+// filter them.
 type spaceScopedMockIndexer struct {
 	space1Claim delegation.Delegation
 	space2Claim delegation.Delegation
@@ -295,23 +330,6 @@ var _ locator.IndexerClient = (*spaceScopedMockIndexer)(nil)
 
 func (m *spaceScopedMockIndexer) QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error) {
 	m.queryCount++
-
-	// Determine which claim to return based on the space DID in the query
-	var claim delegation.Delegation
-	if len(query.Match.Subject) > 0 {
-		// Extract space DID from space1's claim
-		match1, _ := assertcap.Location.Match(source{
-			capability: m.space1Claim.Capabilities()[0],
-			delegation: m.space1Claim,
-		})
-		space1DID := match1.Value().Nb().Space
-
-		if query.Match.Subject[0] == space1DID {
-			claim = m.space1Claim
-		} else {
-			claim = m.space2Claim
-		}
-	}
 
 	// Build index block
 	indexReader, err := blobindex.Archive(m.index)
@@ -332,7 +350,7 @@ func (m *spaceScopedMockIndexer) QueryClaims(ctx context.Context, query types.Qu
 	)
 
 	return &mockQueryResult{
-		claims:      []delegation.Delegation{claim},
+		claims:      []delegation.Delegation{m.space1Claim, m.space2Claim},
 		indexBlocks: []block.Block{indexBlock},
 	}, nil
 }

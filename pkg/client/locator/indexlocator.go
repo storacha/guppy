@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/capabilities/assert"
@@ -17,6 +18,8 @@ import (
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
+
+var log = logging.Logger("indexlocator")
 
 func NewIndexLocator(indexer IndexerClient, delegations []delegation.Delegation) *indexLocator {
 	return &indexLocator{
@@ -103,9 +106,6 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
 		Hashes:      []mh.Multihash{hash},
 		Delegations: s.delegations,
-		Match: types.Match{
-			Subject: []did.DID{spaceDID},
-		},
 	})
 	if err != nil {
 		var failedResponseErr indexclient.ErrFailedResponse
@@ -123,7 +123,12 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, link := range result.Claims() {
+	resultClaims := result.Claims()
+	numIndices := result.Indexes()
+
+	log.Infow("queried indexer claims", "num_claims", len(resultClaims), "num_indices", len(numIndices))
+
+	for _, link := range resultClaims {
 		d, err := delegation.NewDelegationView(link, bs)
 		if err != nil {
 			return err
@@ -137,14 +142,32 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 			continue
 		}
 
+		log.Infow("claim match", "link", link, "match", match)
+
 		cap := match.Value()
+		if cap.Nb().Space != spaceDID {
+			continue
+		}
 		claimHash := cap.Nb().Content.Hash()
 
 		claimKey := cacheKey(spaceDID, claimHash)
 		s.commitments[claimKey] = append(s.commitments[claimKey], cap)
+
+		// Some location assertions include a byte range for the content itself.
+		// In that case we can satisfy lookups for this hash directly without
+		// needing a separate index entry.
+		if rng := cap.Nb().Range; rng != nil && rng.Length != nil {
+			s.inclusions[claimKey] = append(s.inclusions[claimKey], inclusion{
+				shard: claimHash,
+				position: blobindex.Position{
+					Offset: rng.Offset,
+					Length: *rng.Length,
+				},
+			})
+		}
 	}
 
-	for _, link := range result.Indexes() {
+	for _, link := range numIndices {
 		indexBlock, ok, err := bs.Get(link)
 		if err != nil {
 			return fmt.Errorf("getting index block: %w", err)
