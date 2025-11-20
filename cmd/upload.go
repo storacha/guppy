@@ -17,8 +17,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
-var uploadDbPath string
-var storePath string
+var storachaDirPath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
@@ -75,9 +74,9 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	uploadCmd.PersistentFlags().StringVar(
-		&uploadDbPath,
+		&storachaDirPath,
 		"db",
-		filepath.Join(uploadDbPath, "preparation.db"),
+		filepath.Join(storachaDirPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
 }
@@ -216,10 +215,10 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	storachaDir := filepath.Dir(uploadDbPath)
+	storachaDir := filepath.Dir(storachaDirPath)
 	if err := os.MkdirAll(storachaDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
 	}
 
-	return preparation.OpenRepo(ctx, uploadDbPath)
+	return preparation.OpenRepo(ctx, storachaDirPath)
 }
