@@ -49,7 +49,7 @@ var tracedHttpClient = &http.Client{
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Client {
+func MustGetClient(storePath string, options ...client.Option) *client.Client {
 	data, err := agentdata.ReadFromFile(storePath)
 
 	if err != nil {
@@ -77,7 +77,6 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 		client.WithSaveFn(func(data agentdata.AgentData) error {
 			return data.WriteToFile(storePath)
 		}),
-		client.WithAdditionalProofs(proofs...),
 	)
 
 	c, err := client.NewClient(
