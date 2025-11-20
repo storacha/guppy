@@ -73,16 +73,12 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 		clientOptions = append(clientOptions, client.WithData(data))
 	}
 
-	proofsProvided := len(proofs) > 0
-
-	if !proofsProvided {
-		// Only enable saving if no proofs are provided
-		clientOptions = append(clientOptions,
-			client.WithSaveFn(func(data agentdata.AgentData) error {
-				return data.WriteToFile(storePath)
-			}),
-		)
-	}
+	clientOptions = append(clientOptions,
+		client.WithSaveFn(func(data agentdata.AgentData) error {
+			return data.WriteToFile(storePath)
+		}),
+		client.WithAdditionalProofs(proofs...),
+	)
 
 	c, err := client.NewClient(
 		append(
@@ -93,10 +89,6 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 	)
 	if err != nil {
 		log.Fatalf("creating client: %s", err)
-	}
-
-	if proofsProvided {
-		c.AddProofs(proofs...)
 	}
 
 	return c

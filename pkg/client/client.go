@@ -38,10 +38,11 @@ var (
 )
 
 type Client struct {
-	connection     uclient.Connection
-	receiptsClient *receiptclient.Client
-	data           agentdata.AgentData
-	saveFn         func(agentdata.AgentData) error
+	connection       uclient.Connection
+	receiptsClient   *receiptclient.Client
+	data             agentdata.AgentData
+	saveFn           func(agentdata.AgentData) error
+	additionalProofs []delegation.Delegation
 }
 
 // NewClient creates a new client.
@@ -109,14 +110,22 @@ type CapabilityQuery struct {
 //
 // Additionally, this method includes relevant session proofs (ucan/attest delegations)
 // that attest to the returned authorizations.
+//
+// Returns both stored delegations (from c.data.Delegations) and additional proofs
+// (from c.additionalProofs).
 func (c *Client) Proofs(queries ...CapabilityQuery) []delegation.Delegation {
 	now := ucan.Now()
 
 	// Map to track which delegations to include (by CID string)
 	authorizations := make(map[string]delegation.Delegation)
 
+	// Combine stored delegations and additional proofs
+	allDelegations := make([]delegation.Delegation, 0, len(c.data.Delegations)+len(c.additionalProofs))
+	allDelegations = append(allDelegations, c.data.Delegations...)
+	allDelegations = append(allDelegations, c.additionalProofs...)
+
 	// First pass: collect matching authorizations (non-session-proof delegations)
-	for _, del := range c.data.Delegations {
+	for _, del := range allDelegations {
 		// Filter out expired delegations
 		if exp := del.Expiration(); exp != nil && *exp < now {
 			continue
@@ -145,7 +154,7 @@ func (c *Client) Proofs(queries ...CapabilityQuery) []delegation.Delegation {
 	}
 
 	// Second pass: collect session proofs that attest to the authorizations
-	sessionProofs := getSessionProofs(c.data.Delegations, now)
+	sessionProofs := getSessionProofs(allDelegations, now)
 
 	for authCID := range authorizations {
 		if proofsForAuth, exists := sessionProofs[authCID]; exists {

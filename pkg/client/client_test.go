@@ -275,3 +275,199 @@ func TestProofs(t *testing.T) {
 		})
 	})
 }
+
+func TestWithAdditionalProofs(t *testing.T) {
+	t.Run("includes additional proofs in Proofs() results", func(t *testing.T) {
+		// Create a client with a save function to verify what gets saved
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		// Create delegations
+		signer := testutil.Must(signer.Generate())(t)
+		storedDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Clear saved data from NewClient initialization
+		savedData = agentdata.AgentData{}
+
+		// Add a proof to the store
+		err := c.AddProofs(storedDel)
+		require.NoError(t, err)
+
+		// Verify that only the stored delegation was saved
+		require.Equal(t, []delegation.Delegation{storedDel}, savedData.Delegations,
+			"only stored delegation should be saved to storage")
+
+		// Verify that Proofs() returns both stored and additional proofs
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{storedDel, additionalDel}, proofs,
+			"Proofs() should return both stored and additional proofs")
+	})
+
+	t.Run("additional proofs not saved to storage", func(t *testing.T) {
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		signer := testutil.Must(signer.Generate())(t)
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Verify that additional proofs were not saved to storage
+		require.Empty(t, savedData.Delegations,
+			"additional proofs should not be saved to storage")
+
+		// But they should be returned by Proofs()
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{additionalDel}, proofs,
+			"additional proofs should be returned by Proofs()")
+	})
+
+	t.Run("additional proofs respect filtering", func(t *testing.T) {
+		signer := testutil.Must(signer.Generate())(t)
+
+		uploadDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		blobDel := testutil.Must(spaceblobcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			spaceblobcap.AddCaveats{Blob: captypes.Blob{Digest: testutil.RandomMultihash(t), Size: 100}},
+		))(t)
+
+		// Create client with both delegations as additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithAdditionalProofs(uploadDel, blobDel),
+		))(t)
+
+		// Query for only upload capabilities
+		proofs := c.Proofs(client.CapabilityQuery{
+			Can:  "upload/add",
+			With: "ucan:*",
+		})
+		require.ElementsMatch(t, []delegation.Delegation{uploadDel}, proofs,
+			"should filter additional proofs by capability query")
+	})
+
+	t.Run("additional proofs exclude expired delegations", func(t *testing.T) {
+		signer := testutil.Must(signer.Generate())(t)
+
+		validDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		expiredDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+			delegation.WithExpiration(ucan.Now()-100), // Expired 100 seconds ago
+		))(t)
+
+		// Create client with both delegations as additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithAdditionalProofs(validDel, expiredDel),
+		))(t)
+
+		// Only the valid delegation should be returned
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{validDel}, proofs,
+			"should exclude expired additional proofs")
+	})
+
+	t.Run("Reset does not affect additional proofs", func(t *testing.T) {
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		signer := testutil.Must(signer.Generate())(t)
+
+		storedDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Add a stored proof
+		err := c.AddProofs(storedDel)
+		require.NoError(t, err)
+
+		// Verify both are returned
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{storedDel, additionalDel}, proofs)
+
+		// Reset the client
+		err = c.Reset()
+		require.NoError(t, err)
+
+		// Additional proofs should still be there, but stored proof should be gone
+		proofs = c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{additionalDel}, proofs,
+			"additional proofs should remain after reset, but stored proofs should be cleared")
+
+		// Verify storage was cleared
+		require.Empty(t, savedData.Delegations,
+			"stored delegations should be cleared after reset")
+	})
+}

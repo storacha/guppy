@@ -2,6 +2,7 @@ package client
 
 import (
 	uclient "github.com/storacha/go-ucanto/client"
+	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/receipt"
@@ -51,6 +52,16 @@ func WithData(data agentdata.AgentData) Option {
 func WithSaveFn(saveFn func(agentdata.AgentData) error) Option {
 	return func(c *Client) error {
 		c.saveFn = saveFn
+		return nil
+	}
+}
+
+// WithAdditionalProofs adds proofs to the client that will be included in
+// Proofs() results but will not be saved to the client's store. This is
+// useful for proofs that are only needed for a single operation.
+func WithAdditionalProofs(proofs ...delegation.Delegation) Option {
+	return func(c *Client) error {
+		c.additionalProofs = append(c.additionalProofs, proofs...)
 		return nil
 	}
 }
