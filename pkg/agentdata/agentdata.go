@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multibase"
@@ -21,11 +22,13 @@ import (
 type AgentData struct {
 	Principal   principal.Signer
 	Delegations []delegation.Delegation
+	Spaces      []principal.Signer
 }
 
 type agentDataSerialized struct {
 	Principal   []byte
 	Delegations []string
+	Spaces      [][]byte
 }
 
 func (ad AgentData) MarshalJSON() ([]byte, error) {
@@ -47,9 +50,15 @@ func (ad AgentData) MarshalJSON() ([]byte, error) {
 		delegations = append(delegations, b64)
 	}
 
+	spaces := make([][]byte, 0, len(ad.Spaces))
+	for _, space := range ad.Spaces {
+		spaces = append(spaces, space.Encode())
+	}
+
 	return json.Marshal(agentDataSerialized{
 		Principal:   ad.Principal.Encode(),
 		Delegations: delegations,
+		Spaces:      spaces,
 	})
 }
 
@@ -108,6 +117,33 @@ func (ad *AgentData) UnmarshalJSON(b []byte) error {
 		ad.Delegations[i] = d
 	}
 
+	// Spaces
+
+	ad.Spaces = make([]principal.Signer, len(s.Spaces))
+	for i, spaceBytes := range s.Spaces {
+		code, err := varint.ReadUvarint(bytes.NewReader(spaceBytes))
+		if err != nil {
+			return fmt.Errorf("reading space %d key codec: %w", i, err)
+		}
+
+		switch code {
+		case ed25519signer.Code:
+			ad.Spaces[i], err = ed25519signer.Decode(spaceBytes)
+			if err != nil {
+				return fmt.Errorf("decoding space %d: %w", i, err)
+			}
+
+		case rsasigner.Code:
+			ad.Spaces[i], err = rsasigner.Decode(spaceBytes)
+			if err != nil {
+				return fmt.Errorf("decoding space %d: %w", i, err)
+			}
+
+		default:
+			return fmt.Errorf("invalid space %d key codec: %d", i, code)
+		}
+	}
+
 	return nil
 }
 
@@ -115,6 +151,12 @@ func (ad AgentData) WriteToFile(path string) error {
 	b, err := json.Marshal(ad)
 	if err != nil {
 		return err
+	}
+
+	// Ensure the directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
 	}
 
 	return os.WriteFile(path, b, 0600)

@@ -19,12 +19,16 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
+var storePath string
+
 var rootCmd = &cobra.Command{
 	Use:   "guppy",
 	Short: "Interact with the Storacha Network",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
+
+		storePath = filepath.Join(storachaDirPath, "store.json")
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
@@ -36,13 +40,13 @@ func init() {
 	if err != nil {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
-	defaultStorachaDir := filepath.Join(homedir, ".storacha")
 
-	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storacha-dir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
-
-	// We could make this configurable in the future, but for now it seems like
-	// too many options for likely no value.
-	storePath = filepath.Join(defaultStorachaDir, "store.json")
+	rootCmd.PersistentFlags().StringVar(
+		&storachaDirPath,
+		"storacha-dir",
+		filepath.Join(homedir, ".storacha"),
+		"Directory containing the config and data store (default: ~/.storacha)",
+	)
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.
