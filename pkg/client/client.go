@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	logging "github.com/ipfs/go-log/v2"
@@ -20,8 +19,8 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/storacha/go-ucanto/principal/ed25519/verifier"
 	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
-	"github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/pkg/agentdata"
@@ -333,7 +332,7 @@ func invokeAndExecute[Caveats, Out any](
 	successType schema.Type,
 	options ...delegation.Option,
 ) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
-	inv, err := invoke[Caveats, Out](c, capParser, with, caveats, options...)
+	inv, err := invoke[Caveats, Out](ctx, c, capParser, with, caveats, options...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invoking `%s`: %w", capParser.Can(), err)
 	}
@@ -341,6 +340,7 @@ func invokeAndExecute[Caveats, Out any](
 }
 
 func invoke[Caveats, Out any](
+	ctx context.Context,
 	c *Client,
 	capParser validator.CapabilityParser[Caveats],
 	with ucan.Resource,
@@ -351,7 +351,45 @@ func invoke[Caveats, Out any](
 	for _, del := range c.Proofs() {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
-	return capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+
+	inv, err := capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate the invocation locally before sending to server
+	vctx := validator.NewValidationContext(
+		c.Issuer().Verifier(),
+		capParser,
+		func(cap ucan.Capability[any], issuer did.DID) bool {
+			// Check if capability can be self-issued
+			return validator.IsSelfIssued(cap, issuer)
+		},
+		func(ctx context.Context, auth validator.Authorization[any]) validator.Revoked {
+			// No revocation checking for now
+			return nil
+		},
+		func(ctx context.Context, proof ucan.Link) (delegation.Delegation, validator.UnavailableProof) {
+			// Resolve proofs from the client's stored delegations
+			for _, del := range c.Proofs() {
+				if del.Link().String() == proof.String() {
+					return del, nil
+				}
+			}
+			return validator.ProofUnavailable(ctx, proof)
+		},
+		func(str string) (principal.Verifier, error) {
+			return verifier.Parse(str)
+		},
+		validator.FailDIDKeyResolution, // DID resolver
+	)
+
+	_, err = validator.Access(ctx, inv, vctx)
+	if err != nil {
+		return nil, fmt.Errorf("authorization failed: %w", err)
+	}
+
+	return inv, nil
 }
 
 func execute[Caveats, Out any](
@@ -369,10 +407,6 @@ func execute[Caveats, Out any](
 
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
 	if err != nil {
-		httpErr := http.NewHTTPError("", 0, nil)
-		if errors.As(err, &httpErr) {
-			log.Errorf(">>> %s\n%s\n%d\n%#v\n", httpErr.Error(), httpErr.Name(), httpErr.Status(), httpErr.Headers())
-		}
 		return nil, nil, fmt.Errorf("sending invocation: %w", err)
 	}
 

@@ -39,6 +39,7 @@ func (c *Client) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize 
 	}
 
 	inv, err := invoke[spaceindexcap.AddCaveats, spaceindexcap.AddOk](
+		ctx,
 		c,
 		spaceindexcap.Add,
 		space.String(),
