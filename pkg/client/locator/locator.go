@@ -16,5 +16,6 @@ type Locator interface {
 
 type Location struct {
 	Commitment ucan.Capability[assert.LocationCaveats]
+	Digest     mh.Multihash
 	Position   blobindex.Position
 }

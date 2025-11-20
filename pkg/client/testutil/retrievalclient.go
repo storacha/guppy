@@ -19,6 +19,7 @@ import (
 	serverretrieval "github.com/storacha/go-ucanto/server/retrieval"
 	thttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,13 +85,10 @@ func NewRetrievalClient(t *testing.T, service principal.Signer, testData []byte,
 						// Get hash from capability
 						capHash := nb.Blob.Digest
 
-						// Validate all three hashes match
-						if !bytes.Equal(urlHash, capHash) {
-							return nil, nil, serverretrieval.Response{Status: http.StatusBadRequest}, fmt.Errorf("URL hash %s does not match capability hash %s", urlHash.B58String(), capHash.B58String())
-						}
-						if !bytes.Equal(capHash, actualHash) {
-							return nil, nil, serverretrieval.Response{Status: http.StatusBadRequest}, fmt.Errorf("capability hash %s does not match actual data hash %s", capHash.B58String(), actualHash.B58String())
-						}
+						// Validate all three hashes match. This is just to verify the tests
+						// are written correctly.
+						assert.Equal(t, urlHash, capHash, "URL should match capability; test may be incorrect")
+						assert.Equal(t, urlHash, actualHash, "URL should match actual data; test may be incorrect")
 					}
 
 					// Extract range from request

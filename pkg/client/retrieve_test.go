@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -62,67 +64,19 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve the content using the custom HTTP client
-		data, err := c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
+		data, err := c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
 		require.NoError(t, err)
 		require.Equal(t, testData, data)
-	})
-
-	t.Run("server validates hash consistency", func(t *testing.T) {
-		// Setup test data
-		wrongData := []byte("This is the WRONG data!!!")
-		wrongHash, err := multihash.Sum(wrongData, multihash.SHA2_256, -1)
-		require.NoError(t, err)
-
-		correctData := []byte("This is the correct data.")
-		correctHash, err := multihash.Sum(correctData, multihash.SHA2_256, -1)
-		require.NoError(t, err)
-
-		// Create space and storage provider
-		space, err := ed25519signer.Generate()
-		require.NoError(t, err)
-
-		storageProvider, err := ed25519signer.Generate()
-		require.NoError(t, err)
-
-		// Create retrieval server with WRONG data
-		httpClient := testutil.NewRetrievalClient(t, storageProvider, wrongData)
-
-		// Create a location commitment where:
-		// - URL has wrongHash (matching the server's data)
-		// - Capability has correctHash (what client expects)
-		// This tests that the server rejects requests where URL hash != capability hash
-		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", wrongHash.B58String()))
-		require.NoError(t, err)
-
-		locationCommitment := ucan.NewCapability(
-			assertcap.Location.Can(),
-			storageProvider.DID().String(),
-			assertcap.LocationCaveats{
-				Space:   space.DID(),
-				Content: captypes.FromHash(correctHash),
-				Range: &assertcap.Range{
-					Offset: 0,
-					Length: uint64Ptr(uint64(len(wrongData))),
-				},
-				Location: []url.URL{*serverURL},
-			},
-		)
-
-		// Create client with space delegation
-		c, err := testutil.Client()
-		require.NoError(t, err)
-
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
-
-		// Retrieve should fail because server detects URL hash != capability hash
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "400")
 	})
 
 	t.Run("client validates received data hash", func(t *testing.T) {
@@ -173,8 +127,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     correctHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(wrongData)),
+			},
+		}
+
 		// Retrieve should fail because client detects data hash mismatch
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
+		_, err = c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "content hash mismatch")
 	})
@@ -213,8 +176,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve should fail due to invalid DID (no HTTP client needed since it fails before connection)
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment)
+		_, err = c.Retrieve(testContext(t), space.DID(), location)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "parsing DID")
 	})
@@ -260,8 +232,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve should fail due to connection error (use default HTTP client which will fail to connect)
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment)
+		_, err = c.Retrieve(testContext(t), space.DID(), location)
 		require.Error(t, err)
 	})
 }
