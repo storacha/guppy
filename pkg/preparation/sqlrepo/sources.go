@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/storacha/guppy/pkg/preparation/sources"
@@ -17,7 +18,25 @@ var _ sources.Repo = (*Repo)(nil)
 
 // CreateSource creates a new source in the repository with the given name, path, and options.
 func (r *Repo) CreateSource(ctx context.Context, name string, path string, options ...sourcemodel.SourceOption) (*sourcemodel.Source, error) {
-	src, err := sourcemodel.NewSource(name, path, options...)
+	// resolve the specific path to its absolute path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve absolute path from %s: %w", path, err)
+	}
+
+	// reuse an existing source pointing at the same path if one already exists
+	// NB(forrest): one intention of the source abstraction is that they mau have different kinds
+	// at present, there is only a local time, so the existence check on a normalized path here is sufficient.
+	// In the future when sources may have different kinds this check will need adjustment.
+	existing, err := r.getSourceByPath(ctx, absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing sources by path: %w", err)
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	src, err := sourcemodel.NewSource(name, absPath, options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create source model: %w", err)
 	}
@@ -76,6 +95,22 @@ func (r *Repo) GetSourceByName(ctx context.Context, name string) (*sourcemodel.S
 			path,
 			connection_params
 		FROM sources WHERE name = ?`, name,
+	)
+
+	return r.getSourceFromRow(row)
+}
+
+func (r *Repo) getSourceByPath(ctx context.Context, path string) (*sourcemodel.Source, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT
+			id,
+			name,
+			created_at,
+			updated_at,
+			kind,
+			path,
+			connection_params
+		FROM sources WHERE path = ?`, path,
 	)
 
 	return r.getSourceFromRow(row)
