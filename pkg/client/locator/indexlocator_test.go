@@ -190,6 +190,80 @@ func TestLocator(t *testing.T) {
 		require.Len(t, mockIndexer.Queries, 1, "Second block should be served from cache without making a new query")
 	})
 
+	t.Run("location-only query for block in cached index", func(t *testing.T) {
+		// Create two different block hashes that will be in different shards
+		block1Hash := testutil.RandomMultihash(t)
+		block2Hash := testutil.RandomMultihash(t)
+		rootLink := testutil.RandomCID(t)
+		shard1Hash := testutil.RandomMultihash(t)
+		shard2Hash := testutil.RandomMultihash(t)
+
+		space := testutil.RandomSigner(t)
+		provider := testutil.RandomSigner(t)
+
+		// Create a claim for shard1 only (not shard2)
+		claim1, err := assertcap.Location.Delegate(
+			provider,
+			provider.DID(),
+			provider.DID().String(),
+			assertcap.LocationCaveats{
+				Space:   space.DID(),
+				Content: captypes.FromHash(shard1Hash),
+				Location: ctestutil.Urls(
+					"https://storage.example.com/shard1",
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		// Create an index that contains BOTH blocks in different shards
+		index := blobindex.NewShardedDagIndexView(rootLink, -1)
+		index.SetSlice(shard1Hash, block1Hash, blobindex.Position{
+			Offset: 0,
+			Length: 1024,
+		})
+		index.SetSlice(shard2Hash, block2Hash, blobindex.Position{
+			Offset: 0,
+			Length: 2048,
+		})
+
+		requiredDelegations := []delegation.Delegation{
+			testutil.RandomLocationDelegation(t),
+		}
+
+		// Create a mock indexer that responds differently based on query type
+		mockIndexer := newLocationQueryMockIndexer(claim1, index)
+		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+
+		// First, locate block1 - should return index and claim for shard1
+		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
+		require.NoError(t, err)
+		require.Len(t, locations1, 1)
+		require.Equal(t, blobindex.Position{
+			Offset: 0,
+			Length: 1024,
+		}, locations1[0].Position)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage.example.com/shard1",
+		), locations1[0].Commitment.Nb().Location)
+
+		// Verify that we made one query
+		require.Len(t, mockIndexer.Queries, 1)
+		require.Equal(t, types.QueryTypeStandard, mockIndexer.Queries[0].Type)
+
+		// Now locate block2 - should make a location-only query since we have the index
+		// But the mock won't return a location claim for shard2, so we should get an error
+		_, err = locator.Locate(t.Context(), space.DID(), block2Hash)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), block2Hash.String())
+		require.Contains(t, err.Error(), "no locations found")
+
+		// Verify that we made a second query, but it was location-only
+		require.Len(t, mockIndexer.Queries, 2, "Should have made two queries")
+		require.Equal(t, types.QueryTypeLocation, mockIndexer.Queries[1].Type,
+			"Second query should be location-only since index is cached")
+	})
+
 	t.Run("cache is space-scoped", func(t *testing.T) {
 		// Create a block hash
 		blockHash := testutil.RandomMultihash(t)
@@ -381,6 +455,65 @@ func (m *mockIndexerClient) QueryClaims(ctx context.Context, query types.Query) 
 
 	return &mockQueryResult{
 		claims:      m.claims,
+		indexBlocks: indexBlocks,
+	}, nil
+}
+
+// locationQueryMockIndexer returns indexes on standard queries, but only claims on location queries
+type locationQueryMockIndexer struct {
+	claim delegation.Delegation
+	index blobindex.ShardedDagIndexView
+
+	Queries []types.Query
+}
+
+var _ locator.IndexerClient = (*locationQueryMockIndexer)(nil)
+
+func newLocationQueryMockIndexer(claim delegation.Delegation, index blobindex.ShardedDagIndexView) *locationQueryMockIndexer {
+	return &locationQueryMockIndexer{
+		claim: claim,
+		index: index,
+	}
+}
+
+func (m *locationQueryMockIndexer) QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error) {
+	m.Queries = append(m.Queries, query)
+
+	var claims []delegation.Delegation
+	var indexBlocks []block.Block
+
+	// For location-only queries, only return claims (no indexes)
+	if query.Type == types.QueryTypeLocation {
+		// Return empty result for location queries (simulating no location for shard2)
+		return &mockQueryResult{
+			claims:      nil,
+			indexBlocks: nil,
+		}, nil
+	}
+
+	// For standard queries, return both index and claims
+	claims = []delegation.Delegation{m.claim}
+
+	indexReader, err := blobindex.Archive(m.index)
+	if err != nil {
+		return nil, fmt.Errorf("archiving index: %w", err)
+	}
+	indexBytes, err := io.ReadAll(indexReader)
+	if err != nil {
+		return nil, fmt.Errorf("reading index bytes: %w", err)
+	}
+	hash, err := multihash.Sum(indexBytes, sha256.Code, -1)
+	if err != nil {
+		return nil, fmt.Errorf("hashing index bytes: %w", err)
+	}
+	indexBlock := block.NewBlock(
+		cidlink.Link{Cid: cid.NewCidV1(uint64(multicodec.Car), hash)},
+		indexBytes,
+	)
+	indexBlocks = append(indexBlocks, indexBlock)
+
+	return &mockQueryResult{
+		claims:      claims,
 		indexBlocks: indexBlocks,
 	}, nil
 }
