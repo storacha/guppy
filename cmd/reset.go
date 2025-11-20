@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var resetCmd = &cobra.Command{
@@ -15,11 +19,15 @@ var resetCmd = &cobra.Command{
 		80),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(storePath)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("creating client: %w", err)
+		}
 		return c.Reset()
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(resetCmd)
 }

@@ -20,19 +20,19 @@ import (
 	"github.com/storacha/go-ucanto/transport/car"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/pkg/agentdata"
-	"github.com/storacha/guppy/pkg/client"
-	cdg "github.com/storacha/guppy/pkg/delegation"
-	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-)
 
-const defaultServiceName = "staging.up.warm.storacha.network"
-const defaultIndexerName = "staging.indexer.warm.storacha.network"
+	"github.com/storacha/guppy/pkg/agentdata"
+	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
+	cdg "github.com/storacha/guppy/pkg/delegation"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
+)
 
 // envSigner returns a principal.Signer from the environment variable
 // GUPPY_PRIVATE_KEY, if any.
+// TODO delete or make space in config
 func envSigner() (principal.Signer, error) {
 	str := os.Getenv("GUPPY_PRIVATE_KEY") // use env var preferably
 	if str == "" {
@@ -46,31 +46,24 @@ var tracedHttpClient = &http.Client{
 	Transport: otelhttp.NewTransport(http.DefaultTransport),
 }
 
-// MustGetClient creates a new client suitable for the CLI, using stored data,
+// NewClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Client {
-	data, err := agentdata.ReadFromFile(storePath)
-
-	if err != nil {
-		// If the file doesn't exist yet, that's fine. The config will be empty
-		// until it's written to.
-		if !errors.Is(err, fs.ErrNotExist) {
-			log.Fatalf("reading agent data: %s", err)
-		}
-	}
-
+func NewClient(cfg config.GuppyConfig, proofs ...delegation.Delegation) (*client.Client, error) {
 	var clientOptions []client.Option
-
 	// Use the principal from the environment if given.
 	if s, err := envSigner(); err != nil {
-		log.Fatalf("parsing GUPPY_PRIVATE_KEY: %s", err)
+		return nil, fmt.Errorf("error reading GUPPY_PRIVATE_KEY: %w", err)
 	} else if s != nil {
 		// If a principal is provided, use that, and ignore the saved data.
 		clientOptions = append(clientOptions, client.WithPrincipal(s))
 	} else {
 		// Otherwise, read and write the saved data.
-		clientOptions = append(clientOptions, client.WithData(data))
+		ad, err := cfg.Repo.ReadAgentData()
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("reading agent data from repo: %w", err)
+		}
+		clientOptions = append(clientOptions, client.WithData(ad))
 	}
 
 	proofsProvided := len(proofs) > 0
@@ -79,7 +72,7 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 		// Only enable saving if no proofs are provided
 		clientOptions = append(clientOptions,
 			client.WithSaveFn(func(data agentdata.AgentData) error {
-				return data.WriteToFile(storePath)
+				return cfg.Repo.WriteAgentData(data)
 			}),
 		)
 	}
@@ -87,8 +80,9 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 	c, err := client.NewClient(
 		append(
 			clientOptions,
-			client.WithConnection(MustGetConnection()),
-			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(), receiptclient.WithHTTPClient(tracedHttpClient))),
+			client.WithConnection(MustGetConnection(cfg.Network)),
+			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(cfg.Network),
+				receiptclient.WithHTTPClient(tracedHttpClient))),
 		)...,
 	)
 	if err != nil {
@@ -96,17 +90,19 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 	}
 
 	if proofsProvided {
-		c.AddProofs(proofs...)
+		if err := c.AddProofs(proofs...); err != nil {
+			return nil, fmt.Errorf("adding proofs to client: %w", err)
+		}
 	}
 
-	return c
+	return c, nil
 }
 
-func MustGetConnection() uclient.Connection {
+func MustGetConnection(cfg config.NetworkConfig) uclient.Connection {
 	// service URL & DID
 	serviceURLStr := os.Getenv("STORACHA_SERVICE_URL") // use env var preferably
 	if serviceURLStr == "" {
-		serviceURLStr = fmt.Sprintf("https://%s", defaultServiceName)
+		serviceURLStr = fmt.Sprintf("https://%s", cfg.UploadService)
 	}
 
 	serviceURL, err := url.Parse(serviceURLStr)
@@ -116,7 +112,7 @@ func MustGetConnection() uclient.Connection {
 
 	serviceDIDStr := os.Getenv("STORACHA_SERVICE_DID")
 	if serviceDIDStr == "" {
-		serviceDIDStr = fmt.Sprintf("did:web:%s", defaultServiceName)
+		serviceDIDStr = fmt.Sprintf("did:web:%s", cfg.UploadService)
 	}
 
 	servicePrincipal, err := did.Parse(serviceDIDStr)
@@ -136,10 +132,10 @@ func MustGetConnection() uclient.Connection {
 	return conn
 }
 
-func MustGetReceiptsURL() *url.URL {
+func MustGetReceiptsURL(cfg config.NetworkConfig) *url.URL {
 	receiptsURLStr := os.Getenv("STORACHA_RECEIPTS_URL")
 	if receiptsURLStr == "" {
-		receiptsURLStr = fmt.Sprintf("https://%s/receipt", defaultServiceName)
+		receiptsURLStr = fmt.Sprintf("https://%s/receipt", cfg.UploadService)
 	}
 
 	receiptsURL, err := url.Parse(receiptsURLStr)
@@ -150,10 +146,10 @@ func MustGetReceiptsURL() *url.URL {
 	return receiptsURL
 }
 
-func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
+func MustGetIndexClient(cfg config.NetworkConfig) (*indexclient.Client, ucan.Principal) {
 	indexerURLStr := os.Getenv("STORACHA_INDEXING_SERVICE_URL") // use env var preferably
 	if indexerURLStr == "" {
-		indexerURLStr = fmt.Sprintf("https://%s", defaultIndexerName)
+		indexerURLStr = fmt.Sprintf("https://%s", cfg.IndexService)
 	}
 
 	indexerURL, err := url.Parse(indexerURLStr)
@@ -163,7 +159,7 @@ func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
 
 	indexerDIDStr := os.Getenv("STORACHA_INDEXING_SERVICE_DID")
 	if indexerDIDStr == "" {
-		indexerDIDStr = fmt.Sprintf("did:web:%s", defaultIndexerName)
+		indexerDIDStr = fmt.Sprintf("did:web:%s", cfg.IndexService)
 	}
 
 	indexerPrincipal, err := did.Parse(indexerDIDStr)

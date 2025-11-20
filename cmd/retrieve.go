@@ -10,9 +10,11 @@ import (
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
 )
 
@@ -25,13 +27,7 @@ var retrieveCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		repo, err := makeRepo(ctx)
-		if err != nil {
-			return err
-		}
-		defer repo.Close()
 
-		c := cmdutil.MustGetClient(storePath)
 		space, err := did.Parse(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid space DID: %w", err)
@@ -42,7 +38,17 @@ var retrieveCmd = &cobra.Command{
 		}
 		outputPath := args[2]
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg)
+		if err != nil {
+			return fmt.Errorf("creating client: %w", err)
+		}
+
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
 		pfs := make([]delegation.Proof, 0, len(c.Proofs()))
 		for _, del := range c.Proofs() {
@@ -73,8 +79,4 @@ var retrieveCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(retrieveCmd)
 }
