@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"time"
 
-	"github.com/ipfs/go-cid"
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -17,11 +19,18 @@ import (
 )
 
 var retrieveCmd = &cobra.Command{
-	Use:     "retrieve <space> <CID> <output-path>",
+	Use:     "retrieve <space> <content-path> <output-path>",
 	Aliases: []string{"get"},
 	Short:   "Get a file or directory by its CID",
-	Long:    "Retrieves a file or directory from the space by its CID.",
-	Args:    cobra.ExactArgs(3),
+	Long: wordwrap.WrapString(
+		"Retrieves a file or directory from a space. The specified file or "+
+			"directory will be written to <output-path>. <content-path> can take "+
+			"several forms:\n\n"+
+			"* /ipfs/<cid>[/<subpath>]\n"+
+			"* ipfs://<cid>[/<subpath>]\n"+
+			"* <cid>[/<subpath>]",
+		80),
+	Args: cobra.ExactArgs(3),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -36,10 +45,15 @@ var retrieveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
-		cid, err := cid.Parse(args[1])
+
+		pathCID, subpath, err := cmdutil.ContentPath(args[1])
 		if err != nil {
-			return fmt.Errorf("invalid CID: %w", err)
+			return fmt.Errorf("parsing content path: %w", err)
 		}
+		if subpath == "" {
+			subpath = "."
+		}
+
 		outputPath := args[2]
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
@@ -64,11 +78,37 @@ var retrieveCmd = &cobra.Command{
 
 		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
 		ds := dagservice.NewDAGService(locator, c, space)
-		retrievedFs := dagfs.New(ctx, ds, cid)
+		retrievedFs := dagfs.New(ctx, ds, pathCID)
 
-		err = os.CopyFS(outputPath, retrievedFs)
+		file, err := retrievedFs.Open(subpath)
 		if err != nil {
-			return fmt.Errorf("copying retrieved filesystem: %w", err)
+			return fmt.Errorf("opening path in retrieved filesystem: %w", err)
+		}
+		defer file.Close()
+
+		// If it's a directory, copy the whole directory. If it's a file, copy the
+		// file.
+		if _, ok := file.(fs.ReadDirFile); ok {
+			pathedFs, err := fs.Sub(retrievedFs, subpath)
+			if err != nil {
+				return fmt.Errorf("sub filesystem: %w", err)
+			}
+
+			err = os.CopyFS(outputPath, pathedFs)
+			if err != nil {
+				return fmt.Errorf("copying retrieved filesystem: %w", err)
+			}
+		} else {
+			outFile, err := os.Create(outputPath)
+			if err != nil {
+				return fmt.Errorf("creating output file: %w", err)
+			}
+			defer outFile.Close()
+
+			_, err = io.Copy(outFile, file)
+			if err != nil {
+				return fmt.Errorf("writing to output file: %w", err)
+			}
 		}
 
 		return nil
