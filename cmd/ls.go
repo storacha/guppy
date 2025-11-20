@@ -9,6 +9,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/client"
 )
 
 var lsFlags struct {
@@ -39,7 +40,7 @@ var lsCmd = &cobra.Command{
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(storePath, proofs...)
+		c := cmdutil.MustGetClient(storePath, client.WithAdditionalProofs(proofs...))
 
 		var cursor *string
 		for {
