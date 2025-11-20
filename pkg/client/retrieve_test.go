@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -62,8 +64,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve the content using the custom HTTP client
-		data, err := c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
+		data, err := c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
 		require.NoError(t, err)
 		require.Equal(t, testData, data)
 	})
@@ -119,8 +130,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     correctHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(wrongData)),
+			},
+		}
+
 		// Retrieve should fail because server detects URL hash != capability hash
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
+		_, err = c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "400")
 	})
@@ -173,8 +193,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     correctHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(wrongData)),
+			},
+		}
+
 		// Retrieve should fail because client detects data hash mismatch
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment, rclient.WithClient(httpClient))
+		_, err = c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "content hash mismatch")
 	})
@@ -213,8 +242,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve should fail due to invalid DID (no HTTP client needed since it fails before connection)
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment)
+		_, err = c.Retrieve(testContext(t), space.DID(), location)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "parsing DID")
 	})
@@ -260,8 +298,17 @@ func TestRetrieve(t *testing.T) {
 		err = c.AddProofs(proof)
 		require.NoError(t, err)
 
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Digest:     dataHash,
+			Position: blobindex.Position{
+				Offset: 0,
+				Length: uint64(len(testData)),
+			},
+		}
+
 		// Retrieve should fail due to connection error (use default HTTP client which will fail to connect)
-		_, err = c.Retrieve(testContext(t), space.DID(), locationCommitment)
+		_, err = c.Retrieve(testContext(t), space.DID(), location)
 		require.Error(t, err)
 	})
 }
