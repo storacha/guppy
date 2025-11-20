@@ -127,7 +127,6 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	_, failErr := result.Unwrap(res)
 	if failErr != nil {
-		fmt.Printf("failErr: %#v", failErr)
 		return AddedBlob{}, fmt.Errorf("`space/blob/add` failed: %w", failErr)
 	}
 
@@ -220,7 +219,17 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 				return AddedBlob{}, fmt.Errorf("unexpected capability in accept task: %s", ability)
 			}
 		default:
-			log.Warnf("ignoring receipt for unexpected task: %s", concludeRcpt.Ran().Link())
+			inv, ok := concludeRcpt.Ran().Invocation()
+			if !ok {
+				log.Debugf("ignoring receipt for unknown task: %s", concludeRcpt.Ran().Link())
+			}
+			ability := inv.Capabilities()[0].Can()
+			switch ability {
+			case w3sblobcap.AllocateAbility, w3sblobcap.AcceptAbility:
+				log.Debugf("ignoring receipt for additional `%s` legacy task: %s", ability, concludeRcpt.Ran().Link())
+			default:
+				log.Warnf("ignoring receipt for unexpected `%s` task: %s", ability, concludeRcpt.Ran().Link())
+			}
 		}
 	}
 
