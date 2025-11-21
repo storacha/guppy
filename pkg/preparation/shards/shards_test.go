@@ -34,7 +34,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	t.Run("adds nodes to shards", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
-		api := shards.API{Repo: repo}
+		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder(nil)}
 		space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(1<<16))
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
@@ -144,7 +144,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	t.Run("with a node too big for a shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
-		api := shards.API{Repo: repo}
+		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder(nil)}
 		space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(128))
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
@@ -227,9 +227,11 @@ func TestCarForShard(t *testing.T) {
 		err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID3, spaceDID, 0 /* irrelevant */)
 		require.NoError(t, err)
 
+		nodeReader := stubNodeReader{}
 		api := shards.API{
-			Repo:       repo,
-			NodeReader: stubNodeReader{},
+			Repo:         repo,
+			NodeReader:   nodeReader,
+			ShardEncoder: shards.NewCAREncoder(nodeReader),
 		}
 
 		carReader, err := api.CarForShard(t.Context(), shard.ID())
@@ -299,11 +301,13 @@ func TestCarForShard(t *testing.T) {
 			require.NoError(t, err)
 		}
 
+		nodeReader := stubNodeReader{
+			errorNodes: []cid.Cid{nodeCID2, nodeCID4},
+		}
 		api := shards.API{
-			Repo: repo,
-			NodeReader: stubNodeReader{
-				errorNodes: []cid.Cid{nodeCID2, nodeCID4},
-			},
+			Repo:         repo,
+			NodeReader:   nodeReader,
+			ShardEncoder: shards.NewCAREncoder(nodeReader),
 		}
 
 		carReader, err := api.CarForShard(t.Context(), shard.ID())
@@ -321,9 +325,11 @@ func TestCarForShard(t *testing.T) {
 func TestIndexForUpload(t *testing.T) {
 	t.Run("returns a reader of an index of the upload", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		nodeReader := stubNodeReader{}
 		api := shards.API{
 			Repo:             repo,
-			NodeReader:       stubNodeReader{},
+			NodeReader:       nodeReader,
+			ShardEncoder:     shards.NewCAREncoder(nodeReader),
 			MaxNodesPerIndex: 5,
 		}
 
@@ -435,9 +441,11 @@ func TestIndexForUpload(t *testing.T) {
 
 	t.Run("for an upload with no root CID, returns an error", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		nodeReader := stubNodeReader{}
 		api := shards.API{
-			Repo:       repo,
-			NodeReader: stubNodeReader{},
+			Repo:         repo,
+			NodeReader:   nodeReader,
+			ShardEncoder: shards.NewCAREncoder(nodeReader),
 		}
 
 		spaceDID, err := did.Parse("did:storacha:space:example")
