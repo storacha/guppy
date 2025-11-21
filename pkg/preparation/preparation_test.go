@@ -43,14 +43,15 @@ import (
 	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func randomBytes(n int) []byte {
@@ -183,10 +184,16 @@ func prepareTestClient(
 	return client
 }
 
-func createUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, api preparation.API) *uploadsmodel.Upload {
+func createUpload(
+	t *testing.T,
+	sourcePath string,
+	repo *sqlrepo.Repo,
+	spaceDID did.DID,
+	api preparation.API,
+) *uploadsmodel.Upload {
 	_, err := api.FindOrCreateSpace(t.Context(), spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
 	require.NoError(t, err)
-	source, err := api.CreateSource(t.Context(), "Large Upload Source", ".")
+	source, err := api.CreateSource(t.Context(), "Large Upload Source", sourcePath)
 	require.NoError(t, err)
 	err = repo.AddSourceToSpace(t.Context(), spaceDID, source.ID())
 	require.NoError(t, err)
@@ -224,16 +231,17 @@ func TestExecuteUpload(t *testing.T) {
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
 		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
+		uploadSourcePath := t.TempDir()
 		api := preparation.NewAPI(
 			repo,
 			c,
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
-				require.Equal(t, ".", path, "test expects root to be '.'")
+				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
 		)
 
-		upload := createUpload(t, repo, space.DID(), api)
+		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
 
 		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
@@ -344,16 +352,17 @@ func TestExecuteUpload(t *testing.T) {
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
 		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
+		uploadSourcePath := t.TempDir()
 		api := preparation.NewAPI(
 			repo,
 			c,
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
-				require.Equal(t, ".", path, "test expects root to be '.'")
+				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
 		)
 
-		upload := createUpload(t, repo, space.DID(), api)
+		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
 
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
