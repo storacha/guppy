@@ -21,8 +21,8 @@ type Repo interface {
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
-	// NodesByShard fetches all the nodes for a given shard. Thery are returned in
-	// the order they should appear in the shard.
+	// NodesByShard fetches all the nodes for a given shard, returned in the order
+	// they should appear in the shard.
 	NodesByShard(ctx context.Context, shardID id.ShardID) iter.Seq2[dagsmodel.Node, error]
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 }
