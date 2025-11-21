@@ -8,12 +8,8 @@ import (
 	"io"
 
 	"github.com/ipfs/go-cid"
-	cbor "github.com/ipfs/go-ipld-cbor"
 	logging "github.com/ipfs/go-log/v2"
-	ipldcar "github.com/ipld/go-car"
-	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -28,30 +24,6 @@ import (
 
 var log = logging.Logger("preparation/shards")
 
-// A CAR header with zero roots.
-var noRootsHeader []byte
-
-func init() {
-	var err error
-	noRootsHeaderWithoutLength, err := cbor.Encode(
-		ipldcar.CarHeader{
-			Roots:   nil,
-			Version: 1,
-		},
-	)
-	if err != nil {
-		panic(fmt.Sprintf("failed to encode CAR header: %v", err))
-	}
-
-	var buf bytes.Buffer
-	err = util.LdWrite(&buf, noRootsHeaderWithoutLength)
-	if err != nil {
-		panic(fmt.Sprintf("failed to length-delimit CAR header: %v", err))
-	}
-
-	noRootsHeader = buf.Bytes()
-}
-
 type NodeDataGetter interface {
 	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
 }
@@ -61,6 +33,7 @@ type API struct {
 	Repo             Repo
 	NodeReader       NodeDataGetter
 	MaxNodesPerIndex int
+	ShardEncoder     ShardEncoder
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
@@ -94,7 +67,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := roomInShard(s, node, space)
+		hasRoom, err := roomInShard(a.ShardEncoder, s, node, space)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
@@ -111,11 +84,11 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 
 	// If no such shard exists, create a new one
 	if shard == nil {
-		shard, err = a.Repo.CreateShard(ctx, uploadID, uint64(len(noRootsHeader)))
+		shard, err = a.Repo.CreateShard(ctx, uploadID, a.ShardEncoder.HeaderEncodingLength())
 		if err != nil {
 			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
-		hasRoom, err := roomInShard(shard, node, space)
+		hasRoom, err := roomInShard(a.ShardEncoder, shard, node, space)
 		if err != nil {
 			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
 		}
@@ -124,29 +97,21 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())
+	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, a.ShardEncoder.NodeEncodingLength(node)-node.Size())
 	if err != nil {
 		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
 	return closed, nil
 }
 
-func roomInShard(shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
-	nodeSize := nodeEncodingLength(node)
+func roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
+	nodeSize := encoder.NodeEncodingLength(node)
 
 	if shard.Size()+nodeSize > space.ShardSize() {
 		return false, nil // No room in the shard
 	}
 
 	return true, nil
-}
-
-func nodeEncodingLength(node dagsmodel.Node) uint64 {
-	cid := node.CID()
-	blockSize := node.Size()
-	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
-	vilen := uint64(varint.UvarintSize(uint64(pllen)))
-	return pllen + vilen
 }
 
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
@@ -168,29 +133,19 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
+// TODO: probably rename this
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
-		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
-		cidReader := bytes.NewReader(node.CID().Bytes())
-		newReader := NewLazyReader(func() ([]byte, error) {
-			data, err := a.NodeReader.GetData(ctx, node)
-			if err != nil {
-				log.Debug("Error getting data for node ", node.CID(), ": ", err)
-				return nil, a.makeErrBadNodes(ctx, shardID)
-			}
-			return data, nil
-		})
-
-		readers = append(readers, lengthReader, cidReader, newReader)
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
-	}
-
-	return io.MultiReader(readers...), nil
+	r, w := io.Pipe()
+	go func() {
+		err := a.ShardEncoder.Encode(ctx, a.Repo.NodesByShard(ctx, shardID), w)
+		if err != nil {
+			log.Debug("Error encoding shard:", err)
+			w.CloseWithError(a.makeErrBadNodes(ctx, shardID))
+			return
+		}
+		w.Close()
+	}()
+	return r, nil
 }
 
 // makeErrBadNodes attempts to read data from all nodes in the given shard, and
