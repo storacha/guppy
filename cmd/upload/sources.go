@@ -12,6 +12,7 @@ import (
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/spaces/model"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 var sourcesCmd = &cobra.Command{
@@ -58,18 +59,23 @@ var sourcesAddCmd = &cobra.Command{
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		c, err := cmdutil.NewClient(cfg)
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg.Network, repo)
 		if err != nil {
 			return fmt.Errorf("creating client: %w", err)
 		}
 
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.UploadDBPath())
+		sqlRepo, err := repo.OpenSQLRepo(ctx)
 		if err != nil {
 			return err
 		}
-		defer repo.Close()
+		defer sqlRepo.Close()
 
-		api := preparation.NewAPI(repo, c)
+		api := preparation.NewAPI(sqlRepo, c)
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption
@@ -91,7 +97,7 @@ var sourcesAddCmd = &cobra.Command{
 			return fmt.Errorf("command failed to create source: %w", err)
 		}
 
-		err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
+		err = sqlRepo.AddSourceToSpace(ctx, spaceDID, source.ID())
 		if err != nil {
 			return fmt.Errorf("command failed to add source to space: %w", err)
 		}
@@ -125,20 +131,25 @@ var sourcesListCmd = &cobra.Command{
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.UploadDBPath())
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		sqlRepo, err := repo.OpenSQLRepo(ctx)
 		if err != nil {
 			return err
 		}
-		defer repo.Close()
+		defer sqlRepo.Close()
 
-		sourceIDs, err := repo.ListSpaceSources(ctx, spaceDID)
+		sourceIDs, err := sqlRepo.ListSpaceSources(ctx, spaceDID)
 		if err != nil {
 			return err
 		}
 
 		cmd.Printf("Sources for space %s:\n", spaceDID)
 		for _, sourceID := range sourceIDs {
-			source, err := repo.GetSourceByID(ctx, sourceID)
+			source, err := sqlRepo.GetSourceByID(ctx, sourceID)
 			if err != nil {
 				return fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
 			}

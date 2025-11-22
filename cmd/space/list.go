@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 func init() {
@@ -19,20 +22,34 @@ var listCmd = &cobra.Command{
 	Long:    "List all spaces that have been created locally",
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		config, err := loadSpaceConfig()
+		cfg, err := config.Load()
 		if err != nil {
-			return err
+			return fmt.Errorf("loading config: %w", err)
+		}
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
 		}
 
-		if len(config.Spaces) == 0 {
+		spaceStore, err := repo.SpaceStore()
+		if err != nil {
+			return fmt.Errorf("opening space store: %w", err)
+		}
+
+		state, err := spaceStore.State()
+		if err != nil {
+			return fmt.Errorf("listing spaces: %w", err)
+		}
+
+		if len(state.Spaces) == 0 {
 			cmd.Println("No spaces found. Create one with 'guppy space create <name>'")
 			return nil
 		}
 
 		if spaceFlags.json {
 			safeSpaces := make(map[string]interface{})
-			for did, space := range config.Spaces {
-				safeSpaces[did] = sanitizeSpace(&space)
+			for did, space := range state.Spaces {
+				safeSpaces[did] = space.Sanitized()
 			}
 			data, err := json.MarshalIndent(safeSpaces, "", "  ")
 			if err != nil {
@@ -46,9 +63,9 @@ var listCmd = &cobra.Command{
 		cmd.Printf("%-20s %-12s %-10s %s\n", "NAME", "REGISTERED", "CURRENT", "DID")
 		cmd.Println(strings.Repeat("-", 80))
 
-		for did, space := range config.Spaces {
+		for did, space := range state.Spaces {
 			current := ""
-			if config.Current == did {
+			if state.Current != nil && state.Current.DID.String() == did {
 				current = "✓"
 			}
 

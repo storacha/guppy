@@ -11,6 +11,7 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 var Cmd = &cobra.Command{
@@ -44,21 +45,26 @@ var Cmd = &cobra.Command{
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		c, err := cmdutil.NewClient(cfg)
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg.Network, repo)
 		if err != nil {
 			return fmt.Errorf("creating client: %w", err)
 		}
 
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.UploadDBPath())
+		sqlRepo, err := repo.OpenSQLRepo(ctx)
 		if err != nil {
 			return err
 		}
 		// Currently leads to a race condition with the app still running delayed DB
 		// queries. We can deal with this issue later, since the process ends at the
 		// end of this function anyhow.
-		// defer repo.Close()
+		// defer sqlRepo.Close()
 
-		api := preparation.NewAPI(repo, c)
+		api := preparation.NewAPI(sqlRepo, c)
 		uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -69,7 +75,7 @@ var Cmd = &cobra.Command{
 			return cmdutil.NewHandledCliError(fmt.Errorf("no uploads found for space %s", spaceDID))
 		}
 
-		return ui.RunUploadUI(ctx, repo, api, uploads)
+		return ui.RunUploadUI(ctx, sqlRepo, api, uploads)
 	},
 }
 

@@ -5,6 +5,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 func init() {
@@ -20,24 +23,32 @@ var useCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nameOrDID := args[0]
 
-		space, err := findSpaceByNameOrDID(nameOrDID)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		spaceStore, err := repo.SpaceStore()
+		if err != nil {
+			return fmt.Errorf("opening space store: %w", err)
+		}
+
+		space, err := spaceStore.Get(nameOrDID)
 		if err != nil {
 			return err
 		}
 
-		config, err := loadSpaceConfig()
-		if err != nil {
+		if err := spaceStore.SetCurrent(space); err != nil {
 			return err
-		}
-
-		config.Current = space.DID
-
-		if err := saveSpaceConfig(config); err != nil {
-			return fmt.Errorf("failed to save space config: %w", err)
 		}
 
 		if spaceFlags.json {
-			data, err := json.MarshalIndent(sanitizeSpace(space), "", "  ")
+			data, err := json.MarshalIndent(space.Sanitized(), "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
 			}

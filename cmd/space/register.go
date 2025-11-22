@@ -5,6 +5,9 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 func init() {
@@ -30,16 +33,30 @@ var registerCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		email := args[0]
 
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		r, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		spaceStore, err := r.SpaceStore()
+		if err != nil {
+			return fmt.Errorf("opening space store: %w", err)
+		}
+
 		// Get space to register
-		var space *Space
-		var err error
+		var space repo.Space
 		if spaceFlags.spaceName != "" {
-			space, err = findSpaceByNameOrDID(spaceFlags.spaceName)
+			space, err = spaceStore.Get(spaceFlags.spaceName)
 			if err != nil {
-				return fmt.Errorf("space not found: %w", err)
+				return err
 			}
 		} else {
-			space, err = getCurrentSpace()
+			space, err = spaceStore.Current()
 			if err != nil {
 				return fmt.Errorf("no current space - specify with --space or use 'guppy space use': %w", err)
 			}
@@ -53,7 +70,7 @@ var registerCmd = &cobra.Command{
 		cmd.Printf("Creating delegation for space '%s' to email %s...\n", space.Name, email)
 
 		// Create delegation from space to email
-		del, err := createSpaceToEmailDelegation(space, email)
+		del, err := spaceStore.RegisterSpace(space, email)
 		if err != nil {
 			return fmt.Errorf("failed to create delegation: %w", err)
 		}
@@ -66,17 +83,6 @@ var registerCmd = &cobra.Command{
 
 		if err := saveDelegationToFile(del, outputPath); err != nil {
 			return fmt.Errorf("failed to save delegation: %w", err)
-		}
-
-		// Mark space as registered locally
-		space.Registered = true
-		config, err := loadSpaceConfig()
-		if err != nil {
-			return fmt.Errorf("failed to load space config: %w", err)
-		}
-		config.Spaces[space.DID] = *space
-		if err := saveSpaceConfig(config); err != nil {
-			return fmt.Errorf("failed to save space config: %w", err)
 		}
 
 		// Success message with clear instructions

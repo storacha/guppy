@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 func init() {
@@ -19,20 +22,41 @@ var infoCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var space *Space
-		var err error
+		var (
+			space repo.Space
+			err   error
+		)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %v", err)
+		}
+
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %v", err)
+		}
+
+		spaceStore, err := repo.SpaceStore()
+		if err != nil {
+			return fmt.Errorf("opening space store: %v", err)
+		}
 
 		if len(args) > 0 {
-			space, err = findSpaceByNameOrDID(args[0])
+			space, err = spaceStore.Get(args[0])
+			if err != nil {
+				return err
+			}
 		} else {
-			space, err = getCurrentSpace()
-		}
-		if err != nil {
-			return err
+			space, err = spaceStore.Current()
+			if err != nil {
+				return err
+			}
+			// if this is the current space, print so last.
+			defer cmd.Println("Status: Current Space")
 		}
 
 		if spaceFlags.json {
-			data, err := json.MarshalIndent(sanitizeSpace(space), "", "  ")
+			data, err := json.MarshalIndent(space.Sanitized(), "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
 			}
@@ -44,11 +68,6 @@ var infoCmd = &cobra.Command{
 			cmd.Printf("Registered: %t\n", space.Registered)
 			if space.Description != "" {
 				cmd.Printf("Description: %s\n", space.Description)
-			}
-
-			config, _ := loadSpaceConfig()
-			if config != nil && config.Current == space.DID {
-				cmd.Printf("Status: Current space\n")
 			}
 		}
 

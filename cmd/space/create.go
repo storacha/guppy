@@ -6,6 +6,9 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 func init() {
@@ -25,28 +28,29 @@ var createCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		spaceName := args[0]
 
-		// Check if space already exists
-		if existing, _ := findSpaceByNameOrDID(spaceName); existing != nil {
-			return fmt.Errorf("space with name '%s' already exists", spaceName)
-		}
-
-		// Generate new space
-		space, err := generateSpace()
+		cfg, err := config.Load()
 		if err != nil {
-			return fmt.Errorf("failed to generate space: %w", err)
+			return fmt.Errorf("loading config: %w", err)
 		}
 
-		space.Name = spaceName
-		space.Description = spaceFlags.description
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
 
-		// Save to config
-		if err := addSpaceToConfig(space); err != nil {
-			return fmt.Errorf("failed to save space: %w", err)
+		spaceStore, err := repo.SpaceStore()
+		if err != nil {
+			return fmt.Errorf("loading space-store: %w", err)
+		}
+
+		space, err := spaceStore.CreateSpace(spaceName, spaceFlags.description)
+		if err != nil {
+			return fmt.Errorf("creating space: %w", err)
 		}
 
 		// Output
 		if spaceFlags.json {
-			data, err := json.MarshalIndent(sanitizeSpace(space), "", "  ")
+			data, err := json.MarshalIndent(space.Sanitized(), "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
 			}

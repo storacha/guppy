@@ -46,10 +46,16 @@ var tracedHttpClient = &http.Client{
 	Transport: otelhttp.NewTransport(http.DefaultTransport),
 }
 
+type AgentDataRepo interface {
+	ReadAgentData() (agentdata.AgentData, error)
+	WriteAgentData(data agentdata.AgentData) error
+}
+
 // NewClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func NewClient(cfg config.GuppyConfig, proofs ...delegation.Delegation) (*client.Client, error) {
+func NewClient(cfg config.NetworkConfig, agentStore AgentDataRepo, proofs ...delegation.Delegation) (*client.Client,
+	error) {
 	var clientOptions []client.Option
 	// Use the principal from the environment if given.
 	if s, err := envSigner(); err != nil {
@@ -59,7 +65,7 @@ func NewClient(cfg config.GuppyConfig, proofs ...delegation.Delegation) (*client
 		clientOptions = append(clientOptions, client.WithPrincipal(s))
 	} else {
 		// Otherwise, read and write the saved data.
-		ad, err := cfg.Repo.ReadAgentData()
+		ad, err := agentStore.ReadAgentData()
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("reading agent data from repo: %w", err)
 		}
@@ -71,17 +77,15 @@ func NewClient(cfg config.GuppyConfig, proofs ...delegation.Delegation) (*client
 	if !proofsProvided {
 		// Only enable saving if no proofs are provided
 		clientOptions = append(clientOptions,
-			client.WithSaveFn(func(data agentdata.AgentData) error {
-				return cfg.Repo.WriteAgentData(data)
-			}),
+			client.WithSaveFn(agentStore.WriteAgentData),
 		)
 	}
 
 	c, err := client.NewClient(
 		append(
 			clientOptions,
-			client.WithConnection(MustGetConnection(cfg.Network)),
-			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(cfg.Network),
+			client.WithConnection(MustGetConnection(cfg)),
+			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(cfg),
 				receiptclient.WithHTTPClient(tracedHttpClient))),
 		)...,
 	)

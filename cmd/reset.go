@@ -8,6 +8,7 @@ import (
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 var resetCmd = &cobra.Command{
@@ -24,7 +25,12 @@ var resetCmd = &cobra.Command{
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		c, err := cmdutil.NewClient(cfg)
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg.Network, repo)
 		if err != nil {
 			return fmt.Errorf("creating client: %w", err)
 		}

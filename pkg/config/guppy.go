@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/viper"
@@ -50,10 +49,6 @@ func Load() (GuppyConfig, error) {
 	var out GuppyConfig
 	if err := viper.UnmarshalExact(&out); err != nil {
 		return GuppyConfig{}, fmt.Errorf("failed to load config: %w", err)
-	}
-	// bit of a hack, ensure the dir always exists
-	if err := os.MkdirAll(out.Repo.Dir, 0700); err != nil {
-		return GuppyConfig{}, fmt.Errorf("failed to create repo dir: %w", err)
 	}
 	return out, nil
 }
