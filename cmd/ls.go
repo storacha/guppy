@@ -8,12 +8,20 @@ import (
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 var lsFlags struct {
 	proofsPath string
 	showShards bool
+}
+
+func init() {
+	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
+	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }
 
 var lsCmd = &cobra.Command{
@@ -33,13 +41,23 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		proofs := []delegation.Delegation{}
+		var proofs []delegation.Delegation
 		if lsFlags.proofsPath != "" {
 			proof := cmdutil.MustGetProof(lsFlags.proofsPath)
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(storePath, proofs...)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		repo, err := repo.Open(cfg.Repo)
+
+		c, err := cmdutil.NewClient(cfg.Network, repo, proofs...)
+		if err != nil {
+			return fmt.Errorf("creating client: %w", err)
+		}
 
 		var cursor *string
 		for {
@@ -52,10 +70,10 @@ var lsCmd = &cobra.Command{
 			}
 
 			for _, r := range listOk.Results {
-				fmt.Printf("%s\n", r.Root)
+				cmd.Printf("%s\n", r.Root)
 				if lsFlags.showShards {
 					for _, s := range r.Shards {
-						fmt.Printf("\t%s\n", s)
+						cmd.Printf("\t%s\n", s)
 					}
 				}
 			}
@@ -68,11 +86,4 @@ var lsCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(lsCmd)
-
-	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
-	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }

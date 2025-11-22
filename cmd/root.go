@@ -2,16 +2,21 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/cmd/space"
+	"github.com/storacha/guppy/cmd/upload"
 )
 
 var (
@@ -19,30 +24,47 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "guppy",
-	Short: "Interact with the Storacha Network",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		span := trace.SpanFromContext(cmd.Context())
-		setSpanAttributes(cmd, span)
-	},
-	// We handle errors ourselves when they're returned from ExecuteContext.
-	SilenceErrors: true,
-}
+// DefaultDataDirPath defines the default data dir of guppy: "$HOME/.storacha/guppy"
+var DefaultDataDirPath = filepath.Join(lo.Must(os.UserHomeDir()), ".storacha/guppy")
+
+const (
+	defaultServiceName = "staging.up.warm.storacha.network"
+	defaultIndexerName = "staging.indexer.warm.storacha.network"
+)
 
 func init() {
-	// default storacha dir: ~/.storacha
-	homedir, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Errorf("failed to get user home directory: %w", err))
-	}
-	defaultStorachaDir := filepath.Join(homedir, ".storacha")
+	// root flags
+	rootCmd.PersistentFlags().String("config", "", "path to a config file")
 
-	uploadCmd.PersistentFlags().StringVar(&uploadDbPath, "storacha-dir", defaultStorachaDir, "Directory containing the config and data store (default: ~/.storacha)")
+	// root flags w/ config binding
+	rootCmd.PersistentFlags().String("data-dir", DefaultDataDirPath, "path to a data dir containing guppy state")
+	cobra.CheckErr(viper.BindPFlag("repo.dir", rootCmd.PersistentFlags().Lookup("data-dir")))
 
-	// We could make this configurable in the future, but for now it seems like
-	// too many options for likely no value.
-	storePath = filepath.Join(defaultStorachaDir, "store.json")
+	rootCmd.PersistentFlags().String("upload-service", defaultServiceName, "name of service to use for storacha upload")
+	cobra.CheckErr(viper.BindPFlag("network.upload_service", rootCmd.PersistentFlags().Lookup("upload-service")))
+
+	rootCmd.PersistentFlags().String("indexer-service", defaultIndexerName, "name of service to use for storacha indexing")
+	cobra.CheckErr(viper.BindPFlag("network.indexer_service", rootCmd.PersistentFlags().Lookup("indexer-service")))
+
+	// root commands
+	rootCmd.AddCommand(loginCmd, upload.Cmd, lsCmd, resetCmd, retrieveCmd, space.Cmd, whoamiCmd)
+}
+
+func initViper() {
+	viper.AutomaticEnv()
+	// replace . and - with _
+	viper.EnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
+}
+
+var rootCmd = &cobra.Command{
+	Use:           "guppy",
+	Short:         "Interact with the Storacha Network",
+	SilenceErrors: true, // We handle errors ourselves when they're returned from ExecuteContext.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		span := trace.SpanFromContext(cmd.Context())
+		// TODO(forrest): I think this will need to re-embed the span back into the context to have desired effect.
+		setSpanAttributes(cmd, span)
+	},
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.

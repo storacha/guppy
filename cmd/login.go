@@ -8,8 +8,11 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/core/result"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
+	"github.com/storacha/guppy/pkg/repo"
 )
 
 var loginCmd = &cobra.Command{
@@ -30,43 +33,52 @@ var loginCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		email := cmd.Flags().Arg(0)
 
 		accountDid, err := didmailto.FromEmail(email)
 		if err != nil {
-			return err
+			return fmt.Errorf("parsing email: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(storePath)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
 
-		authOk, err := c.RequestAccess(cmd.Context(), accountDid.String())
+		repo, err := repo.Open(cfg.Repo)
+		if err != nil {
+			return fmt.Errorf("opening repo: %w", err)
+		}
+
+		c, err := cmdutil.NewClient(cfg.Network, repo)
+		if err != nil {
+			return fmt.Errorf("creating client: %w", err)
+		}
+
+		authOk, err := c.RequestAccess(ctx, accountDid.String())
 		if err != nil {
 			return fmt.Errorf("requesting access: %w", err)
 		}
 
-		resultChan := c.PollClaim(cmd.Context(), authOk)
-
-		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
+		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(cmd.ErrOrStderr())) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
 		s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
 		s.Start()
-		claimedDels, err := result.Unwrap(<-resultChan)
-		s.Stop()
+		defer s.Stop()
 
-		if cmd.Context().Err() != nil {
-			return fmt.Errorf("login canceled: %w", cmd.Context().Err())
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("login canceled: %w", ctx.Err())
+		case res := <-c.PollClaim(ctx, authOk):
+			claimedDels, err := result.Unwrap(res)
+			if err != nil {
+				return fmt.Errorf("claiming access: %w", err)
+			}
+			if err := c.AddProofs(claimedDels...); err != nil {
+				return fmt.Errorf("storing claimed access: %w", err)
+			}
+			cmd.Printf("Successfully logged in as %s!", email)
 		}
-
-		if err != nil {
-			return fmt.Errorf("claiming access: %w", err)
-		}
-
-		fmt.Printf("Successfully logged in as %s!", email)
-		c.AddProofs(claimedDels...)
-
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(loginCmd)
 }
