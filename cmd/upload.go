@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/mitchellh/go-wordwrap"
@@ -218,10 +217,5 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	storachaDir := filepath.Dir(storachaDirPath)
-	if err := os.MkdirAll(storachaDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
-	}
-
-	return preparation.OpenRepo(ctx, storachaDirPath)
+	return preparation.OpenRepo(ctx, uploadDbPath)
 }
