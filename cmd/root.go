@@ -33,6 +33,7 @@ var rootCmd = &cobra.Command{
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 func init() {

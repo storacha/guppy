@@ -25,12 +25,14 @@ var provisionCmd = &cobra.Command{
 		// Parse the space DID
 		spaceDID, err := did.Parse(spaceDIDStr)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
 
 		// Convert email to did:mailto
 		customerDID, err := didmailto.FromInput(customerEmail)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("invalid customer email: %w", err)
 		}
 
