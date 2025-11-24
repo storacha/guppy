@@ -16,13 +16,14 @@ import (
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/pkg/client"
-	"github.com/storacha/guppy/pkg/client/locator"
 
 	// Register codecs
 	_ "github.com/ipld/go-codec-dagpb"
 	_ "github.com/ipld/go-ipld-prime/codec/dagcbor"
 	_ "github.com/ipld/go-ipld-prime/codec/dagjson"
+
+	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/client/locator"
 )
 
 type Retriever interface {
@@ -50,26 +51,104 @@ func NewDAGService(locator locator.Locator, retriever Retriever, space did.DID) 
 }
 
 func (d *dagService) Get(ctx context.Context, c cid.Cid) (ipldfmt.Node, error) {
+	return d.getNode(ctx, c)
+}
+
+func (d *dagService) GetMany(ctx context.Context, cids []cid.Cid) <-chan *ipldfmt.NodeOption {
+	out := make(chan *ipldfmt.NodeOption, len(cids))
+
+	go func() {
+		defer close(out)
+
+		for _, c := range cids {
+			select {
+			case <-ctx.Done():
+				out <- &ipldfmt.NodeOption{Err: ctx.Err()}
+				return
+			default:
+			}
+
+			node, err := d.getNode(ctx, c)
+
+			select {
+			case out <- &ipldfmt.NodeOption{Node: node, Err: err}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return out
+}
+
+func (d *dagService) Add(context.Context, ipldfmt.Node) error {
+	return errors.ErrUnsupported
+}
+
+func (d *dagService) AddMany(context.Context, []ipldfmt.Node) error {
+	return errors.ErrUnsupported
+}
+
+func (d *dagService) Remove(ctx context.Context, cid cid.Cid) error {
+	return errors.ErrUnsupported
+}
+
+func (d *dagService) RemoveMany(context.Context, []cid.Cid) error {
+	return errors.ErrUnsupported
+}
+
+func (d *dagService) getNode(ctx context.Context, c cid.Cid) (ipldfmt.Node, error) {
 	locations, err := d.locator.Locate(ctx, d.space, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
+	if len(locations) == 0 {
+		return nil, ipldfmt.ErrNotFound{Cid: c}
+	}
 
-	// Randomly pick one of the available locations
-	location := locations[rand.Intn(len(locations))]
+	location := d.selectLocation(locations)
 
-	shardBytes, err := d.retriever.Retrieve(ctx, d.space, location.Commitment)
+	shardBytes, err := d.getShard(ctx, location)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}
 
-	// Cache the shard
-	d.shards.Set(location.Commitment.Nb().Content.Hash(), shardBytes)
+	return nodeFromShard(c, location, shardBytes)
+}
 
-	blockBytes := shardBytes[location.Position.Offset : location.Position.Offset+location.Position.Length]
+func (d *dagService) selectLocation(locations []locator.Location) locator.Location {
+	for _, l := range locations {
+		if d.shards.Has(l.Commitment.Nb().Content.Hash()) {
+			return l
+		}
+	}
 
-	// Create a block from the data and CID
-	// This will verify that the data hashes to the expected CID
+	return locations[rand.Intn(len(locations))]
+}
+
+func (d *dagService) getShard(ctx context.Context, location locator.Location) ([]byte, error) {
+	shardHash := location.Commitment.Nb().Content.Hash()
+	if d.shards.Has(shardHash) {
+		return d.shards.Get(shardHash), nil
+	}
+
+	shardBytes, err := d.retriever.Retrieve(ctx, d.space, location.Commitment)
+	if err != nil {
+		return nil, err
+	}
+
+	d.shards.Set(shardHash, shardBytes)
+	return shardBytes, nil
+}
+
+func nodeFromShard(c cid.Cid, location locator.Location, shardBytes []byte) (ipldfmt.Node, error) {
+	end := location.Position.Offset + location.Position.Length
+	if end > uint64(len(shardBytes)) {
+		return nil, fmt.Errorf("block %s position %d+%d exceeds shard length %d", c, location.Position.Offset, location.Position.Length, len(shardBytes))
+	}
+
+	blockBytes := shardBytes[location.Position.Offset:end]
+
 	block, err := blocks.NewBlockWithCid(blockBytes, c)
 	if err != nil {
 		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(shardBytes), err)
@@ -96,24 +175,4 @@ func (d *dagService) Get(ctx context.Context, c cid.Cid) (ipldfmt.Node, error) {
 	default:
 		return nil, fmt.Errorf("unsupported codec %s (0x%x) for block %s", multicodec.Code(codec), codec, c)
 	}
-}
-
-func (d *dagService) GetMany(context.Context, []cid.Cid) <-chan *ipldfmt.NodeOption {
-	panic("not implemented")
-}
-
-func (d *dagService) Add(context.Context, ipldfmt.Node) error {
-	return errors.ErrUnsupported
-}
-
-func (d *dagService) AddMany(context.Context, []ipldfmt.Node) error {
-	return errors.ErrUnsupported
-}
-
-func (d *dagService) Remove(ctx context.Context, cid cid.Cid) error {
-	return errors.ErrUnsupported
-}
-
-func (d *dagService) RemoveMany(context.Context, []cid.Cid) error {
-	return errors.ErrUnsupported
 }
