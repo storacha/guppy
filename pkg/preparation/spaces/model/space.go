@@ -9,13 +9,13 @@ import (
 )
 
 // MaxShardSize is the maximum allowed size for a shard
-const MaxShardSize = 1 << 29 // 512MB
+const MaxShardSize = 512 << 20 // 512MB
 
 // MinShardSize is the minimum allowed size for a shard
 const MinShardSize = 128
 
 // DefaultShardSize is the default size for a shard
-const DefaultShardSize = MaxShardSize
+const DefaultShardSize = 254 << 20 // 254MB
 
 // ErrShardSizeTooLarge indicates that the shard size is larger than the maximum allowed size.
 var ErrShardSizeTooLarge = fmt.Errorf("shard size must at most %d bytes", MaxShardSize)
