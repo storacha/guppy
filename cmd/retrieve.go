@@ -43,11 +43,13 @@ var retrieveCmd = &cobra.Command{
 		c := cmdutil.MustGetClient(storePath)
 		space, err := did.Parse(args[0])
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
 
 		pathCID, subpath, err := cmdutil.ContentPath(args[1])
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing content path: %w", err)
 		}
 		if subpath == "" {

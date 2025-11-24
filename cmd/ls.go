@@ -31,6 +31,7 @@ var lsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		spaceDID, err := did.Parse(cmd.Flags().Arg(0))
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 

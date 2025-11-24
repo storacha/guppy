@@ -34,6 +34,7 @@ var loginCmd = &cobra.Command{
 
 		accountDid, err := didmailto.FromEmail(email)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return err
 		}
 
@@ -60,7 +61,7 @@ var loginCmd = &cobra.Command{
 			return fmt.Errorf("claiming access: %w", err)
 		}
 
-		fmt.Printf("Successfully logged in as %s!", email)
+		fmt.Printf("Successfully logged in as %s!\n", email)
 		c.AddProofs(claimedDels...)
 
 		return nil

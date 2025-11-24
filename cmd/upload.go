@@ -35,16 +35,14 @@ var uploadCmd = &cobra.Command{
 		ctx := cmd.Context()
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
-
-		// The command line was valid. Past here, errors do not mean the user needs
-		// to see the usage.
-		cmd.SilenceUsage = true
 
 		repo, err := makeRepo(ctx)
 		if err != nil {
@@ -114,16 +112,19 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 
 		path := cmd.Flags().Arg(1)
 		if path == "" {
+			cmd.SilenceUsage = false
 			return errors.New("path cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
@@ -181,11 +182,13 @@ var uploadSourcesListCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 

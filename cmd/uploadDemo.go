@@ -42,6 +42,7 @@ var uploadDemoCmd = &cobra.Command{
 
 		spaceName := cmd.Flags().Arg(0)
 		if spaceName == "" {
+			cmd.SilenceUsage = false
 			return errors.New("Space name cannot be empty")
 		}
 

@@ -21,6 +21,7 @@ var generateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		space, err := signer.Generate()
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("generating signer for space: %w", err)
 		}
 
