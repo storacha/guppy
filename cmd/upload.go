@@ -17,7 +17,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
-var storachaDirPath string
+var uploadDbPath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
@@ -74,9 +74,9 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	uploadCmd.PersistentFlags().StringVar(
-		&storachaDirPath,
+		&uploadDbPath,
 		"db",
-		filepath.Join(storachaDirPath, "preparation.db"),
+		filepath.Join(uploadDbPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
 }
