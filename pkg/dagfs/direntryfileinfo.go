@@ -35,7 +35,13 @@ func (ude *ufsDirEntryFileInfo) Size() int64 {
 }
 
 func (ude *ufsDirEntryFileInfo) Mode() fs.FileMode {
-	return ude.fsNode.Mode()
+	m := ude.fsNode.Mode()
+	// ude.fsNode.Mode() looks like it tries to include the dir mode, but it
+	// doesn't appear to succeed. So, add it here.
+	if ude.IsDir() {
+		m |= fs.ModeDir
+	}
+	return m
 }
 
 func (ude *ufsDirEntryFileInfo) ModTime() time.Time {
