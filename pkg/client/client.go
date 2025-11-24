@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime/schema"
@@ -443,6 +444,20 @@ func execute[Caveats, Out any](
 		errorValue, err := nodevalue.NodeValue(errorNode)
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading `%s` error output: %w", capParser.Can(), err)
+		}
+
+		// Try to extract error message if possible
+		if errorMap, ok := errorValue.(map[string]any); ok {
+			if msg, exists := errorMap["message"]; exists {
+				// Add a newline if the message contains multiple lines, for readability
+				if msgStr, ok := msg.(string); ok {
+					if strings.Contains(msgStr, "\n") {
+						msg = "\n" + msgStr
+					}
+				}
+
+				return nil, nil, fmt.Errorf("`%s` failed with error message: %s", capParser.Can(), msg)
+			}
 		}
 		return nil, nil, fmt.Errorf("`%s` failed with unexpected error: %#v", capParser.Can(), errorValue)
 	}
