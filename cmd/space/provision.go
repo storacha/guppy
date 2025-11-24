@@ -2,12 +2,12 @@ package space
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/didmailto"
 )
 
 var provisionCmd = &cobra.Command{
@@ -29,34 +29,21 @@ var provisionCmd = &cobra.Command{
 		}
 
 		// Convert email to did:mailto
-		customerDID, err := did.Parse(fmt.Sprintf("did:mailto:%s", customerEmail))
+		customerDID, err := didmailto.FromInput(customerEmail)
 		if err != nil {
 			return fmt.Errorf("invalid customer email: %w", err)
-		}
-
-		// Get the default provider DID from environment or use default
-		providerDIDStr := os.Getenv("STORACHA_SERVICE_DID")
-		if providerDIDStr == "" {
-			providerDIDStr = "did:web:staging.up.warm.storacha.network"
-		}
-
-		providerDID, err := did.Parse(providerDIDStr)
-		if err != nil {
-			return fmt.Errorf("invalid provider DID: %w", err)
 		}
 
 		c := cmdutil.MustGetClient(*StorePathP)
 
 		fmt.Printf("Provisioning space %s with customer %s...\n", spaceDID, customerEmail)
 
-		result, err := c.ProviderAdd(cmd.Context(), customerDID, providerDID, spaceDID)
+		_, err = c.ProviderAdd(cmd.Context(), customerDID, c.Connection().ID().DID(), spaceDID)
 		if err != nil {
 			return fmt.Errorf("provisioning space: %w", err)
 		}
 
 		fmt.Printf("Successfully provisioned!\n")
-		fmt.Printf("  Consumer: %s\n", result.Consumer)
-		fmt.Printf("  Provider: %s\n", result.Provider)
 
 		return nil
 	},

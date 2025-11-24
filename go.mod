@@ -1,6 +1,6 @@
 module github.com/storacha/guppy
 
-go 1.24.4
+go 1.25.3
 
 require (
 	github.com/briandowns/spinner v1.23.2
@@ -158,3 +158,5 @@ require (
 )
 
 tool github.com/hannahhoward/cbor-gen-for
+
+replace github.com/storacha/go-libstoracha => ../go-libstoracha

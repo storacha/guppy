@@ -19,6 +19,7 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
+var storachaDirPath string
 var storePath string
 
 var rootCmd = &cobra.Command{
