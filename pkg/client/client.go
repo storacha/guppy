@@ -443,7 +443,14 @@ func execute[Caveats, Out any](
 					}
 				}
 
-				return nil, nil, fmt.Errorf("`%s` failed with error message: %s", capParser.Can(), msg)
+				name := "unnamed"
+				if n, exists := errorMap["name"]; exists {
+					if nStr, ok := n.(string); ok {
+						name = nStr
+					}
+				}
+
+				return nil, nil, fmt.Errorf("`%s` failed with %s error: %s", capParser.Can(), name, msg)
 			}
 		}
 		return nil, nil, fmt.Errorf("`%s` failed with unexpected error: %#v", capParser.Can(), errorValue)

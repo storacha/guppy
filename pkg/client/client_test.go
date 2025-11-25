@@ -424,7 +424,7 @@ func TestWithAdditionalProofs(t *testing.T) {
 		// Query for only upload capabilities
 		proofs := c.Proofs(client.CapabilityQuery{
 			Can:  "upload/add",
-			With: "ucan:*",
+			With: signer.DID().String(),
 		})
 		require.ElementsMatch(t, []delegation.Delegation{uploadDel}, proofs,
 			"should filter additional proofs by capability query")
