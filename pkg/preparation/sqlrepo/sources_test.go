@@ -1,6 +1,7 @@
 package sqlrepo_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
@@ -23,4 +24,20 @@ func TestCreateSource(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, source, readSourceByName)
+}
+
+func TestCreateSourceReturnsExisting(t *testing.T) {
+	repo := sqlrepo.New(testdb.CreateTestDB(t))
+
+	source, err := repo.CreateSource(t.Context(), "source name", "source/path")
+	require.NoError(t, err)
+
+	absPath, err := filepath.Abs("source/path")
+	require.NoError(t, err)
+	require.Equal(t, absPath, source.Path())
+
+	duplicate, err := repo.CreateSource(t.Context(), "another name", "./source/path")
+	require.NoError(t, err)
+
+	require.Equal(t, source, duplicate)
 }
