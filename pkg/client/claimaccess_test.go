@@ -113,8 +113,7 @@ func TestClaimAccess(t *testing.T) {
 		c := testutil.Must(client.NewClient(client.WithConnection(connection)))(t)
 		claimedDels, err := c.ClaimAccess(testContext(t))
 
-		require.ErrorContains(t, err, "`access/claim` failed with unexpected error:")
-		require.ErrorContains(t, err, "HandlerNotFoundError")
+		require.ErrorContains(t, err, "`access/claim` failed with HandlerNotFoundError error:")
 		require.Len(t, claimedDels, 0)
 	})
 }
