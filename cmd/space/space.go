@@ -5,6 +5,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var StorePathP *string
+
 var SpaceCmd = &cobra.Command{
 	Use:   "space",
 	Short: "Manage spaces",

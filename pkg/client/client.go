@@ -20,7 +20,6 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
-	"github.com/storacha/go-ucanto/principal/ed25519/verifier"
 	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
@@ -231,9 +230,11 @@ func matchesAbility(capAbility, queryAbility ucan.Ability) bool {
 }
 
 // matchesResource checks if a capability's resource matches the query resource.
-// Supports "ucan:*" wildcard.
+// A capability matches if:
+//   - The resources match exactly
+//   - The capability has "ucan:*" (matches any query resource)
 func matchesResource(capResource, queryResource ucan.Resource) bool {
-	return queryResource == "ucan:*" || queryResource == capResource
+	return capResource == "ucan:*" || queryResource == capResource
 }
 
 // isSessionProof checks if a delegation is a session proof (ucan/attest capability).
@@ -348,46 +349,32 @@ func invoke[Caveats, Out any](
 	caveats Caveats,
 	options ...delegation.Option,
 ) (invocation.IssuedInvocation, error) {
+
+	var err error
 	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
+
+	// var spaceSigner ucan.Signer
+	// for _, s := range c.Spaces() {
+	// 	if s.DID().String() == with {
+	// 		spaceSigner = s
+	// 		break
+	// 	}
+	// }
+
+	var inv invocation.IssuedInvocation
+	// Sign as space if available
+	// TODO: Re-enable once we consider the implications of signing as space
+	// if spaceSigner != nil {
+	// 	inv, err = capParser.Invoke(spaceSigner, c.Connection().ID(), with, caveats, options...)
+	// } else {
 	for _, del := range c.Proofs() {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
 
-	inv, err := capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+	inv, err = capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+	// }
 	if err != nil {
 		return nil, err
-	}
-
-	// Validate the invocation locally before sending to server
-	vctx := validator.NewValidationContext(
-		c.Issuer().Verifier(),
-		capParser,
-		func(cap ucan.Capability[any], issuer did.DID) bool {
-			// Check if capability can be self-issued
-			return validator.IsSelfIssued(cap, issuer)
-		},
-		func(ctx context.Context, auth validator.Authorization[any]) validator.Revoked {
-			// No revocation checking for now
-			return nil
-		},
-		func(ctx context.Context, proof ucan.Link) (delegation.Delegation, validator.UnavailableProof) {
-			// Resolve proofs from the client's stored delegations
-			for _, del := range c.Proofs() {
-				if del.Link().String() == proof.String() {
-					return del, nil
-				}
-			}
-			return validator.ProofUnavailable(ctx, proof)
-		},
-		func(str string) (principal.Verifier, error) {
-			return verifier.Parse(str)
-		},
-		validator.FailDIDKeyResolution, // DID resolver
-	)
-
-	_, err = validator.Access(ctx, inv, vctx)
-	if err != nil {
-		return nil, fmt.Errorf("authorization failed: %w", err)
 	}
 
 	return inv, nil

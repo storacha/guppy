@@ -10,8 +10,6 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
-var StorePathP *string
-
 var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a new space",
@@ -30,6 +28,22 @@ var generateCmd = &cobra.Command{
 		err = c.AddSpace(space)
 		if err != nil {
 			return fmt.Errorf("adding space to client: %w", err)
+		}
+
+		accounts := c.Accounts()
+		if len(accounts) == 0 {
+			return fmt.Errorf("no accounts logged in yet - use 'guppy login' to log in")
+		}
+		account := accounts[0]
+
+		_, err = c.ProviderAdd(cmd.Context(), account, c.Connection().ID().DID(), space.DID())
+		if err != nil {
+			return fmt.Errorf("provisioning space: %w", err)
+		}
+
+		_, err = grant(cmd.Context(), c, space, account)
+		if err != nil {
+			return fmt.Errorf("granting capabilities: %w", err)
 		}
 
 		// Print JSON output with just the DID (omitting the private key)
