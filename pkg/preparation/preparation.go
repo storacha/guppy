@@ -113,6 +113,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		Repo:             repo,
 		NodeReader:       nr,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,
+		ShardEncoder:     shards.NewCAREncoder(nr),
 	}
 
 	storachaAPI := storacha.API{

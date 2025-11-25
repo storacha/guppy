@@ -51,7 +51,8 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		shardsApi := shards.API{
-			Repo: repo,
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(nil),
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -182,7 +183,8 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		shardsApi := shards.API{
-			Repo: repo,
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(nil),
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
