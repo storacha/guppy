@@ -34,7 +34,7 @@ require (
 	github.com/spf13/afero v1.12.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
-	github.com/storacha/go-libstoracha v0.5.2-0.20251117155844-b4b67870f480
+	github.com/storacha/go-libstoracha v0.6.1-0.20251125195603-7f481d9cf093
 	github.com/storacha/go-ucanto v0.7.2-0.20251119232529-559b0a57d38f
 	github.com/storacha/indexing-service v1.11.3
 	github.com/stretchr/testify v1.11.1
@@ -158,5 +158,3 @@ require (
 )
 
 tool github.com/hannahhoward/cbor-gen-for
-
-replace github.com/storacha/go-libstoracha => ../go-libstoracha
