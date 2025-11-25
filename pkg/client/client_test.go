@@ -97,7 +97,7 @@ func TestProofs(t *testing.T) {
 	t.Run("query by specific ability", func(t *testing.T) {
 		proofs := c.Proofs(client.CapabilityQuery{
 			Can:  "upload/add",
-			With: "ucan:*",
+			With: c.Issuer().DID().String(),
 		})
 		require.ElementsMatch(t, []delegation.Delegation{uploadDel}, proofs, "should return 1 upload/add delegation")
 	})
@@ -112,8 +112,8 @@ func TestProofs(t *testing.T) {
 
 	t.Run("multiple queries", func(t *testing.T) {
 		proofs := c.Proofs(
-			client.CapabilityQuery{Can: "upload/add", With: "ucan:*"},
-			client.CapabilityQuery{Can: "space/blob/add", With: "ucan:*"},
+			client.CapabilityQuery{Can: "upload/add", With: c.Issuer().DID().String()},
+			client.CapabilityQuery{Can: "space/blob/add", With: c.Issuer().DID().String()},
 		)
 		require.ElementsMatch(t, []delegation.Delegation{uploadDel, blobDel}, proofs, "should return delegations matching either query")
 	})
@@ -175,7 +175,7 @@ func TestProofs(t *testing.T) {
 			// Query by specific capability - should get both the matching authorization and its session proof
 			proofs := c.Proofs(client.CapabilityQuery{
 				Can:  "upload/add",
-				With: "ucan:*",
+				With: c.Issuer().DID().String(),
 			})
 			require.ElementsMatch(t, []delegation.Delegation{authDel, sessionProof}, proofs,
 				"should return authorization and its session proof when querying by capability")
@@ -214,24 +214,21 @@ func TestProofs(t *testing.T) {
 		})
 	})
 
-	t.Run("wildcard matching", func(t *testing.T) {
+	t.Run("ability wildcard matching", func(t *testing.T) {
 		c := testutil.Must(client.NewClient())(t)
 
-		// Create delegations with specific and wildcard capabilities
-		specificDel := testutil.Must(uploadcap.Add.Delegate(
-			c.Issuer(),
-			c.Issuer(),
-			c.Issuer().DID().String(),
-			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
-		))(t)
+		// Create delegations with specific and wildcard capabilities (all with ucan:* resource)
+		specificCap := ucan.NewCapability("upload/add", "ucan:*", ucan.NoCaveats{})
+		specificDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{specificCap})
+		require.NoError(t, err)
 
 		// Create a delegation with a namespace wildcard capability (upload/*)
-		namespaceCap := ucan.NewCapability("upload/*", c.Issuer().DID().String(), ucan.NoCaveats{})
+		namespaceCap := ucan.NewCapability("upload/*", "ucan:*", ucan.NoCaveats{})
 		namespaceDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{namespaceCap})
 		require.NoError(t, err)
 
 		// Create a delegation with a global wildcard capability (*)
-		globalCap := ucan.NewCapability("*", c.Issuer().DID().String(), ucan.NoCaveats{})
+		globalCap := ucan.NewCapability("*", "ucan:*", ucan.NoCaveats{})
 		globalDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{globalCap})
 		require.NoError(t, err)
 
@@ -272,6 +269,50 @@ func TestProofs(t *testing.T) {
 			})
 			require.ElementsMatch(t, []delegation.Delegation{globalDel}, proofs,
 				"should only match global wildcard capability when query is *")
+		})
+	})
+
+	t.Run("resource wildcard matching", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		// Create a delegation with a specific resource (space DID)
+		specificResourceDel := testutil.Must(uploadcap.Add.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			space.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		// Create a delegation with the resource wildcard (ucan:*)
+		wildcardResourceCap := ucan.NewCapability("upload/add", "ucan:*", ucan.NoCaveats{})
+		wildcardResourceDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{wildcardResourceCap})
+		require.NoError(t, err)
+
+		err = c.AddProofs(specificResourceDel, wildcardResourceDel)
+		require.NoError(t, err)
+
+		t.Run("specific resource query matches exact and wildcard resources", func(t *testing.T) {
+			// Searching for a specific resource should find:
+			// - delegations with that exact resource
+			// - delegations with ucan:* (matches any resource)
+			proofs := c.Proofs(client.CapabilityQuery{
+				Can:  "upload/add",
+				With: space.DID().String(),
+			})
+			require.ElementsMatch(t, []delegation.Delegation{specificResourceDel, wildcardResourceDel}, proofs,
+				"should match both exact resource and wildcard resource")
+		})
+
+		t.Run("wildcard resource query only matches wildcard resources", func(t *testing.T) {
+			// Searching for ucan:* should only match delegations with ucan:*
+			// NOT delegations with specific resources (they're too specific)
+			proofs := c.Proofs(client.CapabilityQuery{
+				Can:  "upload/add",
+				With: "ucan:*",
+			})
+			require.ElementsMatch(t, []delegation.Delegation{wildcardResourceDel}, proofs,
+				"should only match wildcard resource when query is ucan:*")
 		})
 	})
 }
