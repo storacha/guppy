@@ -106,11 +106,27 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	// Start the workers
 	eg, wCtx := bettererrgroup.WithContext(ctx)
-	eg.Go(func() error { return runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable) })
 	eg.Go(func() error {
-		return runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
+		err := runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable)
+		if err != nil {
+			return fmt.Errorf("scan worker: %w", err)
+		}
+		return nil
 	})
-	eg.Go(func() error { return runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable) })
+	eg.Go(func() error {
+		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
+		if err != nil {
+			return fmt.Errorf("DAG scan worker: %w", err)
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+		if err != nil {
+			return fmt.Errorf("storacha worker: %w", err)
+		}
+		return nil
+	})
 
 	// Kick them all off. There may be work available in the DB from a previous
 	// attempt.
