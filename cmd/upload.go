@@ -73,7 +73,7 @@ func init() {
 	uploadCmd.PersistentFlags().StringVar(
 		&uploadDbPath,
 		"db",
-		filepath.Join(uploadDbPath, "preparation.db"),
+		filepath.Join(storachaDirPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
 }
