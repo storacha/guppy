@@ -101,6 +101,12 @@ func (nr *NodeReader) getData(ctx context.Context, node model.Node) ([]byte, err
 }
 
 func (nr *NodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) ([]byte, error) {
+	ctx, span := tracer.Start(ctx, "get-raw-node", trace.WithAttributes(
+		attribute.String("node.cid", node.CID().String()),
+		attribute.Int("node.size", int(node.Size())),
+	))
+	defer span.End()
+
 	file, err := nr.fileOpener(ctx, node.SourceID(), node.Path())
 	if err != nil {
 		return nil, err
@@ -117,10 +123,17 @@ func (nr *NodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) (
 	if _, err := io.ReadFull(seeker, data); err != nil {
 		return nil, err
 	}
+	span.SetAttributes(attribute.Int64("read.bytes", int64(len(data))))
 	return data, nil
 }
 
 func (nr *NodeReader) getUnixFSNodeData(ctx context.Context, node *model.UnixFSNode) ([]byte, error) {
+	ctx, span := tracer.Start(ctx, "get-unixfs-node", trace.WithAttributes(
+		attribute.String("node.cid", node.CID().String()),
+		attribute.Int("node.size", int(node.Size())),
+	))
+	defer span.End()
+
 	if node.UFSData() == nil {
 		return nil, fs.ErrInvalid
 	}
