@@ -295,17 +295,6 @@ func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
 	return c.save()
 }
 
-// AddSpace adds the given space to the client's data and saves it.
-func (c *Client) AddSpace(space principal.Signer) error {
-	c.data.Spaces = append(c.data.Spaces, space)
-	return c.save()
-}
-
-// Spaces returns all stored spaces.
-func (c *Client) Spaces() []principal.Signer {
-	return c.data.Spaces
-}
-
 func (c *Client) save() error {
 	if c.saveFn == nil {
 		return nil

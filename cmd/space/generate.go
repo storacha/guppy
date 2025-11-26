@@ -1,16 +1,35 @@
 package space
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
+
+// spaceAccess is the set of capabilities required by the agent to manage a
+// space.
+var spaceAccess = []string{
+	"assert/*",
+	"space/*",
+	"blob/*",
+	"index/*",
+	"store/*",
+	"upload/*",
+	"access/*",
+	"filecoin/*",
+	"usage/*",
+}
 
 var generateFlags struct {
 	grantTo     string
@@ -92,18 +111,23 @@ var generateCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Granting access on %s to %s...\n", space.DID(), grantAccount)
-		_, err = grant(cmd.Context(), c, space, grantAccount)
+
+		// Build the capabilities to grant
+		capabilities := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaceAccess))
+		for _, cap := range spaceAccess {
+			capabilities = append(capabilities, ucan.NewCapability(
+				cap,
+				space.DID().String(),
+				ucan.NoCaveats{},
+			))
+		}
+
+		_, err = grant(cmd.Context(), c, space, grantAccount, capabilities)
 		if err != nil {
 			return fmt.Errorf("granting capabilities: %w", err)
 		}
 
-		fmt.Printf("Adding key for space %s to local store...\n", space.DID())
-		err = c.AddSpace(space)
-		if err != nil {
-			return fmt.Errorf("adding space to client: %w", err)
-		}
-
-		fmt.Printf("Generated space %s!\n", space.DID())
+		fmt.Printf("Generated space: %s\n", space.DID())
 
 		return nil
 	},
@@ -113,4 +137,37 @@ func init() {
 	SpaceCmd.AddCommand(generateCmd)
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
+}
+
+func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats]) (delegation.Delegation, error) {
+	// Create the delegation from space to account
+	delToStore, err := delegation.Delegate(
+		spaceSigner,
+		account,
+		capabilities,
+		delegation.WithNoExpiration(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating delegation: %w", err)
+	}
+
+	delToKeep, err := delegation.Delegate(
+		spaceSigner,
+		c.Issuer().DID(),
+		capabilities,
+		delegation.WithNoExpiration(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating delegation: %w", err)
+	}
+
+	c.AddProofs(delToStore, delToKeep)
+
+	// Store the delegation via access/delegate
+	_, err = c.AccessDelegate(ctx, spaceSigner.DID(), delToStore)
+	if err != nil {
+		return nil, fmt.Errorf("storing delegation: %w", err)
+	}
+
+	return delToStore, nil
 }
