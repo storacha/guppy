@@ -18,7 +18,10 @@ var lsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := cmdutil.MustGetClient(*StorePathP)
 
-		spaces := c.Spaces()
+		spaces, err := c.Spaces()
+		if err != nil {
+			return fmt.Errorf("retrieving spaces: %w", err)
+		}
 
 		// Build JSON array of space DIDs
 		output := make([]map[string]string, 0, len(spaces))
