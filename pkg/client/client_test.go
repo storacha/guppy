@@ -97,7 +97,7 @@ func TestProofs(t *testing.T) {
 	t.Run("query by specific ability", func(t *testing.T) {
 		proofs := c.Proofs(client.CapabilityQuery{
 			Can:  "upload/add",
-			With: "ucan:*",
+			With: c.Issuer().DID().String(),
 		})
 		require.ElementsMatch(t, []delegation.Delegation{uploadDel}, proofs, "should return 1 upload/add delegation")
 	})
@@ -112,8 +112,8 @@ func TestProofs(t *testing.T) {
 
 	t.Run("multiple queries", func(t *testing.T) {
 		proofs := c.Proofs(
-			client.CapabilityQuery{Can: "upload/add", With: "ucan:*"},
-			client.CapabilityQuery{Can: "space/blob/add", With: "ucan:*"},
+			client.CapabilityQuery{Can: "upload/add", With: c.Issuer().DID().String()},
+			client.CapabilityQuery{Can: "space/blob/add", With: c.Issuer().DID().String()},
 		)
 		require.ElementsMatch(t, []delegation.Delegation{uploadDel, blobDel}, proofs, "should return delegations matching either query")
 	})
@@ -175,7 +175,7 @@ func TestProofs(t *testing.T) {
 			// Query by specific capability - should get both the matching authorization and its session proof
 			proofs := c.Proofs(client.CapabilityQuery{
 				Can:  "upload/add",
-				With: "ucan:*",
+				With: c.Issuer().DID().String(),
 			})
 			require.ElementsMatch(t, []delegation.Delegation{authDel, sessionProof}, proofs,
 				"should return authorization and its session proof when querying by capability")
@@ -214,24 +214,21 @@ func TestProofs(t *testing.T) {
 		})
 	})
 
-	t.Run("wildcard matching", func(t *testing.T) {
+	t.Run("ability wildcard matching", func(t *testing.T) {
 		c := testutil.Must(client.NewClient())(t)
 
-		// Create delegations with specific and wildcard capabilities
-		specificDel := testutil.Must(uploadcap.Add.Delegate(
-			c.Issuer(),
-			c.Issuer(),
-			c.Issuer().DID().String(),
-			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
-		))(t)
+		// Create delegations with specific and wildcard capabilities (all with ucan:* resource)
+		specificCap := ucan.NewCapability("upload/add", "ucan:*", ucan.NoCaveats{})
+		specificDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{specificCap})
+		require.NoError(t, err)
 
 		// Create a delegation with a namespace wildcard capability (upload/*)
-		namespaceCap := ucan.NewCapability("upload/*", c.Issuer().DID().String(), ucan.NoCaveats{})
+		namespaceCap := ucan.NewCapability("upload/*", "ucan:*", ucan.NoCaveats{})
 		namespaceDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{namespaceCap})
 		require.NoError(t, err)
 
 		// Create a delegation with a global wildcard capability (*)
-		globalCap := ucan.NewCapability("*", c.Issuer().DID().String(), ucan.NoCaveats{})
+		globalCap := ucan.NewCapability("*", "ucan:*", ucan.NoCaveats{})
 		globalDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{globalCap})
 		require.NoError(t, err)
 
@@ -273,5 +270,245 @@ func TestProofs(t *testing.T) {
 			require.ElementsMatch(t, []delegation.Delegation{globalDel}, proofs,
 				"should only match global wildcard capability when query is *")
 		})
+	})
+
+	t.Run("resource wildcard matching", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		// Create a delegation with a specific resource (space DID)
+		specificResourceDel := testutil.Must(uploadcap.Add.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			space.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		// Create a delegation with the resource wildcard (ucan:*)
+		wildcardResourceCap := ucan.NewCapability("upload/add", "ucan:*", ucan.NoCaveats{})
+		wildcardResourceDel, err := delegation.Delegate(c.Issuer(), c.Issuer(), []ucan.Capability[ucan.NoCaveats]{wildcardResourceCap})
+		require.NoError(t, err)
+
+		err = c.AddProofs(specificResourceDel, wildcardResourceDel)
+		require.NoError(t, err)
+
+		t.Run("specific resource query matches exact and wildcard resources", func(t *testing.T) {
+			// Searching for a specific resource should find:
+			// - delegations with that exact resource
+			// - delegations with ucan:* (matches any resource)
+			proofs := c.Proofs(client.CapabilityQuery{
+				Can:  "upload/add",
+				With: space.DID().String(),
+			})
+			require.ElementsMatch(t, []delegation.Delegation{specificResourceDel, wildcardResourceDel}, proofs,
+				"should match both exact resource and wildcard resource")
+		})
+
+		t.Run("wildcard resource query only matches wildcard resources", func(t *testing.T) {
+			// Searching for ucan:* should only match delegations with ucan:*
+			// NOT delegations with specific resources (they're too specific)
+			proofs := c.Proofs(client.CapabilityQuery{
+				Can:  "upload/add",
+				With: "ucan:*",
+			})
+			require.ElementsMatch(t, []delegation.Delegation{wildcardResourceDel}, proofs,
+				"should only match wildcard resource when query is ucan:*")
+		})
+	})
+}
+
+func TestWithAdditionalProofs(t *testing.T) {
+	t.Run("includes additional proofs in Proofs() results", func(t *testing.T) {
+		// Create a client with a save function to verify what gets saved
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		// Create delegations
+		signer := testutil.Must(signer.Generate())(t)
+		storedDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Clear saved data from NewClient initialization
+		savedData = agentdata.AgentData{}
+
+		// Add a proof to the store
+		err := c.AddProofs(storedDel)
+		require.NoError(t, err)
+
+		// Verify that only the stored delegation was saved
+		require.Equal(t, []delegation.Delegation{storedDel}, savedData.Delegations,
+			"only stored delegation should be saved to storage")
+
+		// Verify that Proofs() returns both stored and additional proofs
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{storedDel, additionalDel}, proofs,
+			"Proofs() should return both stored and additional proofs")
+	})
+
+	t.Run("additional proofs not saved to storage", func(t *testing.T) {
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		signer := testutil.Must(signer.Generate())(t)
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Verify that additional proofs were not saved to storage
+		require.Empty(t, savedData.Delegations,
+			"additional proofs should not be saved to storage")
+
+		// But they should be returned by Proofs()
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{additionalDel}, proofs,
+			"additional proofs should be returned by Proofs()")
+	})
+
+	t.Run("additional proofs respect filtering", func(t *testing.T) {
+		signer := testutil.Must(signer.Generate())(t)
+
+		uploadDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		blobDel := testutil.Must(spaceblobcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			spaceblobcap.AddCaveats{Blob: captypes.Blob{Digest: testutil.RandomMultihash(t), Size: 100}},
+		))(t)
+
+		// Create client with both delegations as additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithAdditionalProofs(uploadDel, blobDel),
+		))(t)
+
+		// Query for only upload capabilities
+		proofs := c.Proofs(client.CapabilityQuery{
+			Can:  "upload/add",
+			With: signer.DID().String(),
+		})
+		require.ElementsMatch(t, []delegation.Delegation{uploadDel}, proofs,
+			"should filter additional proofs by capability query")
+	})
+
+	t.Run("additional proofs exclude expired delegations", func(t *testing.T) {
+		signer := testutil.Must(signer.Generate())(t)
+
+		validDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		expiredDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+			delegation.WithExpiration(ucan.Now()-100), // Expired 100 seconds ago
+		))(t)
+
+		// Create client with both delegations as additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithAdditionalProofs(validDel, expiredDel),
+		))(t)
+
+		// Only the valid delegation should be returned
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{validDel}, proofs,
+			"should exclude expired additional proofs")
+	})
+
+	t.Run("Reset does not affect additional proofs", func(t *testing.T) {
+		var savedData agentdata.AgentData
+		saveFn := func(data agentdata.AgentData) error {
+			savedData = data
+			return nil
+		}
+
+		signer := testutil.Must(signer.Generate())(t)
+
+		storedDel := testutil.Must(uploadcap.Add.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		additionalDel := testutil.Must(uploadcap.Get.Delegate(
+			signer,
+			signer,
+			signer.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		// Create client with additional proofs
+		c := testutil.Must(client.NewClient(
+			client.WithPrincipal(signer),
+			client.WithSaveFn(saveFn),
+			client.WithAdditionalProofs(additionalDel),
+		))(t)
+
+		// Add a stored proof
+		err := c.AddProofs(storedDel)
+		require.NoError(t, err)
+
+		// Verify both are returned
+		proofs := c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{storedDel, additionalDel}, proofs)
+
+		// Reset the client
+		err = c.Reset()
+		require.NoError(t, err)
+
+		// Additional proofs should still be there, but stored proof should be gone
+		proofs = c.Proofs()
+		require.ElementsMatch(t, []delegation.Delegation{additionalDel}, proofs,
+			"additional proofs should remain after reset, but stored proofs should be cleared")
+
+		// Verify storage was cleared
+		require.Empty(t, savedData.Delegations,
+			"stored delegations should be cleared after reset")
 	})
 }

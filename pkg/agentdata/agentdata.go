@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multibase"
@@ -115,6 +116,12 @@ func (ad AgentData) WriteToFile(path string) error {
 	b, err := json.Marshal(ad)
 	if err != nil {
 		return err
+	}
+
+	// Ensure the directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
 	}
 
 	return os.WriteFile(path, b, 0600)

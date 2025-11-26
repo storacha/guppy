@@ -48,6 +48,7 @@ func (c *Client) FilecoinOffer(ctx context.Context, space did.DID, content ipld.
 		caveats.PDP = &pdpAcceptLink
 	}
 	inv, err := invoke[filecoincap.OfferCaveats, filecoincap.OfferOk](
+		ctx,
 		c,
 		filecoincap.Offer,
 		space.String(),

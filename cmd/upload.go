@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/mitchellh/go-wordwrap"
@@ -18,7 +17,6 @@ import (
 )
 
 var uploadDbPath string
-var storePath string
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
@@ -36,16 +34,14 @@ var uploadCmd = &cobra.Command{
 		ctx := cmd.Context()
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
-
-		// The command line was valid. Past here, errors do not mean the user needs
-		// to see the usage.
-		cmd.SilenceUsage = true
 
 		repo, err := makeRepo(ctx)
 		if err != nil {
@@ -77,7 +73,7 @@ func init() {
 	uploadCmd.PersistentFlags().StringVar(
 		&uploadDbPath,
 		"db",
-		filepath.Join(uploadDbPath, "preparation.db"),
+		filepath.Join(storachaDirPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
 }
@@ -115,16 +111,19 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 
 		path := cmd.Flags().Arg(1)
 		if path == "" {
+			cmd.SilenceUsage = false
 			return errors.New("path cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
@@ -182,11 +181,13 @@ var uploadSourcesListCmd = &cobra.Command{
 
 		space := cmd.Flags().Arg(0)
 		if space == "" {
+			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
 
 		spaceDID, err := did.Parse(space)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
@@ -216,10 +217,5 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	storachaDir := filepath.Dir(uploadDbPath)
-	if err := os.MkdirAll(storachaDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", storachaDir, err)
-	}
-
 	return preparation.OpenRepo(ctx, uploadDbPath)
 }

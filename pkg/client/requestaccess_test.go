@@ -66,18 +66,8 @@ func TestRequestAccess(t *testing.T) {
 
 		require.ElementsMatch(
 			t,
-			[]string{
-				"assert/*",
-				"space/*",
-				"blob/*",
-				"index/*",
-				"store/*",
-				"upload/*",
-				"access/*",
-				"filecoin/*",
-				"usage/*",
-			}, requestedCapabilities,
-			"expected to authorize the capabilities required to manage a space",
+			[]string{"*"}, requestedCapabilities,
+			"expected to authorize all capabilities",
 		)
 
 		require.NoError(t, err, "expected to successfully request access")
