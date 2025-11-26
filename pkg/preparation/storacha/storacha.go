@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
@@ -87,10 +88,12 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	))
 	defer span.End()
 
+	carStart := time.Now()
 	car, err := a.CarForShard(ctx, shard.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 	}
+	span.SetAttributes(attribute.Int64("car.build_ms", time.Since(carStart).Milliseconds()))
 
 	addReader, addWriter := io.Pipe()
 	commpCalc := &commp.Calc{}

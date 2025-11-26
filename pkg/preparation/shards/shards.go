@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -24,9 +25,13 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var log = logging.Logger("preparation/shards")
+var tracer = otel.Tracer("preparation/shards")
 
 // A CAR header with zero roots.
 var noRootsHeader []byte
@@ -169,8 +174,20 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 }
 
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+	ctx, span := tracer.Start(ctx, "car-for-shard", trace.WithAttributes(
+		attribute.String("shard.id", shardID.String()),
+	))
+	defer span.End()
+
 	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
+	var nodeCount int
+	var carPayloadBytes uint64
+
+	start := time.Now()
 	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
+		nodeCount++
+		carPayloadBytes += uint64(node.CID().ByteLen()) + node.Size()
+
 		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
 		cidReader := bytes.NewReader(node.CID().Bytes())
 		newReader := NewLazyReader(func() ([]byte, error) {
@@ -189,6 +206,12 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
+
+	span.SetAttributes(
+		attribute.Int("car.node_count", nodeCount),
+		attribute.Int64("car.payload_bytes", int64(carPayloadBytes)),
+		attribute.Int64("car.build_ms", time.Since(start).Milliseconds()),
+	)
 
 	return io.MultiReader(readers...), nil
 }

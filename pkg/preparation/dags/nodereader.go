@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
@@ -12,6 +13,9 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -49,13 +53,24 @@ func (nr *NodeReader) AddToCache(node model.Node, data []byte) {
 }
 
 func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, error) {
+	ctx, span := tracer.Start(ctx, "get-node-data", trace.WithAttributes(
+		attribute.String("node.cid", node.CID().String()),
+		attribute.Int("node.size", int(node.Size())),
+	))
+	defer span.End()
+
 	if data, ok := nr.dataCache.Get(node.CID()); ok {
+		span.SetAttributes(attribute.Bool("cache.hit", true))
 		return data, nil
 	}
+
+	start := time.Now()
 	data, err := nr.getData(ctx, node)
+	span.SetAttributes(attribute.Int64("fetch.duration_ms", time.Since(start).Milliseconds()))
 	if err != nil {
 		return nil, err
 	}
+
 	if nr.checkReads {
 		if len(data) != int(node.Size()) {
 			return nil, fs.ErrInvalid
@@ -68,6 +83,8 @@ func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 			return nil, fs.ErrInvalid
 		}
 	}
+
+	span.SetAttributes(attribute.Bool("cache.hit", false))
 	nr.dataCache.Add(node.CID(), data)
 	return data, nil
 }
