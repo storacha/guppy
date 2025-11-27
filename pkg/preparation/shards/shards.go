@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"runtime"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -218,16 +217,12 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 			err  error
 		}
 
-		workerCount := runtime.GOMAXPROCS(0) / 2
-		if workerCount < 2 {
-			workerCount = 2
-		}
-		if workerCount > 8 {
-			workerCount = 8
-		}
+		workerCount := 32
 
-		jobs := make(chan job, workerCount)
-		results := make(chan result, workerCount)
+		prefetchWindow := workerCount * 4
+
+		jobs := make(chan job, prefetchWindow)
+		results := make(chan result, prefetchWindow)
 
 		for w := 0; w < workerCount; w++ {
 			go func() {
