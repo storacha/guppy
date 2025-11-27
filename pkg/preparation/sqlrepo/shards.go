@@ -65,7 +65,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 		FROM shards
 		WHERE upload_id = ?
 		  AND state = ?
-		ORDER BY created_at, id`,
+		ORDER BY id`,
 		uploadID,
 		state,
 	)
