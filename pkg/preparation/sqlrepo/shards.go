@@ -64,7 +64,9 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			state
 		FROM shards
 		WHERE upload_id = ?
-		  AND state = ?`,
+		  AND state = ?
+		-- Order by rowid (insertion order) for determinism; id alone is UUID, not chronological.
+		ORDER BY rowid, id`,
 		uploadID,
 		state,
 	)
@@ -203,7 +205,8 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 			nodes_in_shards.shard_offset
 		FROM nodes_in_shards
 		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
-		WHERE shard_id = ?`,
+		WHERE shard_id = ?
+		ORDER BY nodes_in_shards.shard_offset, nodes.cid`,
 		shardID,
 	)
 	if err != nil {

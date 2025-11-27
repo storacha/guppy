@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"sort"
 
 	logging "github.com/ipfs/go-log/v2"
+
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 )
 
@@ -41,6 +43,10 @@ func walkDir(fsys fs.FS, name string, d fs.DirEntry, visitor FSVisitor) (model.F
 	if err != nil {
 		return nil, fmt.Errorf("reading directory %s: %w", name, err)
 	}
+	// Explicitly sort to enforce deterministic traversal even if the FS doesn't guarantee ordering.
+	sort.SliceStable(dirEntries, func(i, j int) bool {
+		return dirEntries[i].Name() < dirEntries[j].Name()
+	})
 
 	children := make([]model.FSEntry, 0, len(dirEntries))
 	for _, dirEntry := range dirEntries {

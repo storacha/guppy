@@ -8,15 +8,15 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -98,37 +98,115 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	))
 	defer span.End()
 
-	var (
-		scansAvailable        = make(chan struct{}, 1)
-		dagScansAvailable     = make(chan struct{}, 1)
-		closedShardsAvailable = make(chan struct{}, 1)
-	)
+	// Step 1: walk filesystem and create DAG scans deterministically.
+	if err := a.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
+		_, isDirectory := entry.(*scanmodel.Directory)
+		_, err := a.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, spaceDID)
+		if err != nil {
+			return fmt.Errorf("creating DAG scan: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return cid.Undef, fmt.Errorf("running scans: %w", err)
+	}
 
-	// Start the workers
-	eg, wCtx := bettererrgroup.WithContext(ctx)
-	eg.Go(func() error { return runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable) })
-	eg.Go(func() error {
-		return runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
-	})
-	eg.Go(func() error { return runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable) })
+	// Step 2: execute DAG scans in deterministic order and assign nodes to shards.
+	if err := func() error {
+		err := a.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
+			log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
+			_, err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID())
+			if err != nil {
+				return fmt.Errorf("adding node to upload shard: %w", err)
+			}
+			return nil
+		})
 
-	// Kick them all off. There may be work available in the DB from a previous
-	// attempt.
-	signal(scansAvailable)
-	signal(dagScansAvailable)
-	signal(closedShardsAvailable)
-	close(scansAvailable)
+		var badFSEntryErr types.ErrBadFSEntry
+		if errors.As(err, &badFSEntryErr) {
+			upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+			if err != nil {
+				return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
+			}
 
-	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
-	workersErr := eg.Wait()
+			log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
+			if err := a.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID()); err != nil {
+				return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
+			}
+			if err := upload.Invalidate(); err != nil {
+				return fmt.Errorf("invalidating upload %s after removing bad FS entry: %w", uploadID, err)
+			}
+			if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
+				return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
+			}
+			return badFSEntryErr
+		}
+		if err != nil {
+			return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
+		}
+		return nil
+	}(); err != nil {
+		return cid.Undef, err
+	}
 
-	// Reload the upload to get the latest state from the DB.
+	// Close any remaining open shards and set root CID.
+	_, err := a.CloseUploadShards(ctx, uploadID)
+	if err != nil {
+		return cid.Undef, fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
+	}
+	// Reload upload to set root CID.
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("reloading upload: %w", err)
 	}
+	rootCID, err := a.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
+	if err != nil {
+		return cid.Undef, fmt.Errorf("retrieving CID for root fs entry: %w", err)
+	}
+	if err := upload.SetRootCID(rootCID); err != nil {
+		return cid.Undef, fmt.Errorf("completing DAG generation: %w", err)
+	}
+	if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
+		return cid.Undef, fmt.Errorf("updating upload: %w", err)
+	}
 
-	return upload.RootCID(), workersErr
+	// Step 3: upload shards and indexes to Storacha.
+	if err := func() error {
+		if err := a.AddShardsForUpload(ctx, uploadID, spaceDID); err != nil {
+			log.Debug("Error adding shards for upload ", uploadID, ": ", err)
+			var badNodesErr types.ErrBadNodes
+			if errors.As(err, &badNodesErr) {
+				var cids []cid.Cid
+				for _, e := range badNodesErr.Errs() {
+					cids = append(cids, e.CID())
+				}
+				log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
+				if err := a.RemoveBadNodes(ctx, upload.SpaceDID(), cids); err != nil {
+					return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
+				}
+				if err := upload.Invalidate(); err != nil {
+					return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
+				}
+				if err := a.Repo.UpdateUpload(ctx, upload); err != nil {
+					return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
+				}
+				return badNodesErr
+			}
+			return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
+		}
+		return nil
+	}(); err != nil {
+		return cid.Undef, err
+	}
+
+	if err := a.AddIndexesForUpload(ctx, uploadID, spaceDID); err != nil {
+		return cid.Undef, fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
+	}
+
+	if err := a.AddStorachaUploadForUpload(ctx, uploadID, spaceDID); err != nil {
+		return cid.Undef, fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
+	}
+
+	return upload.RootCID(), nil
 }
 
 func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {

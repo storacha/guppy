@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -16,6 +17,10 @@ import (
 	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -27,6 +32,7 @@ import (
 )
 
 var log = logging.Logger("preparation/shards")
+var tracer = otel.Tracer("preparation/shards")
 
 // A CAR header with zero roots.
 var noRootsHeader []byte
@@ -169,28 +175,145 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 }
 
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
-		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
-		cidReader := bytes.NewReader(node.CID().Bytes())
-		newReader := NewLazyReader(func() ([]byte, error) {
-			data, err := a.NodeReader.GetData(ctx, node)
-			if err != nil {
-				log.Debug("Error getting data for node ", node.CID(), ": ", err)
-				return nil, a.makeErrBadNodes(ctx, shardID)
-			}
-			return data, nil
-		})
+	ctx, span := tracer.Start(ctx, "car-for-shard", trace.WithAttributes(
+		attribute.String("shard.id", shardID.String()),
+	))
+	defer span.End()
 
-		readers = append(readers, lengthReader, cidReader, newReader)
+	nodes := make([]dagsmodel.Node, 0, 1024)
+	var carPayloadBytes uint64
+	if err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
+		nodes = append(nodes, node)
+		carPayloadBytes += uint64(node.CID().ByteLen()) + node.Size()
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
-	return io.MultiReader(readers...), nil
+	span.SetAttributes(
+		attribute.Int("car.node_count", len(nodes)),
+		attribute.Int64("car.payload_bytes", int64(carPayloadBytes)),
+	)
+
+	pr, pw := io.Pipe()
+
+	go func() {
+		defer pw.Close()
+		buildStart := time.Now()
+
+		if _, err := pw.Write(noRootsHeader); err != nil {
+			pw.CloseWithError(fmt.Errorf("failed to write CAR header: %w", err))
+			return
+		}
+
+		type job struct {
+			idx  int
+			node dagsmodel.Node
+		}
+		type result struct {
+			idx  int
+			node dagsmodel.Node
+			data []byte
+			err  error
+		}
+
+		workerCount := 32
+
+		prefetchWindow := workerCount * 4
+
+		jobs := make(chan job, prefetchWindow)
+		results := make(chan result, prefetchWindow)
+
+		for w := 0; w < workerCount; w++ {
+			go func() {
+				for j := range jobs {
+					data, err := a.NodeReader.GetData(ctx, j.node)
+					if err != nil {
+						// Expand to all bad nodes in the shard to match previous behavior.
+						err = a.makeErrBadNodes(ctx, shardID)
+					}
+					results <- result{idx: j.idx, node: j.node, data: data, err: err}
+					if err != nil {
+						return
+					}
+				}
+			}()
+		}
+
+		go func() {
+			for idx, node := range nodes {
+				select {
+				case <-ctx.Done():
+					pw.CloseWithError(ctx.Err())
+					return
+				case jobs <- job{idx: idx, node: node}:
+				}
+			}
+			close(jobs)
+		}()
+
+		next := 0
+		pending := make(map[int]result)
+
+		writeBlock := func(res result) error {
+			if res.err != nil {
+				return res.err
+			}
+			if res.data == nil {
+				return fmt.Errorf("missing data for node %s", res.node.CID())
+			}
+
+			if err := writeNode(pw, res.node, res.data); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		for next < len(nodes) {
+			var res result
+			select {
+			case <-ctx.Done():
+				pw.CloseWithError(ctx.Err())
+				return
+			case res = <-results:
+			}
+
+			if res.idx == next {
+				if err := writeBlock(res); err != nil {
+					pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", res.node.CID(), err))
+					return
+				}
+				next++
+				for {
+					if pendingRes, ok := pending[next]; ok {
+						if err := writeBlock(pendingRes); err != nil {
+							pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", pendingRes.node.CID(), err))
+							return
+						}
+						delete(pending, next)
+						next++
+						continue
+					}
+					break
+				}
+			} else {
+				pending[res.idx] = res
+			}
+		}
+
+		span.SetAttributes(attribute.Int64("car.build_ms", time.Since(buildStart).Milliseconds()))
+	}()
+
+	return pr, nil
+}
+
+func writeNode(w io.Writer, node dagsmodel.Node, data []byte) error {
+	lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
+	cidReader := bytes.NewReader(node.CID().Bytes())
+	if _, err := io.Copy(w, io.MultiReader(lengthReader, cidReader, bytes.NewReader(data))); err != nil {
+		return err
+	}
+	return nil
 }
 
 // makeErrBadNodes attempts to read data from all nodes in the given shard, and
