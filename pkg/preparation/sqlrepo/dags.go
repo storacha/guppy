@@ -128,11 +128,12 @@ func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.Uplo
 	rows, err := r.db.QueryContext(
 		ctx,
 		`
-			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
-			FROM dag_scans
-			WHERE upload_id = $1
-			AND cid IS NULL
-			ORDER BY fs_entry_id
+			SELECT ds.fs_entry_id, ds.upload_id, ds.space_did, ds.created_at, ds.updated_at, ds.cid, ds.kind
+			FROM dag_scans ds
+			JOIN fs_entries fe ON fe.id = ds.fs_entry_id
+			WHERE ds.upload_id = $1
+			AND ds.cid IS NULL
+			ORDER BY fe.path, ds.fs_entry_id
 		`,
 		uploadID,
 	)
