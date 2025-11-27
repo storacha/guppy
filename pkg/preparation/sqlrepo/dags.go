@@ -132,6 +132,7 @@ func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.Uplo
 			FROM dag_scans
 			WHERE upload_id = $1
 			AND cid IS NULL
+			ORDER BY fs_entry_id
 		`,
 		uploadID,
 	)
