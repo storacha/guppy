@@ -2,6 +2,7 @@ package dags
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"sync"
@@ -21,7 +22,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-const CACHE_SIZE = 256
+const CACHE_SIZE = 512
 
 type NodeReader struct {
 	repo       Repo
@@ -29,12 +30,55 @@ type NodeReader struct {
 	dataCache  *lru.Cache[cid.Cid, []byte]
 	fileOpener FileOpenerFn
 	cacheMu    sync.Mutex
+	fileCache  *lru.Cache[string, *cachedFile]
 }
 
 type FileOpenerFn func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error)
 
+type cachedFile struct {
+	f  fs.File
+	mu sync.Mutex
+}
+
+func (cf *cachedFile) Close() {
+	if cf.f != nil {
+		cf.f.Close()
+	}
+}
+
+func (nr *NodeReader) acquireFile(ctx context.Context, sourceID id.SourceID, path string) (*cachedFile, error) {
+	key := fmt.Sprintf("%s:%s", sourceID.String(), path)
+
+	nr.cacheMu.Lock()
+	if cf, ok := nr.fileCache.Get(key); ok {
+		nr.cacheMu.Unlock()
+		return cf, nil
+	}
+	nr.cacheMu.Unlock()
+
+	f, err := nr.fileOpener(ctx, sourceID, path)
+	if err != nil {
+		return nil, err
+	}
+	cf := &cachedFile{f: f}
+
+	nr.cacheMu.Lock()
+	nr.fileCache.Add(key, cf)
+	nr.cacheMu.Unlock()
+
+	return cf, nil
+}
+
 func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeReader, error) {
 	cache, err := lru.New[cid.Cid, []byte](CACHE_SIZE)
+	if err != nil {
+		return nil, err
+	}
+	fileCache, err := lru.NewWithEvict[string, *cachedFile](CACHE_SIZE, func(_ string, cf *cachedFile) {
+		if cf != nil {
+			cf.Close()
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +88,7 @@ func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeRe
 		checkReads: checkReads,
 		dataCache:  cache,
 		fileOpener: fileOpener,
+		fileCache:  fileCache,
 	}, nil
 }
 
@@ -116,12 +161,15 @@ func (nr *NodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) (
 	))
 	defer span.End()
 
-	file, err := nr.fileOpener(ctx, node.SourceID(), node.Path())
+	cf, err := nr.acquireFile(ctx, node.SourceID(), node.Path())
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	seeker, ok := file.(io.ReadSeeker)
+
+	cf.mu.Lock()
+	defer cf.mu.Unlock()
+
+	seeker, ok := cf.f.(io.ReadSeeker)
 	if !ok {
 		return nil, fs.ErrInvalid
 	}
