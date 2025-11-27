@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -27,6 +28,7 @@ type NodeReader struct {
 	checkReads bool
 	dataCache  *lru.Cache[cid.Cid, []byte]
 	fileOpener FileOpenerFn
+	cacheMu    sync.Mutex
 }
 
 type FileOpenerFn func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error)
@@ -49,7 +51,9 @@ func (nr *NodeReader) AddToCache(node model.Node, data []byte) {
 	if node == nil || data == nil {
 		return
 	}
+	nr.cacheMu.Lock()
 	nr.dataCache.ContainsOrAdd(node.CID(), data)
+	nr.cacheMu.Unlock()
 }
 
 func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, error) {
@@ -59,7 +63,10 @@ func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 	))
 	defer span.End()
 
-	if data, ok := nr.dataCache.Get(node.CID()); ok {
+	nr.cacheMu.Lock()
+	data, ok := nr.dataCache.Get(node.CID())
+	nr.cacheMu.Unlock()
+	if ok {
 		span.SetAttributes(attribute.Bool("cache.hit", true))
 		return data, nil
 	}
@@ -85,7 +92,9 @@ func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 	}
 
 	span.SetAttributes(attribute.Bool("cache.hit", false))
+	nr.cacheMu.Lock()
 	nr.dataCache.Add(node.CID(), data)
+	nr.cacheMu.Unlock()
 	return data, nil
 }
 

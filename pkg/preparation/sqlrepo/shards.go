@@ -203,7 +203,8 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 			nodes_in_shards.shard_offset
 		FROM nodes_in_shards
 		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
-		WHERE shard_id = ?`,
+		WHERE shard_id = ?
+		ORDER BY nodes_in_shards.shard_offset`,
 		shardID,
 	)
 	if err != nil {
