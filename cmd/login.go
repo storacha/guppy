@@ -49,8 +49,8 @@ var loginCmd = &cobra.Command{
 		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
 		s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
 		s.Start()
+		defer s.Stop()
 		claimedDels, err := result.Unwrap(<-resultChan)
-		s.Stop()
 
 		if cmd.Context().Err() != nil {
 			return fmt.Errorf("login canceled: %w", cmd.Context().Err())
