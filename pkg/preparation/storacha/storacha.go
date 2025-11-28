@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"golang.org/x/sync/errgroup"
+
 	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
@@ -70,11 +72,29 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
 
+	const maxInFlight = 4
+	sem := make(chan struct{}, maxInFlight)
+	g, gctx := errgroup.WithContext(ctx)
+
 	for _, shard := range closedShards {
-		err := a.addShard(ctx, shard, spaceDID)
-		if err != nil {
-			return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
-		}
+		shard := shard
+		g.Go(func() error {
+			select {
+			case sem <- struct{}{}:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+			defer func() { <-sem }()
+
+			if err := a.addShard(gctx, shard, spaceDID); err != nil {
+				return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	return nil
