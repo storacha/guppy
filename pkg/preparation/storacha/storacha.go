@@ -93,34 +93,24 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	}
 
 	addReader, addWriter := io.Pipe()
-	pieceDigest := shard.PieceDigest()
-	var commpCalc *commp.Calc
+	commpCalc := &commp.Calc{}
 
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
-		mw := io.Writer(meteredAddWriter)
-		if pieceDigest == nil {
-			commpCalc = &commp.Calc{}
-			meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
-			mw = io.MultiWriter(
-				meteredAddWriter,
-				meteredCommpCalc,
-			)
-			defer meteredCommpCalc.Close()
-		}
+		meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
 		defer meteredAddWriter.Close()
+		defer meteredCommpCalc.Close()
+		mw := io.MultiWriter(
+			meteredAddWriter,
+			meteredCommpCalc,
+		)
 		_, err := io.Copy(mw, car)
 		if err != nil {
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
 		}
 	}()
 
-	var blobOpts []client.SpaceBlobAddOption
-	if digest := shard.Digest(); digest != nil && len(digest) > 0 {
-		blobOpts = append(blobOpts, client.WithPrecomputedDigest(digest, shard.Size()))
-	}
-
-	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, blobOpts...)
+	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID)
 	if err != nil {
 		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 	}
@@ -130,12 +120,10 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
 	}
 
-	if pieceDigest == nil && commpCalc != nil && shard.Size() >= commp.MinPiecePayload && shard.Size() <= commp.MaxPiecePayload {
-		pieceDigest, _, err = commpCalc.Digest()
-		if err != nil {
-			return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+	if shard.Size() >= commp.MinPiecePayload && shard.Size() <= commp.MaxPiecePayload {
+		if pieceDigest, _, err := commpCalc.Digest(); err == nil && len(pieceDigest) > 0 {
+			shard.SetDigests(addedBlob.Digest, addedBlob.Digest, pieceDigest)
 		}
-		shard.SetDigests(shard.Digest(), shard.Sha256Digest(), pieceDigest)
 	}
 
 	span.SetAttributes(attribute.String("shard.digest", shard.Digest().String()))
@@ -150,7 +138,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	if addedBlob.PDPAccept != nil {
 		opts = append(opts, client.WithPDPAcceptInvocation(addedBlob.PDPAccept))
 	}
-	err = a.filecoinOffer(ctx, shard, spaceDID, pieceDigest, opts...)
+	err = a.filecoinOffer(ctx, shard, spaceDID, shard.PieceDigest(), opts...)
 	if err != nil {
 		return err
 	}

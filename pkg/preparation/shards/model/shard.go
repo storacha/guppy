@@ -84,6 +84,7 @@ func (s *Shard) Added(dig multihash.Multihash) error {
 	}
 	s.state = ShardStateAdded
 	s.digest = dig
+	s.sha256 = dig
 	return nil
 }
 
