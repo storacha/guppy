@@ -93,24 +93,34 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	}
 
 	addReader, addWriter := io.Pipe()
-	commpCalc := &commp.Calc{}
+	pieceDigest := shard.PieceDigest()
+	var commpCalc *commp.Calc
 
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
-		meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
+		mw := io.Writer(meteredAddWriter)
+		if pieceDigest == nil {
+			commpCalc = &commp.Calc{}
+			meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
+			mw = io.MultiWriter(
+				meteredAddWriter,
+				meteredCommpCalc,
+			)
+			defer meteredCommpCalc.Close()
+		}
 		defer meteredAddWriter.Close()
-		defer meteredCommpCalc.Close()
-		mw := io.MultiWriter(
-			meteredAddWriter,
-			meteredCommpCalc,
-		)
 		_, err := io.Copy(mw, car)
 		if err != nil {
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
 		}
 	}()
 
-	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID)
+	var blobOpts []client.SpaceBlobAddOption
+	if digest := shard.Digest(); digest != nil && len(digest) > 0 {
+		blobOpts = append(blobOpts, client.WithPrecomputedDigest(digest, shard.Size()))
+	}
+
+	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, blobOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 	}
@@ -118,6 +128,14 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	err = shard.Added(addedBlob.Digest)
 	if err != nil {
 		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
+	}
+
+	if pieceDigest == nil && commpCalc != nil && shard.Size() >= commp.MinPiecePayload && shard.Size() <= commp.MaxPiecePayload {
+		pieceDigest, _, err = commpCalc.Digest()
+		if err != nil {
+			return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+		}
+		shard.SetDigests(shard.Digest(), shard.Sha256Digest(), pieceDigest)
 	}
 
 	span.SetAttributes(attribute.String("shard.digest", shard.Digest().String()))
@@ -132,7 +150,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	if addedBlob.PDPAccept != nil {
 		opts = append(opts, client.WithPDPAcceptInvocation(addedBlob.PDPAccept))
 	}
-	err = a.filecoinOffer(ctx, shard, spaceDID, commpCalc, opts...)
+	err = a.filecoinOffer(ctx, shard, spaceDID, pieceDigest, opts...)
 	if err != nil {
 		return err
 	}
@@ -144,11 +162,11 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	return nil
 }
 
-func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID) (client.AddedBlob, error) {
+func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID, opts ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
 	ctx, span := tracer.Start(ctx, "space-blob-add")
 	defer span.End()
 
-	return a.Client.SpaceBlobAdd(ctx, content, spaceDID)
+	return a.Client.SpaceBlobAdd(ctx, content, spaceDID, opts...)
 }
 
 func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, locationCommitment delegation.Delegation) error {
@@ -168,7 +186,7 @@ func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, s
 	return err
 }
 
-func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, commpCalc *commp.Calc, opts ...client.FilecoinOfferOption) error {
+func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, pieceDigest []byte, opts ...client.FilecoinOfferOption) error {
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
 
@@ -182,9 +200,8 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 		return nil
 	}
 
-	pieceDigest, _, err := commpCalc.Digest()
-	if err != nil {
-		return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+	if len(pieceDigest) == 0 {
+		return fmt.Errorf("missing piece digest for shard %s", shard.ID())
 	}
 
 	shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())

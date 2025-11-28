@@ -6,6 +6,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	shardmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -23,4 +24,6 @@ type Repo interface {
 	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error)
 	// ListSpaceSources lists all space sources for the given space DID.
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
+	GetShardByID(ctx context.Context, shardID id.ShardID) (*shardmodel.Shard, error)
+	UpdateShard(ctx context.Context, shard *shardmodel.Shard) error
 }

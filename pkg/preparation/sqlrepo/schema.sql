@@ -161,5 +161,7 @@ CREATE TABLE IF NOT EXISTS shards (
   -- If NULL, has not yet been calculated (and maybe cannot be, if still
   -- accepting new nodes)
   digest BLOB,
+  sha256_digest BLOB,
+  piece_digest BLOB,
   state TEXT NOT NULL
 ) STRICT;
