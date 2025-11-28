@@ -34,7 +34,7 @@ cd "$(dirname "$0")"
 exec 3>&1
 
 
-sandbox="doupload"
+sandbox="doupload-dir"
 
 # Function wrapper to properly invoke guppy with word splitting
 guppy() {
