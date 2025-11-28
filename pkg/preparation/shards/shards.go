@@ -6,16 +6,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
-	logging "github.com/ipfs/go-log/v2"
 	ipldcar "github.com/ipld/go-car"
 	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
+
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -25,8 +27,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
-
-var log = logging.Logger("preparation/shards")
 
 // A CAR header with zero roots.
 var noRootsHeader []byte
@@ -168,29 +168,185 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
+// CarForShard streams a CAR by:
+//  1. Spawning workers to fetch block data and enqueue ordered results.
+//  2. Writing the CAR header, then draining results in index order while
+//     preserving ordering via a small pending map.
+//  3. Propagating errors/cancellations through the pipe while draining to let
+//     workers exit cleanly and bound memory via buffered channels.
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-	readers := []io.Reader{bytes.NewReader(noRootsHeader)}
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
-		lengthReader := bytes.NewReader(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
-		cidReader := bytes.NewReader(node.CID().Bytes())
-		newReader := NewLazyReader(func() ([]byte, error) {
-			data, err := a.NodeReader.GetData(ctx, node)
-			if err != nil {
-				log.Debug("Error getting data for node ", node.CID(), ": ", err)
-				return nil, a.makeErrBadNodes(ctx, shardID)
-			}
-			return data, nil
-		})
-
-		readers = append(readers, lengthReader, cidReader, newReader)
+	// Collect nodes up front so DB iteration isn't held during block fetch.
+	nodes := make([]dagsmodel.Node, 0, 2048)
+	if err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
+		nodes = append(nodes, node)
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
-	return io.MultiReader(readers...), nil
+	ctx, cancel := context.WithCancel(ctx)
+	// cancel when we're done writing or when we hit an error so that worker
+	// goroutines exit promptly.
+	// NOTE: cancel is invoked in the writer goroutine.
+	type (
+		job struct {
+			idx  int
+			node dagsmodel.Node
+		}
+		result struct {
+			idx  int
+			node dagsmodel.Node
+			data []byte
+			err  error
+		}
+	)
+	var (
+		pr, pw = io.Pipe()
+
+		workerCount = runtime.NumCPU()
+
+		jobs    chan job
+		results chan result
+	)
+
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	jobWindow := workerCount * 4
+	// Each result carries a whole block (~1MiB), so give results extra headroom
+	// to keep workers busy if the writer is momentarily slow.
+	resultWindow := jobWindow * 4
+	jobs = make(chan job, jobWindow)
+	results = make(chan result, resultWindow)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+
+	writeNode := func(w io.Writer, node dagsmodel.Node, data []byte) error {
+		// Write length-prefix, cid bytes, then the block data directly to avoid
+		// the extra allocations incurred by io.MultiReader per block.
+		if _, err := w.Write(lengthVarint(uint64(node.CID().ByteLen()) + node.Size())); err != nil {
+			return err
+		}
+		if _, err := w.Write(node.CID().Bytes()); err != nil {
+			return err
+		}
+		_, err := w.Write(data)
+		return err
+	}
+
+	writeBlock := func(res result) error {
+		if res.err != nil {
+			return res.err
+		}
+		if res.data == nil {
+			return fmt.Errorf("missing data for node %s", res.node.CID())
+		}
+
+		if err := writeNode(pw, res.node, res.data); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	go func() {
+		defer cancel()
+		defer pw.Close()
+
+		if _, err := pw.Write(noRootsHeader); err != nil {
+			pw.CloseWithError(fmt.Errorf("failed to write CAR header: %w", err))
+			return
+		}
+
+		for w := 0; w < workerCount; w++ {
+			go func() {
+				defer workers.Done()
+				for j := range jobs {
+					data, err := a.NodeReader.GetData(ctx, j.node)
+					if err != nil {
+						// Expand to all bad nodes in the shard to match previous behavior.
+						err = a.makeErrBadNodes(ctx, shardID)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case results <- result{idx: j.idx, node: j.node, data: data, err: err}:
+					}
+				}
+			}()
+		}
+
+		go func() {
+			defer close(jobs)
+			for idx, node := range nodes {
+				select {
+				case <-ctx.Done():
+					return
+				case jobs <- job{idx: idx, node: node}:
+				}
+			}
+		}()
+
+		go func() {
+			workers.Wait()
+			close(results)
+		}()
+
+		pending := make(map[int]result)
+		next := 0
+		resultsClosed := false
+		drainOnly := false
+
+		for {
+			if resultsClosed && len(pending) == 0 {
+				return
+			}
+
+			var (
+				res result
+				ok  bool
+			)
+
+			select {
+			case <-ctx.Done():
+				// Stop writing, but continue draining results so workers can exit.
+				drainOnly = true
+				_ = pw.CloseWithError(ctx.Err())
+				continue
+			case res, ok = <-results:
+				if !ok {
+					resultsClosed = true
+					continue
+				}
+			}
+
+			if drainOnly {
+				continue
+			}
+
+			if res.err != nil {
+				pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", res.node.CID(), res.err))
+				return
+			}
+
+			pending[res.idx] = res
+			for {
+				pendingRes, ok := pending[next]
+				if !ok {
+					break
+				}
+
+				if err := writeBlock(pendingRes); err != nil {
+					pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", pendingRes.node.CID(), err))
+					return
+				}
+				delete(pending, next)
+				next++
+			}
+		}
+	}()
+
+	return pr, nil
 }
 
 // makeErrBadNodes attempts to read data from all nodes in the given shard, and
