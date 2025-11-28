@@ -6,12 +6,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
+
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -135,23 +138,162 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 
 // TODO: probably rename this
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-	r, w := io.Pipe()
+	ctx, cancel := context.WithCancel(ctx)
+	// cancel when we're done writing or when we hit an error so that worker
+	// goroutines exit promptly.
+	// NOTE: cancel is invoked in the writer goroutine.
+	type (
+		job struct {
+			idx  int
+			node dagsmodel.Node
+		}
+		result struct {
+			idx  int
+			node dagsmodel.Node
+			data []byte
+			err  error
+		}
+	)
+	var (
+		pr, pw = io.Pipe()
+
+		workerCount = runtime.NumCPU()
+
+		jobs    chan job
+		results chan result
+	)
+
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	jobWindow := workerCount * 4
+	// Each result carries a whole block (~1MiB), so give results extra headroom
+	// to keep workers busy if the writer is momentarily slow.
+	resultWindow := jobWindow * 4
+	jobs = make(chan job, jobWindow)
+	results = make(chan result, resultWindow)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+
+	writeBlock := func(res result) error {
+		if res.err != nil {
+			return res.err
+		}
+		if res.data == nil {
+			return fmt.Errorf("missing data for node %s", res.node.CID())
+		}
+
+		if err := a.ShardEncoder.WriteNode(ctx, res.node, res.data, pw); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	go func() {
+		defer cancel()
+		defer pw.Close()
 		nodes, err := a.Repo.NodesByShard(ctx, shardID)
+
 		if err != nil {
 			log.Debug("Error getting nodes for shard:", err)
-			w.CloseWithError(err)
+			pw.CloseWithError(err)
 			return
 		}
-		err = a.ShardEncoder.Encode(ctx, nodes, w)
-		if err != nil {
-			log.Debug("Error encoding shard:", err)
-			w.CloseWithError(a.makeErrBadNodes(ctx, shardID))
+		if err := a.ShardEncoder.WriteHeader(ctx, pw); err != nil {
+			pw.CloseWithError(fmt.Errorf("failed to write CAR header: %w", err))
 			return
 		}
-		w.Close()
+
+		for w := 0; w < workerCount; w++ {
+			go func() {
+				defer workers.Done()
+				for j := range jobs {
+					data, err := a.NodeReader.GetData(ctx, j.node)
+					if err != nil {
+						// Expand to all bad nodes in the shard to match previous behavior.
+						err = a.makeErrBadNodes(ctx, shardID)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case results <- result{idx: j.idx, node: j.node, data: data, err: err}:
+					}
+				}
+			}()
+		}
+
+		go func() {
+			defer close(jobs)
+			for idx, node := range nodes {
+				select {
+				case <-ctx.Done():
+					return
+				case jobs <- job{idx: idx, node: node}:
+				}
+			}
+		}()
+
+		go func() {
+			workers.Wait()
+			close(results)
+		}()
+
+		pending := make(map[int]result)
+		next := 0
+		resultsClosed := false
+		drainOnly := false
+
+		for {
+			if resultsClosed && len(pending) == 0 {
+				return
+			}
+
+			var (
+				res result
+				ok  bool
+			)
+
+			select {
+			case <-ctx.Done():
+				// Stop writing, but continue draining results so workers can exit.
+				drainOnly = true
+				_ = pw.CloseWithError(ctx.Err())
+				continue
+			case res, ok = <-results:
+				if !ok {
+					resultsClosed = true
+					continue
+				}
+			}
+
+			if drainOnly {
+				continue
+			}
+
+			if res.err != nil {
+				pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", res.node.CID(), res.err))
+				return
+			}
+
+			pending[res.idx] = res
+			for {
+				pendingRes, ok := pending[next]
+				if !ok {
+					break
+				}
+
+				if err := writeBlock(pendingRes); err != nil {
+					pw.CloseWithError(fmt.Errorf("failed to write node %s: %w", pendingRes.node.CID(), err))
+					return
+				}
+				delete(pending, next)
+				next++
+			}
+		}
 	}()
-	return r, nil
+
+	return pr, nil
 }
 
 // makeErrBadNodes attempts to read data from all nodes in the given shard, and

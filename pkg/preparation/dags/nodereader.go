@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
@@ -30,20 +31,25 @@ type NodeReader struct {
 	checkReads bool
 	dataCache  *lru.Cache[cid.Cid, []byte]
 	// TODO:(forrest) we may consider adding a "close" method to the `NewReader` that closes all cached files when done
-	fileCache  *lru.Cache[string, fs.File]
+	fileCache  *lru.Cache[string, *cachedFile]
 	fileOpener FileOpenerFn
 }
 
 type FileOpenerFn func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error)
+
+type cachedFile struct {
+	mu   sync.Mutex
+	file fs.File
+}
 
 func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeReader, error) {
 	dataCache, err := lru.New[cid.Cid, []byte](DataCacheSize)
 	if err != nil {
 		return nil, err
 	}
-	fileCache, err := lru.NewWithEvict[string, fs.File](FileHandleCacheSize, func(name string, f fs.File) {
-		if f != nil {
-			if err := f.Close(); err != nil {
+	fileCache, err := lru.NewWithEvict[string, *cachedFile](FileHandleCacheSize, func(name string, cf *cachedFile) {
+		if cf != nil && cf.file != nil {
+			if err := cf.file.Close(); err != nil {
 				log.Errorw("error closing cached file", "name", name, "err", err)
 			}
 		}
@@ -61,7 +67,7 @@ func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeRe
 	}, nil
 }
 
-func (nr *NodeReader) getFile(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+func (nr *NodeReader) getFile(ctx context.Context, sourceID id.SourceID, path string) (*cachedFile, error) {
 	key := fmt.Sprintf("%s:%s", sourceID, path)
 
 	if cf, ok := nr.fileCache.Get(key); ok {
@@ -72,8 +78,9 @@ func (nr *NodeReader) getFile(ctx context.Context, sourceID id.SourceID, path st
 	if err != nil {
 		return nil, err
 	}
-	nr.fileCache.Add(key, f)
-	return f, nil
+	cf := &cachedFile{file: f}
+	nr.fileCache.Add(key, cf)
+	return cf, nil
 }
 
 func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, error) {
@@ -112,11 +119,14 @@ func (nr *NodeReader) getData(ctx context.Context, node model.Node) ([]byte, err
 }
 
 func (nr *NodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) ([]byte, error) {
-	file, err := nr.getFile(ctx, node.SourceID(), node.Path())
+	cf, err := nr.getFile(ctx, node.SourceID(), node.Path())
 	if err != nil {
 		return nil, err
 	}
-	seeker, ok := file.(io.ReadSeeker)
+	cf.mu.Lock()
+	defer cf.mu.Unlock()
+
+	seeker, ok := cf.file.(io.ReadSeeker)
 	if !ok {
 		return nil, fs.ErrInvalid
 	}
