@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/dagfs"
@@ -60,7 +61,10 @@ var retrieveCmd = &cobra.Command{
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
 
-		pfs := make([]delegation.Proof, 0, len(c.Proofs()))
+		pfs := make([]delegation.Proof, 0, len(c.Proofs(client.CapabilityQuery{
+			Can:  contentcap.Retrieve.Can(),
+			With: space.String(),
+		})))
 		for _, del := range c.Proofs() {
 			pfs = append(pfs, delegation.FromDelegation(del))
 		}
