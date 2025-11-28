@@ -29,8 +29,10 @@ type Repo interface {
 
 // ShardEncoder is the interface for shard implementations.
 type ShardEncoder interface {
-	// Encode encodes a shard from the sequence of nodes.
-	Encode(ctx context.Context, nodes []dagsmodel.Node, w io.Writer) error
+	// WriteHeader writes a header to the provided writer.
+	WriteHeader(ctx context.Context, w io.Writer) error
+	// WriteNode writes a node to the provided writer.
+	WriteNode(ctx context.Context, node dagsmodel.Node, data []byte, w io.Writer) error
 	// NodeEncodingLength determines the number of bytes a node will occupy when
 	// encoded in a shard.
 	NodeEncodingLength(node dagsmodel.Node) uint64

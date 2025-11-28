@@ -19,16 +19,15 @@ func NewFilepackEncoder(nodeReader NodeDataGetter) *FilepackEncoder {
 	return &FilepackEncoder{nodeReader}
 }
 
-func (f *FilepackEncoder) Encode(ctx context.Context, nodes []model.Node, w io.Writer) error {
-	for _, n := range nodes {
-		data, err := f.nodeReader.GetData(ctx, n)
-		if err != nil {
-			return fmt.Errorf("getting data for %s: %w", n.CID(), err)
-		}
-		_, err = w.Write(data)
-		if err != nil {
-			return fmt.Errorf("writing data for %s: %w", n.CID(), err)
-		}
+func (f *FilepackEncoder) WriteHeader(ctx context.Context, w io.Writer) error {
+	// Filepack has no header to write.
+	return nil
+}
+
+func (f *FilepackEncoder) WriteNode(ctx context.Context, node model.Node, data []byte, w io.Writer) error {
+	_, err := w.Write(data)
+	if err != nil {
+		return fmt.Errorf("writing filepack node data: %w", err)
 	}
 	return nil
 }

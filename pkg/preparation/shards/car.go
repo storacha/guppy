@@ -49,29 +49,26 @@ func NewCAREncoder(nodeReader NodeDataGetter) *CAREncoder {
 	return &CAREncoder{nodeReader}
 }
 
-func (c *CAREncoder) Encode(ctx context.Context, nodes []model.Node, w io.Writer) error {
+func (c *CAREncoder) WriteHeader(ctx context.Context, w io.Writer) error {
 	_, err := w.Write(noRootsHeader)
 	if err != nil {
 		return fmt.Errorf("writing CAR header: %w", err)
 	}
+	return nil
+}
 
-	for _, n := range nodes {
-		_, err := w.Write(lengthVarint(uint64(n.CID().ByteLen()) + n.Size()))
-		if err != nil {
-			return fmt.Errorf("writing varint for %s: %w", n.CID(), err)
-		}
-		_, err = w.Write(n.CID().Bytes())
-		if err != nil {
-			return fmt.Errorf("writing CID bytes for %s: %w", n.CID(), err)
-		}
-		data, err := c.nodeReader.GetData(ctx, n)
-		if err != nil {
-			return fmt.Errorf("getting data for %s: %w", n.CID(), err)
-		}
-		_, err = w.Write(data)
-		if err != nil {
-			return fmt.Errorf("writing data for %s: %w", n.CID(), err)
-		}
+func (c *CAREncoder) WriteNode(ctx context.Context, node model.Node, data []byte, w io.Writer) error {
+	_, err := w.Write(lengthVarint(uint64(node.CID().ByteLen()) + node.Size()))
+	if err != nil {
+		return fmt.Errorf("writing varint for %s: %w", node.CID(), err)
+	}
+	_, err = w.Write(node.CID().Bytes())
+	if err != nil {
+		return fmt.Errorf("writing CID bytes for %s: %w", node.CID(), err)
+	}
+	_, err = w.Write(data)
+	if err != nil {
+		return fmt.Errorf("writing data for %s: %w", node.CID(), err)
 	}
 	return nil
 }
