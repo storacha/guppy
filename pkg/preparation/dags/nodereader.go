@@ -2,6 +2,7 @@ package dags
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 
@@ -12,23 +13,41 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-const CACHE_SIZE = 256
+const (
+	// this cache is for data read from files, we read BLOCK_SIZE from each file, so this will never grow beyond
+	// 1 GiB
+	DataCacheSize       = 1024
+	FileHandleCacheSize = 1024
+)
 
 type NodeReader struct {
 	repo       Repo
 	checkReads bool
 	dataCache  *lru.Cache[cid.Cid, []byte]
+	// TODO:(forrest) we may consider adding a "close" method to the `NewReader` that closes all cached files when done
+	fileCache  *lru.Cache[string, fs.File]
 	fileOpener FileOpenerFn
 }
 
 type FileOpenerFn func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error)
 
 func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeReader, error) {
-	cache, err := lru.New[cid.Cid, []byte](CACHE_SIZE)
+	dataCache, err := lru.New[cid.Cid, []byte](DataCacheSize)
+	if err != nil {
+		return nil, err
+	}
+	fileCache, err := lru.NewWithEvict[string, fs.File](FileHandleCacheSize, func(name string, f fs.File) {
+		if f != nil {
+			if err := f.Close(); err != nil {
+				log.Errorw("error closing cached file", "name", name, "err", err)
+			}
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -36,16 +55,25 @@ func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeRe
 	return &NodeReader{
 		repo:       repo,
 		checkReads: checkReads,
-		dataCache:  cache,
+		dataCache:  dataCache,
+		fileCache:  fileCache,
 		fileOpener: fileOpener,
 	}, nil
 }
 
-func (nr *NodeReader) AddToCache(node model.Node, data []byte) {
-	if node == nil || data == nil {
-		return
+func (nr *NodeReader) getFile(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+	key := fmt.Sprintf("%s:%s", sourceID, path)
+
+	if cf, ok := nr.fileCache.Get(key); ok {
+		return cf, nil
 	}
-	nr.dataCache.ContainsOrAdd(node.CID(), data)
+
+	f, err := nr.fileOpener(ctx, sourceID, path)
+	if err != nil {
+		return nil, err
+	}
+	nr.fileCache.Add(key, f)
+	return f, nil
 }
 
 func (nr *NodeReader) GetData(ctx context.Context, node model.Node) ([]byte, error) {
@@ -84,11 +112,10 @@ func (nr *NodeReader) getData(ctx context.Context, node model.Node) ([]byte, err
 }
 
 func (nr *NodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) ([]byte, error) {
-	file, err := nr.fileOpener(ctx, node.SourceID(), node.Path())
+	file, err := nr.getFile(ctx, node.SourceID(), node.Path())
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 	seeker, ok := file.(io.ReadSeeker)
 	if !ok {
 		return nil, fs.ErrInvalid
