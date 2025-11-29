@@ -55,7 +55,19 @@ type config struct {
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
-		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
+		getLocalFSForPathFn: func(path string) (fs.FS, error) {
+			// Check if the path is a file or directory
+			info, err := os.Stat(path)
+			if err != nil {
+				return nil, err
+			}
+			// If it is a directory, use the standard DirFS(as before)
+			if info.IsDir() {
+				return os.DirFS(path), nil
+			}
+			// If it is a file, use custom singleFileFS adapter
+			return singleFileFS{path: path}, nil
+		},
 		maxNodesPerIndex:    defaultMaxNodesPerIndex,
 	}
 	for _, opt := range options {
