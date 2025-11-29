@@ -42,20 +42,27 @@ type uploadModel struct {
 	uploads []*uploadsmodel.Upload
 	rng     *rand.Rand
 
-	// State
-	recentAddedShards  []*shardsmodel.Shard
-	addedShardsSize    uint64
-	recentClosedShards []*shardsmodel.Shard
-	closedShardsSize   uint64
-	openShardsSize     uint64
-	dagScans           uint64
-	filesToDAGScan     []sqlrepo.FileInfo
-	shardedFiles       []sqlrepo.FileInfo
-	rootCID            cid.Cid
+	// State (Maps for multi-upload support)
+	recentAddedShards  map[id.UploadID][]*shardsmodel.Shard
+	recentClosedShards map[id.UploadID][]*shardsmodel.Shard
+	filesToDAGScan     map[id.UploadID][]sqlrepo.FileInfo
+	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
+
+	// Aggregated Totals
+	addedShardsSize  uint64
+	closedShardsSize uint64
+	openShardsSize   uint64
+	dagScans         uint64
 	retry              bool
 
-	// Bubbles
-	closedShardSpinners map[id.ShardID]spinner.Model
+	// Internal tracking for totals
+	openShardsStats map[id.UploadID]uint64
+	dagScanStats    map[id.UploadID]uint64
+
+	results map[id.UploadID]cid.Cid
+
+	// Bubbles (Nested map: UploadID -> ShardID -> Spinner)
+	closedShardSpinners map[id.UploadID]map[id.ShardID]spinner.Model
 
 	// Output
 	err              error
@@ -63,14 +70,11 @@ type uploadModel struct {
 }
 
 func (m uploadModel) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.uploads)+1)
+	cmds := make([]tea.Cmd, 0, len(m.uploads)*2)
 	for _, u := range m.uploads {
 		cmds = append(cmds, executeUpload(m.ctx, m.api, u))
+		cmds = append(cmds, checkStats(m.ctx, m.repo, u.ID()))
 	}
-	// TK: Handle stats for more than one upload. Right now, we're just looking at
-	// the first one to make the UI easier, since that's almost always what we
-	// have.
-	cmds = append(cmds, checkStats(m.ctx, m.repo, m.uploads[0].ID()))
 	return tea.Batch(cmds...)
 }
 
@@ -86,44 +90,71 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case rootCIDMsg:
-		m.rootCID = cid.Cid(msg)
-		return m, tea.Quit
+		m.results[msg.id] = msg.cid
+		
+		// Only quit if ALL uploads are finished
+		if len(m.results) == len(m.uploads) {
+			return m, tea.Quit
+		}
+		return m, nil
 
 	case statsMsg:
 		var cmds []tea.Cmd
 
-		m.recentAddedShards = msg.addedShards
-		m.addedShardsSize = 0
-		for _, s := range msg.addedShards {
-			m.addedShardsSize += s.Size()
-		}
+		// 1. Store data for THIS specific upload
+		m.recentAddedShards[msg.uploadID] = msg.addedShards
+		m.recentClosedShards[msg.uploadID] = msg.closedShards
+		m.filesToDAGScan[msg.uploadID] = msg.filesToDAGScan
+		m.shardedFiles[msg.uploadID] = msg.shardedFiles
 
-		m.recentClosedShards = msg.closedShards
-		m.closedShardsSize = 0
-		for _, s := range msg.closedShards {
-			m.closedShardsSize += s.Size()
+		// 2. Update stats for THIS specific upload
+		openSize := uint64(0)
+		for _, s := range msg.openShards {
+			openSize += s.Size()
 		}
+		m.openShardsStats[msg.uploadID] = openSize
+		m.dagScanStats[msg.uploadID] = msg.bytesToDAGScan
 
-		previousSpinners := m.closedShardSpinners
-		m.closedShardSpinners = make(map[id.ShardID]spinner.Model)
+		// 3. Handle Spinners
+		if m.closedShardSpinners[msg.uploadID] == nil {
+			m.closedShardSpinners[msg.uploadID] = make(map[id.ShardID]spinner.Model)
+		}
+		currentSpinners := m.closedShardSpinners[msg.uploadID]
+		
+		newSpinners := make(map[id.ShardID]spinner.Model)
 		for _, s := range msg.closedShards {
-			if sp, ok := previousSpinners[s.ID()]; ok {
-				m.closedShardSpinners[s.ID()] = sp
+			if sp, ok := currentSpinners[s.ID()]; ok {
+				newSpinners[s.ID()] = sp
 			} else {
 				newSpinner := spinner.New(spinner.WithSpinner(bubbleup.Spinner(m.rng)))
-				m.closedShardSpinners[s.ID()] = newSpinner
+				newSpinners[s.ID()] = newSpinner
 				cmds = append(cmds, newSpinner.Tick)
 			}
 		}
+		m.closedShardSpinners[msg.uploadID] = newSpinners
 
+		// 4. Recalculate Global Totals
+		m.addedShardsSize = 0
+		m.closedShardsSize = 0
 		m.openShardsSize = 0
-		for _, s := range msg.openShards {
-			m.openShardsSize += s.Size()
-		}
+		m.dagScans = 0
 
-		m.dagScans = msg.bytesToDAGScan
-		m.filesToDAGScan = msg.filesToDAGScan
-		m.shardedFiles = msg.shardedFiles
+		for _, shards := range m.recentAddedShards {
+			for _, s := range shards {
+				m.addedShardsSize += s.Size()
+			}
+		}
+		for _, shards := range m.recentClosedShards {
+			for _, s := range shards {
+				m.closedShardsSize += s.Size()
+			}
+		}
+		for _, size := range m.openShardsStats {
+			m.openShardsSize += size
+		}
+		for _, size := range m.dagScanStats {
+			m.dagScans += size
+		}
 
 		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
 
@@ -138,10 +169,12 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	default:
 		var cmds []tea.Cmd
-		for id, sp := range m.closedShardSpinners {
-			updatedSpinner, cmd := sp.Update(msg)
-			m.closedShardSpinners[id] = updatedSpinner
-			cmds = append(cmds, cmd)
+		for uid, shardMap := range m.closedShardSpinners {
+			for sid, sp := range shardMap {
+				updatedSpinner, cmd := sp.Update(msg)
+				m.closedShardSpinners[uid][sid] = updatedSpinner
+				cmds = append(cmds, cmd)
+			}
 		}
 		return m, tea.Batch(cmds...)
 	}
@@ -166,33 +199,49 @@ func (m uploadModel) View() string {
 	}
 
 	output.WriteString("Shards:\n")
-	for _, s := range m.recentAddedShards {
-		output.WriteString(renderListItem(style.Foreground(addedShardColor), s.Digest().B58String(), s.Size()))
+	// Iterate uploads to show shards for everyone
+	for _, u := range m.uploads {
+		uid := u.ID()
+		if shards, ok := m.recentAddedShards[uid]; ok {
+			for _, s := range shards {
+				output.WriteString(renderListItem(style.Foreground(addedShardColor), s.Digest().B58String(), s.Size()))
+			}
+		}
+		if shards, ok := m.recentClosedShards[uid]; ok {
+			for _, s := range shards {
+				spView := ""
+				if spMap, ok := m.closedShardSpinners[uid]; ok {
+					if sp, ok := spMap[s.ID()]; ok {
+						spView = sp.View() + " "
+					}
+				}
+				output.WriteString(renderListItem(style.Foreground(closedShardColor), spView+s.ID().String(), s.Size()))
+			}
+		}
 	}
-
-	for _, s := range m.recentClosedShards {
-		output.WriteString(renderListItem(style.Foreground(closedShardColor), m.closedShardSpinners[s.ID()].View()+" "+s.ID().String(), s.Size()))
-	}
-
 	output.WriteString("\n")
 
 	output.WriteString("Added to Shards:\n")
-	for i, fi := range m.shardedFiles {
-		if i < 5 {
-			output.WriteString(renderListItem(style.Foreground(shardedColor), fi.Path, fi.Size))
-		} else {
-			output.WriteString(style.Foreground(shardedColor).Italic(true).Render("... and more\n"))
+	for _, u := range m.uploads {
+		if files, ok := m.shardedFiles[u.ID()]; ok {
+			for i, fi := range files {
+				if i < 3 { 
+					output.WriteString(renderListItem(style.Foreground(shardedColor), fi.Path, fi.Size))
+				}
+			}
 		}
 	}
 
 	output.WriteString("\n")
 
 	output.WriteString("Scanning Files:\n")
-	for i, fi := range m.filesToDAGScan {
-		if i < 5 {
-			output.WriteString(renderListItem(style.Foreground(scannedColor), fi.Path, fi.Size))
-		} else {
-			output.WriteString(style.Foreground(scannedColor).Italic(true).Render("... and more\n"))
+	for _, u := range m.uploads {
+		if files, ok := m.filesToDAGScan[u.ID()]; ok {
+			for i, fi := range files {
+				if i < 3 {
+					output.WriteString(renderListItem(style.Foreground(scannedColor), fi.Path, fi.Size))
+				}
+			}
 		}
 	}
 
@@ -227,7 +276,10 @@ func (m uploadModel) View() string {
 	return output.String()
 }
 
-type rootCIDMsg cid.Cid
+type rootCIDMsg struct {
+	id  id.UploadID
+	cid cid.Cid
+}
 
 func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmodel.Upload) tea.Cmd {
 	return func() tea.Msg {
@@ -235,8 +287,7 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 		if err != nil {
 			return fmt.Errorf("command failed to execute upload: %w", err)
 		}
-
-		return rootCIDMsg(rootCID)
+		return rootCIDMsg{id: upload.ID(), cid: rootCID}
 	}
 }
 
@@ -307,7 +358,17 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		repo:    repo,
 		api:     api,
 		uploads: uploads,
+		results: make(map[id.UploadID]cid.Cid),
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
+		
+		// Initialize Maps
+		recentAddedShards:   make(map[id.UploadID][]*shardsmodel.Shard),
+		recentClosedShards:  make(map[id.UploadID][]*shardsmodel.Shard),
+		filesToDAGScan:      make(map[id.UploadID][]sqlrepo.FileInfo),
+		shardedFiles:        make(map[id.UploadID][]sqlrepo.FileInfo),
+		openShardsStats:     make(map[id.UploadID]uint64),
+		dagScanStats:        make(map[id.UploadID]uint64),
+		closedShardSpinners: make(map[id.UploadID]map[id.ShardID]spinner.Model),
 		retry:   retry,
 	}
 }
@@ -416,8 +477,17 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 		return fmt.Errorf("upload failed: %w", um.err)
 	}
 
-	fmt.Println("Upload complete!")
-	fmt.Printf("Root CID: %s\n", um.rootCID.String())
-
+    fmt.Println("Upload complete!")
+    for _, u := range um.uploads {
+        if c, ok := um.results[u.ID()]; ok {
+            // Fetch Source Path to display
+            sourceName := u.SourceID().String()
+            source, err := repo.GetSourceByID(ctx, u.SourceID())
+            if err == nil && source != nil {
+                sourceName = source.Path()
+            }
+            fmt.Printf("Root CID for %s: %s\n", sourceName, c.String())
+        }
+	}
 	return nil
 }
