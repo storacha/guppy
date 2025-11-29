@@ -172,10 +172,13 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
 
-	// On shards too small to compute a CommP, just skip the `filecoin/offer`.
+	// Check against the official block size rather than the payload minimum
+	cp := &commp.Calc{}
+	minPieceSize := uint64(cp.BlockSize())
+
 	switch {
-	case shard.Size() < commp.MinPiecePayload:
-		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), commp.MinPiecePayload)
+	case shard.Size() < minPieceSize:
+		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), minPieceSize)
 		return nil
 	case shard.Size() > commp.MaxPiecePayload:
 		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is above maximum %d", shard.ID(), shard.Size(), commp.MaxPiecePayload)

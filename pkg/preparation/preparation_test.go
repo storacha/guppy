@@ -409,6 +409,67 @@ func TestExecuteUpload(t *testing.T) {
 
 		require.True(t, areEqual, "expected all files to be present and match")
 	})
+
+	t.Run("uploads a single file source", func(t *testing.T) {
+		space, err := signer.Generate()
+		require.NoError(t, err)
+
+		db := testdb.CreateTestDB(t)
+		// Enable foreign keys
+		_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;")
+		require.NoError(t, err)
+		repo := sqlrepo.New(db)
+
+		// Mock a filesystem that behaves like our singleFileFS
+		// (We map "." directly to the file content)
+		fileData := []byte("just a single file")
+		fsData := map[string][]byte{
+			".": fileData,
+		}
+		testFs := prepareFs(t, fsData)
+
+		putClient := ctestutil.NewPutClient()
+		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
+		var offerCaps []ucan.Capability[filecoincap.OfferCaveats]
+		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
+		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
+
+		api := preparation.NewAPI(
+			repo,
+			c,
+			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+				return testFs, nil
+			}),
+		)
+
+		// Create upload logic
+		_, err = api.FindOrCreateSpace(t.Context(), space.DID(), "Single File Space")
+		require.NoError(t, err)
+		source, err := api.CreateSource(t.Context(), "Single File Source", "my-file.txt") // Path doesn't matter for mock
+		require.NoError(t, err)
+		err = repo.AddSourceToSpace(t.Context(), space.DID(), source.ID())
+		require.NoError(t, err)
+		uploads, err := api.FindOrCreateUploads(t.Context(), space.DID())
+		require.NoError(t, err)
+		upload := uploads[0]
+
+		// Execute
+		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
+		require.NoError(t, err)
+		require.NotEmpty(t, returnedRootCID)
+
+		// Verify
+		// We expect 1 shard (the file is small) + 1 index = 2 blobs
+		putBlobs := ctestutil.ReceivedBlobs(putClient)
+		require.Equal(t, 2, putBlobs.Size())
+		require.Len(t, uploadAddCaps, 1)
+		
+		// Verify the root CID matches
+		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
+		require.True(t, ok)
+		require.Equal(t, returnedRootCID, rootCIDLink.Cid)
+	})
 }
 
 func prepareFs(t *testing.T, files map[string][]byte) afero.IOFS {
