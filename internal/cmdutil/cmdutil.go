@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"path/filepath" 
 
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -75,14 +76,23 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 
 	proofsProvided := len(proofs) > 0
 
+	
 	if !proofsProvided {
-		// Only enable saving if no proofs are provided
-		clientOptions = append(clientOptions,
-			client.WithSaveFn(func(data agentdata.AgentData) error {
-				return data.WriteToFile(storePath)
-			}),
-		)
-	}
+        // Only enable saving if no proofs are provided
+        clientOptions = append(clientOptions,
+            client.WithSaveFn(func(data agentdata.AgentData) error {
+                // 1. Get the directory path from the full file path
+                dir := filepath.Dir(storePath)
+
+                // 2. Create the directory (and any parents) if it doesn't exist
+                if err := os.MkdirAll(dir, 0755); err != nil {
+                    return fmt.Errorf("failed to create config directory: %w", err)
+                }
+
+                return data.WriteToFile(storePath)
+            }),
+        )
+    }
 
 	c, err := client.NewClient(
 		append(
