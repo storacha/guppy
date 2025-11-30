@@ -2,6 +2,8 @@
 
 A Storacha client in golang. ⚠️ Heavily WIP.
 
+**New Contributor?** Check out the [Local Development & Setup Guide](docs/LOCAL_SETUP.md) for detailed Windows/Mac/Linux instructions and troubleshooting.
+
 ## Install
 
 ```sh
