@@ -1,49 +1,28 @@
 # guppy
 
-A Storacha client in golang. ⚠️ Heavily WIP.
+A Storacha client in golang. ⚠️ Heavily WIP. Guppy includes both a CLI command and an underlying Go library which can be used directly.
 
-## Install
+TK: Use `latest`
+
+## Guppy CLI
+
+### Install
 
 ```sh
-go get github.com/storacha/guppy
+go install github.com/storacha/guppy@main
 ```
 
-## Usage
+### Differences from [@storacha/cli](https://www.npmjs.com/package/@storacha/cli)
 
-Guppy can be used as a Go library or as a CLI command.
+There's [another CLI for Storacha written in JS](https://www.npmjs.com/package/@storacha/cli). While both provide access to the Storacha Network, they serve different use cases and are optimized for different scenarios.
 
-### Client library
+* **Storacha JS CLI**: Designed for easy integration in web applications and straightforward file uploads. Perfect for developers who need simple, quick uploads and standard web-based workflows.
 
-There are two ways to use the client library: you can get a user to interactively log in, or bring a prepared, authorized identity.
-
-To have the user log in, use `(*client.Client) RequestAccess()` to have the service ask the user to authenticate, and `(*client.Client) PollClaim()` to notice when they do. ([Example](examples/loginflow/loginflow.go))
-
-To bring your own pre-authorized identity, instantiate the client with the option `client.WithPrincipal(signer)`. ([Example](examples/byoidentity/byoidentity.go)) You'll first need to [generate a DID](#generate-a-did) and then [delegate capabilities](#obtain-proofs) to that identity.
-
-### CLI
-
-The CLI will automatically generate an identity for you and store it in `~/.storacha/store.json`, or in another directory given with `--storacha-dir`. Like the library, there are two ways to authenticate the CLI client: interactively, or by authorizing in advance.
-
-To authorize interactively, use `go run ./cmd login` and follow the prompts.
-
-To authorize in advance, use `go run ./cmd whoami` to see the client's DID and then [delegate capabilities](#obtain-proofs) to that identity. Then, pass the proofs you create on the command line whenever you use the CLI.
-
-
-## Uploads in Guppy vs the Storacha JS CLI
-
-While both Guppy and the [Storacha JS CLI](https://github.com/storacha/upload-service/tree/main/packages/cli) provide access to the Storacha Network, they serve different use cases and are optimized for different scenarios:
-
-### Design Goals
-
-**Storacha JS CLI**: Designed for easy integration in web applications and straightforward file uploads. Perfect for developers who need simple, quick uploads and standard web-based workflows.
-
-**Guppy**: Built specifically for enterprise-scale, large data uploads with a focus on efficiency, reliability, and incremental updates. Ideal for organizations managing substantial datasets that change over time.
-
-### Key Differences
+* **Guppy**: Built specifically for enterprise-scale, large data uploads with a focus on efficiency, reliability, and incremental updates. Ideal for organizations managing substantial datasets that change over time.
 
 Guppy provides several enterprise-focused features that set it apart:
 
-**Resumable Uploads**: Guppy can resume interrupted uploads, ensuring that large datasets don't need to be re-uploaded from scratch if something goes wrong.
+* **Resumable Uploads**: Guppy can resume interrupted uploads, ensuring that large datasets don't need to be re-uploaded from scratch if something goes wrong.
 
 <!-- [Not yet implemented:] **Multiple Data Source Support**: Pull data from various sources including:
 - Local filesystems
@@ -53,76 +32,93 @@ Guppy provides several enterprise-focused features that set it apart:
 
 <!-- [Not yet implemented:] **Incremental & Updatable Uploads**: Rather than treating each upload as independent, Guppy supports incremental uploads that only transfer what has changed since the last upload, dramatically reducing bandwidth and time for large, evolving datasets. -->
 
-**Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
+* **Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
 
-### Space Concepts
 
-In Guppy, a Storacha space is associated with settings and one or more data sources. First, `guppy upload sources add <space-did> <data-path>`, then `guppy upload <space-did>`. The configuration for a space, as well as all intermediate progress, is stored in a database (`~/.storacha/preparation.db`, configurable with the `--db` option).
+### Usage
 
-<!-- [Not yet implemented:] In Guppy, a "space" represents more than just a collection of uploads. Each space is configured with a set of data sources, and Guppy treats uploads intelligently:
+#### Login
 
-- **Initial Upload**: The first upload from a data source captures the complete dataset
-- **Subsequent Uploads**: All following uploads are treated as "updates" that only include changes (additions, modifications, deletions) since the last upload
-- **Change Detection**: Guppy automatically detects what has changed and only processes the delta, making updates extremely efficient even for massive datasets
-
-This approach makes Guppy particularly well-suited for scenarios like:
-- Regular backups of large databases
-- Synchronizing evolving datasets
-- Enterprise content management systems
-- Any situation where large amounts of data change incrementally over time -->
-
-## How to
-
-### Generate a DID
-
-You can use `ucan-key` to generate a private key and DID for use with the library. Install Node.js and then use the `ucan-key` module:
+Guppy will automatically generate an identity for you. First, you'll need to authorize that identity to act on behalf of your account:
 
 ```sh
-npx ucan-key ed
+$ guppy login <account-email-address>
 ```
 
-Output should look something like:
+This will ask Storacha to send you an email with a link to click. Clicking that link will confirm to the network that Guppy is authorized to act as you. You can log your identity into multiple accounts at once, if necessary.
+
+Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--guppy-dir`.
+
+#### Spaces
+
+Before you can upload data, you'll need a Storacha space to put it in. To create one:
 
 ```sh
-# did:key:z6Mkh9TtUbFJcUHhMmS9dEbqpBbHPbL9oxg1zziWn1CYCNZ2
-MgCb+bRGl02JqlWMPUxCyntxlYj0T/zLtR2tn8LFvw6+Yke0BKAP/OUu2tXpd+tniEoOzB3pxqxHZpRhrZl1UYUeraT0=
+$ guppy space generate
 ```
 
-You can use the private key (the line starting `Mg...`) in the CLI by setting the environment variable `GUPPY_PRIVATE_KEY`. Alternatively you can use it programmatically after parsing it:
+A space is identified by a `did:key:` DID. Your account will provision the space for billing purposes, and will be granted full authorization to use the space.
 
-```go
-package main
+You can get a list of all spaces you are known to have access to with:
 
-import "github.com/web3-storage/go-ucanto/principal/ed25519/signer"
-
-signer, _ := signer.Parse("MgCb+bRGl02JqlWMPUxCyntxlYj0T/zLtR2tn8LFvw6+Yke0BKAP/OUu2tXpd+tniEoOzB3pxqxHZpRhrZl1UYUeraT0=")
+```sh
+$ guppy space list
 ```
 
-### Obtain proofs
+#### Uploading
 
-Proofs are delegations to your DID enabling it to perform tasks. Currently the best way to obtain proofs that will allow you to interact with the Storacha Network is to use the Storacha JS CLI:
+Guppy's uploader is where most of the work happens. To upload data, you first associate one or more **sources** with a **space**, and then run the uploader for that space.
 
-1. [Generate a DID](#generate-a-did) and make a note of it (the string starting with `did:key:...`)
-2. Install w3 CLI:
-    ```sh
-    npm install -g @storacha/cli
-    ```
-3. Create a space:
-    ```sh
-    storacha space create <NAME>
-    ```
-4. Delegate capabilities to your DID:
-    ```sh
-    storacha delegation create -c 'store/*' -c 'upload/*' <DID>`
-    ```
+```sh
+$ guppy upload source add <space> <path>
+$ guppy upload <space>
+```
 
-## API
+> [!WARNING]  
+> Multiple sources for the same space are not well supported yet, mainly by the UI. This will improve shortly.
+
+The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--guppy-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
+
+```sh
+$ guppy upload <space>
+```
+
+The uploader will pick up where it left off, quickly scanning to make sure it's aware of any changes to the underlying source data. This ensures that the final root CID returned will point to a complete, consistent view of the data source.
+
+#### Retrieving
+
+Guppy can then be used to retrieve content from the network. 
+
+```sh
+$ retrieve <space> <content-path> <output-path>
+```
+
+The `<content-path>` can take any of these forms:
+
+* `/ipfs/<cid>[/<subpath>]`
+* `ipfs://<cid>[/<subpath>]`
+* `<cid>[/<subpath>]`
+
+`bafybeibhybbpoqakv7pfj5nlrpmldkgiuksmbi3t2cnhxqxnqvbzkhyzjy` will retrieve the file or directory named by that CID, while `bafybeibhybbpoqakv7pfj5nlrpmldkgiuksmbi3t2cnhxqxnqvbzkhyzjy/a/subpath` will retrieve the file or directory at `a/subpath` beneath that CID.
+
+The named content will be written to `<output-path>`.
+
+
+## Client library
+
+There are two ways to use the client library: you can get a user to interactively log in, or bring a prepared, authorized identity.
+
+To have the user log in, use `(*client.Client) RequestAccess()` to have the service ask the user to authenticate, and `(*client.Client) PollClaim()` to notice when they do. ([Example](examples/loginflow/loginflow.go))
+
+To bring your own pre-authorized identity, instantiate the client with the option `client.WithPrincipal(signer)`. ([Example](examples/byoidentity/byoidentity.go)) You'll first need to [generate a DID](#generate-a-did) and then [delegate capabilities](#obtain-proofs) to that identity.
+
+### API
 
 [pkg.go.dev Reference](https://pkg.go.dev/github.com/storacha/guppy)
 
 ## Contributing
 
-Feel free to join in. All welcome. Please [open an issue](https://github.com/storacha/guppy/issues)!
+Feel free to join in. All welcome. Please [open an issue](https://github.com/storacha/guppy/issues)! PRs are also welcome, but please confirm with the maintainers before doing significant work; we'd hate your efforts to go to waste on work that's already being done, or that's going to run into an issue we're already thinking about.
 
 ## License
 

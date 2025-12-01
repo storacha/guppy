@@ -19,7 +19,7 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
-var storachaDirPath string
+var guppyDirPath string
 var storePath string
 
 var rootCmd = &cobra.Command{
@@ -29,7 +29,7 @@ var rootCmd = &cobra.Command{
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
 
-		storePath = filepath.Join(storachaDirPath, "store.json")
+		storePath = filepath.Join(guppyDirPath, "store.json")
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
@@ -37,17 +37,17 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	// default storacha dir: ~/.storacha
+	// default storacha dir: ~/.storacha/guppy
 	homedir, err := os.UserHomeDir()
 	if err != nil {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
 
 	rootCmd.PersistentFlags().StringVar(
-		&storachaDirPath,
-		"storacha-dir",
-		filepath.Join(homedir, ".storacha"),
-		"Directory containing the config and data store (default: ~/.storacha)",
+		&guppyDirPath,
+		"guppy-dir",
+		filepath.Join(homedir, ".storacha/guppy"),
+		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
 }
 
