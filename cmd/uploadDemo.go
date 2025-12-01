@@ -43,7 +43,7 @@ var uploadDemoCmd = &cobra.Command{
 		spaceName := cmd.Flags().Arg(0)
 		if spaceName == "" {
 			cmd.SilenceUsage = false
-			return errors.New("Space name cannot be empty")
+			return errors.New("space name cannot be empty")
 		}
 
 		return demo.Demo(ctx, repo, spaceName, uploadDemoFlags.alterMetadata, uploadDemoFlags.alterData)
