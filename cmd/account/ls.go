@@ -9,6 +9,10 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
+var lsFlags struct {
+	jsonOutput bool
+}
+
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List logged in accounts",
@@ -20,24 +24,31 @@ var lsCmd = &cobra.Command{
 
 		accounts := c.Accounts()
 
-		// Build JSON array of account DIDs
-		output := make([]map[string]string, 0, len(accounts))
-		for _, account := range accounts {
-			output = append(output, map[string]string{
-				"id": account.String(),
-			})
-		}
+		if lsFlags.jsonOutput {
+			// Build JSON array of account DIDs
+			output := make([]map[string]string, 0, len(accounts))
+			for _, account := range accounts {
+				output = append(output, map[string]string{
+					"id": account.String(),
+				})
+			}
 
-		jsonBytes, err := json.Marshal(output)
-		if err != nil {
-			return fmt.Errorf("marshaling output: %w", err)
+			jsonBytes, err := json.Marshal(output)
+			if err != nil {
+				return fmt.Errorf("marshaling output: %w", err)
+			}
+			fmt.Println(string(jsonBytes))
+		} else {
+			for _, account := range accounts {
+				fmt.Println(account.String())
+			}
 		}
-		fmt.Println(string(jsonBytes))
 
 		return nil
 	},
 }
 
 func init() {
+	lsCmd.Flags().BoolVar(&lsFlags.jsonOutput, "json", false, "Output in JSON format")
 	AccountCmd.AddCommand(lsCmd)
 }
