@@ -9,6 +9,10 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
+var lsFlags struct {
+	jsonOutput bool
+}
+
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List all spaces",
@@ -23,24 +27,31 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("retrieving spaces: %w", err)
 		}
 
-		// Build JSON array of space DIDs
-		output := make([]map[string]string, 0, len(spaces))
-		for _, space := range spaces {
-			output = append(output, map[string]string{
-				"id": space.DID().String(),
-			})
-		}
+		if lsFlags.jsonOutput {
+			// Build JSON array of space DIDs
+			output := make([]map[string]string, 0, len(spaces))
+			for _, space := range spaces {
+				output = append(output, map[string]string{
+					"id": space.DID().String(),
+				})
+			}
 
-		jsonBytes, err := json.Marshal(output)
-		if err != nil {
-			return fmt.Errorf("marshaling output: %w", err)
+			jsonBytes, err := json.Marshal(output)
+			if err != nil {
+				return fmt.Errorf("marshaling output: %w", err)
+			}
+			fmt.Println(string(jsonBytes))
+		} else {
+			for _, space := range spaces {
+				fmt.Println(space.DID().String())
+			}
 		}
-		fmt.Println(string(jsonBytes))
 
 		return nil
 	},
 }
 
 func init() {
+	lsCmd.Flags().BoolVar(&lsFlags.jsonOutput, "json", false, "Output in JSON format")
 	SpaceCmd.AddCommand(lsCmd)
 }

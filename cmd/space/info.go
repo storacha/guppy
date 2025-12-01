@@ -40,7 +40,7 @@ var infoCmd = &cobra.Command{
 		}
 
 		if infoFlags.jsonOutput {
-			jsonBytes, err := json.MarshalIndent(result, "", "  ")
+			jsonBytes, err := json.Marshal(result)
 			if err != nil {
 				return fmt.Errorf("marshaling output: %w", err)
 			}
