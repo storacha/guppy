@@ -340,28 +340,17 @@ func invoke[Caveats, Out any](
 ) (invocation.IssuedInvocation, error) {
 
 	var err error
-	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
-
-	// var spaceSigner ucan.Signer
-	// for _, s := range c.Spaces() {
-	// 	if s.DID().String() == with {
-	// 		spaceSigner = s
-	// 		break
-	// 	}
-	// }
+	pfs := make([]delegation.Proof, 0, len(c.Proofs(CapabilityQuery{
+		Can:  capParser.Can(),
+		With: with,
+	})))
 
 	var inv invocation.IssuedInvocation
-	// Sign as space if available
-	// TODO: Re-enable once we consider the implications of signing as space
-	// if spaceSigner != nil {
-	// 	inv, err = capParser.Invoke(spaceSigner, c.Connection().ID(), with, caveats, options...)
-	// } else {
 	for _, del := range c.Proofs() {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
 
 	inv, err = capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
-	// }
 	if err != nil {
 		return nil, err
 	}
