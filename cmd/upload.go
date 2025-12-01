@@ -121,6 +121,11 @@ var uploadSourcesAddCmd = &cobra.Command{
 			return errors.New("path cannot be empty")
 		}
 
+		path, err = filepath.Abs(path)
+		if err != nil {
+			return fmt.Errorf("resolving absolute path: %w", err)
+		}
+
 		spaceDID, err := did.Parse(space)
 		if err != nil {
 			cmd.SilenceUsage = false
