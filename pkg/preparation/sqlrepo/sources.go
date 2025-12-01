@@ -25,8 +25,8 @@ func (r *Repo) CreateSource(ctx context.Context, name string, path string, optio
 	}
 
 	// reuse an existing source pointing at the same path if one already exists
-	// NB(forrest): one intention of the source abstraction is that they mau have different kinds
-	// at present, there is only a local time, so the existence check on a normalized path here is sufficient.
+	// NB(forrest): one intention of the source abstraction is that they may have different kinds
+	// at present, there is only a local kind, so the existence check on a normalized path here is sufficient.
 	// In the future when sources may have different kinds this check will need adjustment.
 	existing, err := r.getSourceByPath(ctx, absPath)
 	if err != nil {
