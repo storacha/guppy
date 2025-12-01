@@ -91,7 +91,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case rootCIDMsg:
 		m.results[msg.id] = msg.cid
-		
+
 		// Only quit if ALL uploads are finished
 		if len(m.results) == len(m.uploads) {
 			return m, tea.Quit
@@ -120,7 +120,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closedShardSpinners[msg.uploadID] = make(map[id.ShardID]spinner.Model)
 		}
 		currentSpinners := m.closedShardSpinners[msg.uploadID]
-		
+
 		newSpinners := make(map[id.ShardID]spinner.Model)
 		for _, s := range msg.closedShards {
 			if sp, ok := currentSpinners[s.ID()]; ok {
@@ -225,7 +225,7 @@ func (m uploadModel) View() string {
 	for _, u := range m.uploads {
 		if files, ok := m.shardedFiles[u.ID()]; ok {
 			for i, fi := range files {
-				if i < 3 { 
+				if i < 3 {
 					output.WriteString(renderListItem(style.Foreground(shardedColor), fi.Path, fi.Size))
 				}
 			}
@@ -360,7 +360,7 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		uploads: uploads,
 		results: make(map[id.UploadID]cid.Cid),
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
-		
+
 		// Initialize Maps
 		recentAddedShards:   make(map[id.UploadID][]*shardsmodel.Shard),
 		recentClosedShards:  make(map[id.UploadID][]*shardsmodel.Shard),
@@ -477,17 +477,17 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 		return fmt.Errorf("upload failed: %w", um.err)
 	}
 
-    fmt.Println("Upload complete!")
-    for _, u := range um.uploads {
-        if c, ok := um.results[u.ID()]; ok {
-            // Fetch Source Path to display
-            sourceName := u.SourceID().String()
-            source, err := repo.GetSourceByID(ctx, u.SourceID())
-            if err == nil && source != nil {
-                sourceName = source.Path()
-            }
-            fmt.Printf("Root CID for %s: %s\n", sourceName, c.String())
-        }
+	fmt.Println("Upload complete!")
+	for _, u := range um.uploads {
+		if c, ok := um.results[u.ID()]; ok {
+			// Fetch Source Path to display
+			sourceName := u.SourceID().String()
+			source, err := repo.GetSourceByID(ctx, u.SourceID())
+			if err == nil && source != nil {
+				sourceName = source.Path()
+			}
+			fmt.Printf("Root CID for %s: %s\n", sourceName, c.String())
+		}
 	}
 	return nil
 }
