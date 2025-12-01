@@ -1,9 +1,23 @@
 {
   // Look at `dev` files, too.
   "go.buildTags": "dev",
-
   "gopls": {
-    // Enable staticcheck, matching the checks in CI.
-    "ui.diagnostic.staticcheck": true
+    // Enable staticcheck, which is used in CI.
+    "ui.diagnostic.staticcheck": true,
+
+    // Match the staticcheck settings in CI. CI uses a default set of
+    // analyses, while `gopls` defaults to enabling everything. This turns off
+    // the non-default analyses to match. (This is annoying, but there's no way
+    // around it currently.)
+    "ui.diagnostic.analyses": {
+      "ST1000": false,
+      "ST1003": false,
+      "ST1016": false,
+      "ST1020": false,
+      "ST1021": false,
+      "ST1022": false,
+      "ST1023": false,
+      "SA9003": false
+    }
   }
 }

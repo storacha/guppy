@@ -323,7 +323,7 @@ func invokeAndExecute[Caveats, Out any](
 	successType schema.Type,
 	options ...delegation.Option,
 ) (result.Result[Out, failure.IPLDBuilderFailure], fx.Effects, error) {
-	inv, err := invoke[Caveats, Out](ctx, c, capParser, with, caveats, options...)
+	inv, err := invoke[Caveats, Out](c, capParser, with, caveats, options...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invoking `%s`: %w", capParser.Can(), err)
 	}
@@ -331,14 +331,12 @@ func invokeAndExecute[Caveats, Out any](
 }
 
 func invoke[Caveats, Out any](
-	ctx context.Context,
 	c *Client,
 	capParser validator.CapabilityParser[Caveats],
 	with ucan.Resource,
 	caveats Caveats,
 	options ...delegation.Option,
 ) (invocation.IssuedInvocation, error) {
-
 	var err error
 	pfs := make([]delegation.Proof, 0, len(c.Proofs(CapabilityQuery{
 		Can:  capParser.Can(),

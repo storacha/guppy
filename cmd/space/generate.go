@@ -61,19 +61,23 @@ var generateCmd = &cobra.Command{
 		if generateFlags.provisionTo != "" {
 			provisionAccount, err = didmailto.FromInput(generateFlags.provisionTo)
 			if err != nil {
+				cmd.SilenceUsage = false
 				return fmt.Errorf("parsing `--provision-to` account %q: %w", generateFlags.provisionTo, err)
 			}
 			if !slices.Contains(accounts, provisionAccount) {
-				return fmt.Errorf("account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.provisionTo, generateFlags.provisionTo)
+				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.provisionTo, generateFlags.provisionTo)
+				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				return fmt.Errorf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			case len(accounts) == 1:
 				provisionAccount = accounts[0]
 			default:
-				return fmt.Errorf("Multiple accounts are logged in. Specify an account with `--provision-to`.")
+				fmt.Printf("Multiple accounts are logged in. Specify an account with `--provision-to`.")
+				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
 
@@ -81,19 +85,23 @@ var generateCmd = &cobra.Command{
 		if generateFlags.grantTo != "" {
 			grantAccount, err = didmailto.FromInput(generateFlags.grantTo)
 			if err != nil {
+				cmd.SilenceUsage = false
 				return fmt.Errorf("parsing `--grant-to` account %q: %w", generateFlags.grantTo, err)
 			}
 			if !slices.Contains(accounts, grantAccount) {
-				return fmt.Errorf("account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.grantTo, generateFlags.grantTo)
+				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.grantTo, generateFlags.grantTo)
+				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				return fmt.Errorf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			case len(accounts) == 1:
 				grantAccount = accounts[0]
 			default:
-				return fmt.Errorf("Multiple accounts are logged in. Specify an account with `--grant-to`.")
+				fmt.Printf("Multiple accounts are logged in. Specify an account with `--grant-to`.")
+				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
 

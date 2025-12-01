@@ -20,7 +20,6 @@ func (c *Client) SpaceBlobReplicate(ctx context.Context, space did.DID, blob typ
 	}
 
 	inv, err := invoke[spaceblobcap.ReplicateCaveats, spaceblobcap.ReplicateOk](
-		ctx,
 		c,
 		spaceblobcap.Replicate,
 		space.String(),
