@@ -1,9 +1,15 @@
 package client
 
-import "github.com/storacha/go-ucanto/did"
+import (
+	"cmp"
+	"maps"
+	"slices"
+
+	"github.com/storacha/go-ucanto/did"
+)
 
 func (c *Client) Accounts() []did.DID {
-	var accounts []did.DID
+	accounts := make(map[did.DID]struct{})
 	for _, p := range c.Proofs(CapabilityQuery{
 		Can:  "*",
 		With: "ucan:*",
@@ -11,12 +17,16 @@ func (c *Client) Accounts() []did.DID {
 		if p.Audience().DID() == c.Issuer().DID() {
 			for _, cap := range p.Capabilities() {
 				// `Proofs()` also gives us attestations, so filter those out.
-				if cap.Can() == "*" {
-					accounts = append(accounts, p.Issuer().DID())
+				if cap.Can() != "ucan/attest" {
+					accounts[p.Issuer().DID()] = struct{}{}
 					break
 				}
 			}
 		}
 	}
-	return accounts
+	result := slices.Collect(maps.Keys(accounts))
+	slices.SortFunc(result, func(a, b did.DID) int {
+		return cmp.Compare(a.String(), b.String())
+	})
+	return result
 }
