@@ -1,0 +1,9 @@
+{
+  // Look at `dev` files, too.
+  "go.buildTags": "dev",
+
+  "gopls": {
+    // Enable staticcheck, matching the checks in CI.
+    "ui.diagnostic.staticcheck": true
+  }
+}
