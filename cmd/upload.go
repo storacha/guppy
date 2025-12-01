@@ -24,7 +24,7 @@ var uploadCmd = &cobra.Command{
 	Short:   "Upload data to a Storacha space",
 	Long: wordwrap.WrapString(
 		"Uploads data to a Storacha space. This will produce one upload in the "+
-			"space for each source added to the space with `upload sources add`. If "+
+			"space for each source added to the space with `upload source add`. If "+
 			"no sources have been added to the space yet, the command will exit "+
 			"with an error.",
 		80),
@@ -73,17 +73,17 @@ func init() {
 	uploadCmd.PersistentFlags().StringVar(
 		&uploadDbPath,
 		"db",
-		filepath.Join(storachaDirPath, "preparation.db"),
+		filepath.Join(guppyDirPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
 }
 
-var uploadSourcesCmd = &cobra.Command{
-	Use: "sources",
+var uploadSourceCmd = &cobra.Command{
+	Use: "source",
 }
 
 func init() {
-	uploadCmd.AddCommand(uploadSourcesCmd)
+	uploadCmd.AddCommand(uploadSourceCmd)
 }
 
 var uploadSourcesAddShardSize string
@@ -159,7 +159,7 @@ var uploadSourcesAddCmd = &cobra.Command{
 }
 
 func init() {
-	uploadSourcesCmd.AddCommand(uploadSourcesAddCmd)
+	uploadSourceCmd.AddCommand(uploadSourcesAddCmd)
 	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shard-size", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
 }
 
@@ -213,7 +213,7 @@ var uploadSourcesListCmd = &cobra.Command{
 }
 
 func init() {
-	uploadSourcesCmd.AddCommand(uploadSourcesListCmd)
+	uploadSourceCmd.AddCommand(uploadSourcesListCmd)
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {

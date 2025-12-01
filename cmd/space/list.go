@@ -9,13 +9,14 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
-var lsFlags struct {
+var listFlags struct {
 	jsonOutput bool
 }
 
-var lsCmd = &cobra.Command{
-	Use:   "ls",
-	Short: "List all spaces",
+var listCmd = &cobra.Command{
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List all spaces",
 	Long: wordwrap.WrapString(
 		"Lists all Storacha spaces stored in the local store.",
 		80),
@@ -27,7 +28,7 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("retrieving spaces: %w", err)
 		}
 
-		if lsFlags.jsonOutput {
+		if listFlags.jsonOutput {
 			// Build JSON array of space DIDs
 			output := make([]map[string]string, 0, len(spaces))
 			for _, space := range spaces {
@@ -52,6 +53,6 @@ var lsCmd = &cobra.Command{
 }
 
 func init() {
-	lsCmd.Flags().BoolVar(&lsFlags.jsonOutput, "json", false, "Output in JSON format")
-	SpaceCmd.AddCommand(lsCmd)
+	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
+	SpaceCmd.AddCommand(listCmd)
 }

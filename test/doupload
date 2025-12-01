@@ -38,7 +38,7 @@ sandbox="doupload-dir"
 
 # Function wrapper to properly invoke guppy with word splitting
 guppy() {
-	go run .. --storacha-dir ./$sandbox/storacha "$@"
+	go run .. --guppy-dir ./$sandbox/storacha "$@"
 }
 
 dataDir="$sandbox/data"
@@ -102,7 +102,7 @@ main () {
 
 	echo
 	echo "📤 Uploading data from $dataDir to space $space"
-	guppy upload sources add "$space" "$dataDir"
+	guppy upload source add "$space" "$dataDir"
 	output=$(guppy upload "$space" | tee /dev/fd/3)
 	rootCID=$(echo "$output" | grep 'Root CID:' | awk '{print $3}')
 
