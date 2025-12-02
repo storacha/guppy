@@ -2,11 +2,9 @@
 
 A Storacha client in golang. ⚠️ Heavily WIP. Guppy includes both a CLI command and an underlying Go library which can be used directly.
 
-TK: Use `latest`
+**New Contributor?** Check out the [Local Development & Setup Guide](docs/LOCAL_SETUP.md) for detailed Windows/Mac/Linux instructions and troubleshooting.
 
-## Guppy CLI
-
-### Install
+## Install
 
 ```sh
 go install github.com/storacha/guppy@main
@@ -119,6 +117,8 @@ To bring your own pre-authorized identity, instantiate the client with the optio
 ## Contributing
 
 Feel free to join in. All welcome. Please [open an issue](https://github.com/storacha/guppy/issues)! PRs are also welcome, but please confirm with the maintainers before doing significant work; we'd hate your efforts to go to waste on work that's already being done, or that's going to run into an issue we're already thinking about.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for technical and logistical details about how to contribute.
 
 ## License
 
