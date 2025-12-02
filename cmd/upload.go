@@ -17,13 +17,12 @@ import (
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-var (
-	uploadDbPath     string
-	uploadProofPath  string
-	uploadSourceName string
-	uploadAll        bool
-	retry            bool
-)
+var uploadFlags struct {
+	dbPath    string
+	proofPath string
+	all       bool
+	retry     bool
+}
 
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space> [source-path-or-name...]",
@@ -83,7 +82,7 @@ var uploadCmd = &cobra.Command{
 
 		var uploadsToRun []*uploadsmodel.Upload
 
-		if len(requestedSources) == 0 || uploadAll {
+		if len(requestedSources) == 0 || uploadFlags.all {
 			uploadsToRun = allUploads
 		} else {
 			reqMap := make(map[string]bool)
@@ -115,7 +114,7 @@ var uploadCmd = &cobra.Command{
 			}
 		}
 
-		return ui.RunUploadUI(ctx, repo, api, uploadsToRun, retry)
+		return ui.RunUploadUI(ctx, repo, api, uploadsToRun, uploadFlags.retry)
 	},
 }
 
@@ -123,14 +122,14 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	uploadCmd.PersistentFlags().StringVar(
-		&uploadDbPath,
+		&uploadFlags.dbPath,
 		"db",
 		"",
 		"Path to the preparation database file (default: <guppyDir>/preparation.db)",
 	)
-	uploadCmd.Flags().StringVar(&uploadProofPath, "proof", "", "Path to a UCAN proof file")
-	uploadCmd.Flags().BoolVar(&uploadAll, "all", false, "Upload all sources (even if arguments are provided)")
-	uploadCmd.Flags().BoolVar(&retry, "retry", false, "Auto-retry failed uploads")
+	uploadCmd.Flags().StringVar(&uploadFlags.proofPath, "proof", "", "Path to a UCAN proof file")
+	uploadCmd.Flags().BoolVar(&uploadFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
+	uploadCmd.Flags().BoolVar(&uploadFlags.retry, "retry", false, "Auto-retry failed uploads")
 }
 
 var uploadSourceCmd = &cobra.Command{
@@ -141,7 +140,10 @@ func init() {
 	uploadCmd.AddCommand(uploadSourceCmd)
 }
 
-var uploadSourcesAddShardSize string
+var uploadSourcesAddFlags struct {
+	shardSize string
+	name      string
+}
 
 var uploadSourcesAddCmd = &cobra.Command{
 	Use:   "add <space> <path>",
@@ -191,8 +193,8 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption
-		if uploadSourcesAddShardSize != "" {
-			shardSize, err := cmdutil.ParseSize(uploadSourcesAddShardSize)
+		if uploadSourcesAddFlags.shardSize != "" {
+			shardSize, err := cmdutil.ParseSize(uploadSourcesAddFlags.shardSize)
 			if err != nil {
 				return fmt.Errorf("parsing shard size: %w", err)
 			}
@@ -200,8 +202,8 @@ var uploadSourcesAddCmd = &cobra.Command{
 		}
 
 		name := path
-		if uploadSourceName != "" {
-			name = uploadSourceName
+		if uploadSourcesAddFlags.name != "" {
+			name = uploadSourcesAddFlags.name
 		}
 
 		_, err = api.FindOrCreateSpace(ctx, spaceDID, spaceDID.String(), spaceOptions...)
@@ -225,8 +227,8 @@ var uploadSourcesAddCmd = &cobra.Command{
 
 func init() {
 	uploadSourceCmd.AddCommand(uploadSourcesAddCmd)
-	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddShardSize, "shard-size", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
-	uploadSourcesAddCmd.Flags().StringVar(&uploadSourceName, "name", "", "Name (alias) for the source")
+	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddFlags.shardSize, "shard-size", "", "Shard size for the space (e.g., 1024, 512B, 100K, 50M, 2G)")
+	uploadSourcesAddCmd.Flags().StringVar(&uploadSourcesAddFlags.name, "name", "", "Name (alias) for the source")
 }
 
 var uploadSourcesListCmd = &cobra.Command{
@@ -287,5 +289,5 @@ func init() {
 }
 
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	return preparation.OpenRepo(ctx, uploadDbPath)
+	return preparation.OpenRepo(ctx, uploadFlags.dbPath)
 }
