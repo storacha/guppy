@@ -39,13 +39,23 @@ type SpaceBlobAddOption func(*spaceBlobAddConfig)
 
 // spaceBlobAddConfig holds configuration for SpaceBlobAdd.
 type spaceBlobAddConfig struct {
-	putClient *http.Client
+	putClient          *http.Client
+	precomputedDigest  multihash.Multihash
+	precomputedSizePtr *uint64
 }
 
 // WithPutClient configures the HTTP client to use for uploading blobs.
 func WithPutClient(client *http.Client) SpaceBlobAddOption {
 	return func(cfg *spaceBlobAddConfig) {
 		cfg.putClient = client
+	}
+}
+
+// WithPrecomputedDigest supplies a previously computed digest/size so we can skip re-hashing.
+func WithPrecomputedDigest(d multihash.Multihash, size uint64) SpaceBlobAddOption {
+	return func(cfg *spaceBlobAddConfig) {
+		cfg.precomputedDigest = d
+		cfg.precomputedSizePtr = &size
 	}
 }
 
@@ -99,10 +109,16 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
 		attribute.Int("content-size", len(contentBytes)),
 	))
-	contentHash, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
-	if err != nil {
+	contentHash := cfg.precomputedDigest
+	if contentHash == nil || len(contentHash) == 0 {
+		contentHash, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
+		if err != nil {
+			hashSpan.End()
+			return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
+		}
+	} else if cfg.precomputedSizePtr != nil && *cfg.precomputedSizePtr != uint64(len(contentBytes)) {
 		hashSpan.End()
-		return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
+		return AddedBlob{}, fmt.Errorf("precomputed digest size %d does not match content size %d", *cfg.precomputedSizePtr, len(contentBytes))
 	}
 	hashSpan.End()
 

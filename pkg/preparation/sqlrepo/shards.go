@@ -29,6 +29,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		pieceCID cid.Cid,
 		state model.ShardState,
 	) error {
 		_, err := r.db.ExecContext(ctx, `
@@ -37,12 +38,14 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 				upload_id,
 				size,
 				digest,
+				piece_cid,
 				state
-			) VALUES (?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?)`,
 			id,
 			uploadID,
 			size,
 			digest,
+			util.DbCID(&pieceCID),
 			state,
 		)
 		return err
@@ -61,6 +64,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			upload_id,
 			size,
 			digest,
+			piece_cid,
 			state
 		FROM shards
 		WHERE upload_id = ?
@@ -80,9 +84,10 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			uploadID *id.UploadID,
 			size *uint64,
 			digest *multihash.Multihash,
+			pieceCID *cid.Cid,
 			state *model.ShardState,
 		) error {
-			return rows.Scan(id, uploadID, size, util.DbBytes(digest), state)
+			return rows.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), state)
 		})
 		if err != nil {
 			return nil, err
@@ -102,6 +107,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 			upload_id,
 			size,
 			digest,
+			piece_cid,
 			state
 		FROM shards
 		WHERE id = ?`,
@@ -113,9 +119,10 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		uploadID *id.UploadID,
 		size *uint64,
 		digest *multihash.Multihash,
+		pieceCID *cid.Cid,
 		state *model.ShardState,
 	) error {
-		return row.Scan(id, uploadID, size, util.DbBytes(digest), state)
+		return row.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), state)
 	})
 	if err != nil {
 		return nil, err
@@ -274,6 +281,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		pieceCID cid.Cid,
 		state model.ShardState,
 	) error {
 		_, err := r.db.ExecContext(ctx,
@@ -282,12 +290,14 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			    upload_id = ?,
 			    size = ?,
 			    digest = ?,
+			    piece_cid = ?,
 			    state = ?
 			WHERE id = ?`,
 			id,
 			uploadID,
 			size,
 			digest,
+			util.DbCID(&pieceCID),
 			state,
 			id,
 		)
