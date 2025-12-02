@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"path/filepath" 
 
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
