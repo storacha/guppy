@@ -116,35 +116,37 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	putClient := cfg.PutClient()
 
-	_, readSpan := tracer.Start(ctx, "read-content")
-	contentBytes, err := io.ReadAll(content)
-	if err != nil {
-		readSpan.End()
-		return AddedBlob{}, fmt.Errorf("reading content: %w", err)
-	}
-	readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
-	readSpan.End()
+	contentReader := content
 
-	_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
-		attribute.Int("content-size", len(contentBytes)),
-	))
 	contentHash := cfg.PrecomputedDigest()
-	if contentHash == nil || len(contentHash) == 0 {
+	contentSizePtr := cfg.PrecomputedSizePtr()
+	if contentSizePtr == nil || contentHash == nil || len(contentHash) == 0 {
+
+		_, readSpan := tracer.Start(ctx, "read-content")
+		contentBytes, err := io.ReadAll(content)
+		if err != nil {
+			readSpan.End()
+			return AddedBlob{}, fmt.Errorf("reading content: %w", err)
+		}
+		readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
+		readSpan.End()
+		_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
+			attribute.Int("content-size", len(contentBytes)),
+		))
 		contentHash, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
 		if err != nil {
 			hashSpan.End()
 			return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
 		}
-	} else if cfg.PrecomputedSizePtr() != nil && *cfg.PrecomputedSizePtr() != uint64(len(contentBytes)) {
 		hashSpan.End()
-		return AddedBlob{}, fmt.Errorf("precomputed digest size %d does not match content size %d", *cfg.PrecomputedSizePtr(), len(contentBytes))
+		contentReader = bytes.NewReader(contentBytes)
+		contentSize := uint64(len(contentBytes))
+		contentSizePtr = &contentSize
 	}
-	hashSpan.End()
-
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{
 			Digest: contentHash,
-			Size:   uint64(len(contentBytes)),
+			Size:   uint64(*contentSizePtr),
 		},
 	}
 
@@ -300,7 +302,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	}
 
 	if url != nil && headers != nil {
-		if err := putBlob(ctx, putClient, url, headers, contentBytes); err != nil {
+		if err := putBlob(ctx, putClient, url, headers, contentReader); err != nil {
 			return AddedBlob{}, fmt.Errorf("putting blob: %w", err)
 		}
 	}
@@ -424,8 +426,8 @@ func getConcludeReceipt(concludeFx invocation.Invocation) (receipt.AnyReceipt, e
 	return rcpt, nil
 }
 
-func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), bytes.NewReader(body))
+func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body io.Reader) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), body)
 	if err != nil {
 		return fmt.Errorf("creating upload request: %w", err)
 	}

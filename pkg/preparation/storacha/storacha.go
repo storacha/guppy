@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
@@ -54,10 +55,11 @@ type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload)
 
 // API provides methods to interact with Storacha.
 type API struct {
-	Repo             Repo
-	Client           Client
-	CarForShard      CarForShardFunc
-	IndexesForUpload IndexesForUploadFunc
+	Repo                   Repo
+	Client                 Client
+	CarForShard            CarForShardFunc
+	IndexesForUpload       IndexesForUploadFunc
+	ShardUploadParallelism int
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -73,14 +75,27 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 	span.AddEvent("closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
-	for _, shard := range closedShards {
-		err := a.addShard(ctx, shard, spaceDID)
-		if err != nil {
-			return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
-		}
+	// Ensure at least 1 parallelism
+	if a.ShardUploadParallelism < 1 {
+		a.ShardUploadParallelism = 1
 	}
 
-	return nil
+	sem := make(chan struct{}, a.ShardUploadParallelism)
+	eg, gctx := errgroup.WithContext(ctx)
+
+	for _, shard := range closedShards {
+		shard := shard
+		sem <- struct{}{}
+		eg.Go(func() error {
+			defer func() { <-sem }()
+			if err := a.addShard(gctx, shard, spaceDID); err != nil {
+				return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+			}
+			return nil
+		})
+	}
+
+	return eg.Wait()
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {

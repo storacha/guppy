@@ -244,6 +244,7 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
+			preparation.WithShardUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
@@ -365,6 +366,7 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
+			preparation.WithShardUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
