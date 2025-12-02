@@ -29,6 +29,8 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		sha256 multihash.Multihash,
+		piece []byte,
 		state model.ShardState,
 	) error {
 		_, err := r.db.ExecContext(ctx, `
@@ -37,12 +39,16 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 				upload_id,
 				size,
 				digest,
+				sha256_digest,
+				piece_digest,
 				state
-			) VALUES (?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			uploadID,
 			size,
 			digest,
+			sha256,
+			piece,
 			state,
 		)
 		return err
@@ -61,6 +67,8 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			upload_id,
 			size,
 			digest,
+			sha256_digest,
+			piece_digest,
 			state
 		FROM shards
 		WHERE upload_id = ?
@@ -80,9 +88,11 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			uploadID *id.UploadID,
 			size *uint64,
 			digest *multihash.Multihash,
+			sha256 *multihash.Multihash,
+			piece *[]byte,
 			state *model.ShardState,
 		) error {
-			return rows.Scan(id, uploadID, size, util.DbBytes(digest), state)
+			return rows.Scan(id, uploadID, size, util.DbBytes(digest), util.DbBytes(sha256), piece, state)
 		})
 		if err != nil {
 			return nil, err
@@ -102,6 +112,8 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 			upload_id,
 			size,
 			digest,
+			sha256_digest,
+			piece_digest,
 			state
 		FROM shards
 		WHERE id = ?`,
@@ -113,9 +125,11 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		uploadID *id.UploadID,
 		size *uint64,
 		digest *multihash.Multihash,
+		sha256 *multihash.Multihash,
+		piece *[]byte,
 		state *model.ShardState,
 	) error {
-		return row.Scan(id, uploadID, size, util.DbBytes(digest), state)
+		return row.Scan(id, uploadID, size, util.DbBytes(digest), util.DbBytes(sha256), piece, state)
 	})
 	if err != nil {
 		return nil, err
@@ -203,7 +217,8 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 			nodes_in_shards.shard_offset
 		FROM nodes_in_shards
 		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
-		WHERE shard_id = ?`,
+		WHERE shard_id = ?
+		ORDER BY nodes_in_shards.shard_offset`,
 		shardID,
 	)
 	if err != nil {
@@ -237,6 +252,8 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		sha256 multihash.Multihash,
+		piece []byte,
 		state model.ShardState,
 	) error {
 		_, err := r.db.ExecContext(ctx,
@@ -245,12 +262,16 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			    upload_id = ?,
 			    size = ?,
 			    digest = ?,
+			    sha256_digest = ?,
+			    piece_digest = ?,
 			    state = ?
 			WHERE id = ?`,
 			id,
 			uploadID,
 			size,
 			digest,
+			sha256,
+			piece,
 			state,
 			id,
 		)

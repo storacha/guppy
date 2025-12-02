@@ -37,6 +37,8 @@ type Shard struct {
 	uploadID id.UploadID
 	size     uint64
 	digest   multihash.Multihash
+	sha256   multihash.Multihash
+	piece    []byte
 	state    ShardState
 }
 
@@ -47,6 +49,8 @@ func NewShard(uploadID id.UploadID, size uint64) (*Shard, error) {
 		uploadID: uploadID,
 		size:     size,
 		digest:   multihash.Multihash{},
+		sha256:   multihash.Multihash{},
+		piece:    nil,
 		state:    ShardStateOpen,
 	}
 	if _, err := validateShard(s); err != nil {
@@ -80,6 +84,7 @@ func (s *Shard) Added(dig multihash.Multihash) error {
 	}
 	s.state = ShardStateAdded
 	s.digest = dig
+	s.sha256 = dig
 	return nil
 }
 
@@ -88,6 +93,8 @@ type ShardScanner func(
 	uploadID *id.UploadID,
 	size *uint64,
 	digest *multihash.Multihash,
+	sha256 *multihash.Multihash,
+	piece *[]byte,
 	state *ShardState,
 ) error
 
@@ -98,6 +105,8 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 		&shard.uploadID,
 		&shard.size,
 		&shard.digest,
+		&shard.sha256,
+		&shard.piece,
 		&shard.state,
 	)
 	if err != nil {
@@ -112,6 +121,8 @@ type ShardWriter func(
 	uploadID id.UploadID,
 	size uint64,
 	digest multihash.Multihash,
+	sha256 multihash.Multihash,
+	piece []byte,
 	state ShardState,
 ) error
 
@@ -122,6 +133,8 @@ func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 		shard.uploadID,
 		shard.size,
 		shard.digest,
+		shard.sha256,
+		shard.piece,
 		shard.state,
 	)
 }
@@ -140,6 +153,20 @@ func (s *Shard) Size() uint64 {
 
 func (s *Shard) Digest() multihash.Multihash {
 	return s.digest
+}
+
+func (s *Shard) SetDigests(car multihash.Multihash, sha multihash.Multihash, piece []byte) {
+	s.digest = car
+	s.sha256 = sha
+	s.piece = piece
+}
+
+func (s *Shard) Sha256Digest() multihash.Multihash {
+	return s.sha256
+}
+
+func (s *Shard) PieceDigest() []byte {
+	return s.piece
 }
 
 func (s *Shard) CID() cid.Cid {

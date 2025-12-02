@@ -39,13 +39,24 @@ type SpaceBlobAddOption func(*spaceBlobAddConfig)
 
 // spaceBlobAddConfig holds configuration for SpaceBlobAdd.
 type spaceBlobAddConfig struct {
-	putClient *http.Client
+	putClient         *http.Client
+	precomputedDigest multihash.Multihash
+	precomputedSize   uint64
 }
 
 // WithPutClient configures the HTTP client to use for uploading blobs.
 func WithPutClient(client *http.Client) SpaceBlobAddOption {
 	return func(cfg *spaceBlobAddConfig) {
 		cfg.putClient = client
+	}
+}
+
+// WithPrecomputedDigest provides a precomputed SHA2-256 multihash and size for
+// the blob, skipping the internal hash calculation.
+func WithPrecomputedDigest(digest multihash.Multihash, size uint64) SpaceBlobAddOption {
+	return func(cfg *spaceBlobAddConfig) {
+		cfg.precomputedDigest = digest
+		cfg.precomputedSize = size
 	}
 }
 
@@ -96,15 +107,23 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
 	readSpan.End()
 
-	_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
-		attribute.Int("content-size", len(contentBytes)),
-	))
-	contentHash, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
-	if err != nil {
+	var contentHash multihash.Multihash
+	if cfg.precomputedDigest != nil {
+		if cfg.precomputedSize > 0 && uint64(len(contentBytes)) != cfg.precomputedSize {
+			return AddedBlob{}, fmt.Errorf("precomputed digest size %d does not match content size %d", cfg.precomputedSize, len(contentBytes))
+		}
+		contentHash = cfg.precomputedDigest
+	} else {
+		_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
+			attribute.Int("content-size", len(contentBytes)),
+		))
+		contentHash, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
+		if err != nil {
+			hashSpan.End()
+			return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
+		}
 		hashSpan.End()
-		return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
 	}
-	hashSpan.End()
 
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{

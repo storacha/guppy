@@ -1,22 +1,38 @@
 package uploads
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
+	"sync"
 
+	"golang.org/x/sync/errgroup"
+
+	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
-	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
-	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
-	"github.com/storacha/guppy/pkg/preparation/types"
-	"github.com/storacha/guppy/pkg/preparation/types/id"
-	"github.com/storacha/guppy/pkg/preparation/uploads/model"
+
+	cbor "github.com/ipfs/go-ipld-cbor"
+	ipldcar "github.com/ipld/go-car"
+	"github.com/ipld/go-car/util"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
+	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	shardmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var (
@@ -26,8 +42,8 @@ var (
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error)
-type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (id.ShardID, []id.ShardID, error)
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) ([]id.ShardID, error)
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -53,6 +69,169 @@ type API struct {
 	// returns true if an existing open shard was in fact closed, false if there
 	// was no open shard to close.
 	CloseUploadShards CloseUploadShardsFunc
+}
+
+type shardBlock struct {
+	node dagmodel.Node
+	data []byte
+}
+
+type shardBuildResult struct {
+	carDigest multihash.Multihash
+	sha256MH  multihash.Multihash
+	piece     []byte
+	err       error
+}
+
+type shardBuilder struct {
+	id     id.ShardID
+	tasks  chan shardBlock
+	result chan shardBuildResult
+}
+
+type nodeData struct {
+	node dagmodel.Node
+	data []byte
+	size uint64
+}
+
+func newShardBuilder(ctx context.Context, shardID id.ShardID, sem chan struct{}) *shardBuilder {
+	tasks := make(chan shardBlock, 16)
+	result := make(chan shardBuildResult, 1)
+
+	go func() {
+		defer func() { <-sem }()
+		defer close(result)
+
+		sha := sha256.New()
+		commpCalc := &commp.Calc{}
+		mw := io.MultiWriter(sha, commpCalc)
+
+		var (
+			res       shardBuildResult
+			totalSize uint64
+		)
+
+		if _, err := mw.Write(noRootsHeader()); err != nil {
+			res.err = err
+			result <- res
+			return
+		}
+		totalSize += uint64(len(noRootsHeader()))
+
+		for blk := range tasks {
+			select {
+			case <-ctx.Done():
+				res.err = ctx.Err()
+				continue
+			default:
+			}
+
+			if res.err != nil {
+				continue
+			}
+
+			if err := writeCarBlock(mw, blk.node, blk.data); err != nil {
+				res.err = err
+				continue
+			}
+			cidLen := blk.node.CID().ByteLen()
+			totalSize += uint64(cidLen) + blk.node.Size() + uint64(len(lengthVarint(uint64(cidLen)+blk.node.Size())))
+		}
+
+		if res.err == nil {
+			d := sha.Sum(nil)
+			carMH, err := multihash.Sum(d, multihash.SHA2_256, -1)
+			if err != nil {
+				res.err = err
+			} else {
+				res.carDigest = carMH
+				res.sha256MH = carMH
+				if totalSize >= commp.MinPiecePayload && totalSize <= commp.MaxPiecePayload {
+					pieceDigest, _, err := commpCalc.Digest()
+					if err != nil {
+						res.err = err
+					} else {
+						res.piece = pieceDigest
+					}
+				}
+			}
+		}
+
+		result <- res
+	}()
+
+	return &shardBuilder{
+		id:     shardID,
+		tasks:  tasks,
+		result: result,
+	}
+}
+
+func (sb *shardBuilder) addBlock(ctx context.Context, blk shardBlock) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case sb.tasks <- blk:
+		return nil
+	}
+}
+
+func (sb *shardBuilder) close() {
+	close(sb.tasks)
+}
+
+func (sb *shardBuilder) wait() shardBuildResult {
+	return <-sb.result
+}
+
+func writeCarBlock(w io.Writer, node dagmodel.Node, data []byte) error {
+	cidBytes := node.CID().Bytes()
+	length := uint64(len(cidBytes)) + node.Size()
+	if _, err := w.Write(lengthVarint(length)); err != nil {
+		return err
+	}
+	if _, err := w.Write(cidBytes); err != nil {
+		return err
+	}
+	_, err := w.Write(data)
+	return err
+}
+
+func lengthVarint(size uint64) []byte {
+	buf := make([]byte, 8)
+	n := binary.PutUvarint(buf, size)
+	return buf[:n]
+}
+
+func nodeEncodedLength(nd nodeData) uint64 {
+	cid := nd.node.CID()
+	pllen := uint64(len(cid.Bytes())) + nd.size
+	vilen := uint64(binary.PutUvarint(make([]byte, binary.MaxVarintLen64), pllen))
+	return pllen + uint64(vilen)
+}
+
+var (
+	noRootsHeaderOnce sync.Once
+	noRootsHdr        []byte
+)
+
+func noRootsHeader() []byte {
+	noRootsHeaderOnce.Do(func() {
+		noRootsHeaderWithoutLength, err := cbor.Encode(ipldcar.CarHeader{
+			Roots:   nil,
+			Version: 1,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("failed to encode CAR header: %v", err))
+		}
+		var buf bytes.Buffer
+		if err := util.LdWrite(&buf, noRootsHeaderWithoutLength); err != nil {
+			panic(fmt.Sprintf("failed to length-delimit CAR header: %v", err))
+		}
+		noRootsHdr = buf.Bytes()
+	})
+	return noRootsHdr
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -186,17 +365,10 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 		// doWork
 		func() error {
+			var collected []nodeData
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID())
-				if err != nil {
-					return fmt.Errorf("adding node to upload shard: %w", err)
-				}
-
-				if shardClosed {
-					signal(closedShardsAvailable)
-				}
-
+				collected = append(collected, nodeData{node: node, data: data, size: node.Size()})
 				return nil
 			})
 
@@ -232,18 +404,31 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
 			}
 
+			space, err := api.Repo.GetSpaceByDID(ctx, spaceDID)
+			if err != nil {
+				return fmt.Errorf("getting space %s: %w", spaceDID, err)
+			}
+
+			closedCount, err := planAndBuildShards(ctx, api, uploadID, spaceDID, space.ShardSize(), collected)
+			if err != nil {
+				return err
+			}
+			if closedCount > 0 {
+				signal(closedShardsAvailable)
+			}
+
 			return nil
 		},
 
 		// finalize
 		func() error {
 			// We're out of nodes, so we can close any open shards for this upload.
-			shardClosed, err := api.CloseUploadShards(ctx, uploadID)
+			shardsClosed, err := api.CloseUploadShards(ctx, uploadID)
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
 			}
 
-			if shardClosed {
+			if len(shardsClosed) > 0 {
 				signal(closedShardsAvailable)
 			}
 
@@ -268,6 +453,123 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			return nil
 		},
 	)
+}
+
+type shardPlan struct {
+	nodes     []nodeData
+	totalSize uint64
+	shard     *shardmodel.Shard
+}
+
+func planAndBuildShards(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, shardSize uint64, nodes []nodeData) (int, error) {
+	if len(nodes) == 0 {
+		return 0, nil
+	}
+
+	headerLen := uint64(len(noRootsHeader()))
+
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodeEncodedLength(nodes[i]) > nodeEncodedLength(nodes[j])
+	})
+
+	var plans []shardPlan
+
+	for _, nd := range nodes {
+		encLen := nodeEncodedLength(nd)
+		if encLen > shardSize {
+			return 0, fmt.Errorf("node %s (%d bytes) too large for shard size %d", nd.node.CID(), nd.size, shardSize)
+		}
+
+		bestIdx := -1
+		bestRemaining := shardSize + 1
+		for i, p := range plans {
+			remaining := shardSize - p.totalSize
+			if remaining >= encLen && remaining < bestRemaining {
+				bestRemaining = remaining
+				bestIdx = i
+			}
+		}
+		if bestIdx == -1 {
+			plans = append(plans, shardPlan{
+				nodes:     []nodeData{nd},
+				totalSize: headerLen + encLen,
+			})
+		} else {
+			plans[bestIdx].nodes = append(plans[bestIdx].nodes, nd)
+			plans[bestIdx].totalSize += encLen
+		}
+	}
+
+	// Create shards and record DB membership/order
+	for i := range plans {
+		shard, err := api.Repo.CreateShard(ctx, uploadID, headerLen)
+		if err != nil {
+			return 0, fmt.Errorf("create shard for upload %s: %w", uploadID, err)
+		}
+		plans[i].shard = shard
+
+		for _, nd := range plans[i].nodes {
+			offset := nodeEncodedLength(nd) - nd.size
+			if err := api.Repo.AddNodeToShard(ctx, shard.ID(), nd.node.CID(), spaceDID, offset); err != nil {
+				return 0, fmt.Errorf("add node %s to shard %s: %w", nd.node.CID(), shard.ID(), err)
+			}
+		}
+	}
+
+	// Compute digests and close shards in parallel (bounded)
+	sem := make(chan struct{}, 4)
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i := range plans {
+		p := plans[i]
+		g.Go(func() error {
+			select {
+			case sem <- struct{}{}:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
+			defer func() { <-sem }()
+
+			sha := sha256.New()
+			commpCalc := &commp.Calc{}
+			mw := io.MultiWriter(sha, commpCalc)
+
+			if _, err := mw.Write(noRootsHeader()); err != nil {
+				return fmt.Errorf("writing header for shard %s: %w", p.shard.ID(), err)
+			}
+			for _, nd := range p.nodes {
+				if err := writeCarBlock(mw, nd.node, nd.data); err != nil {
+					return fmt.Errorf("writing block for shard %s: %w", p.shard.ID(), err)
+				}
+			}
+
+			carHash := sha.Sum(nil)
+			carMH, err := multihash.Sum(carHash, multihash.SHA2_256, -1)
+			if err != nil {
+				return fmt.Errorf("multihash shard %s: %w", p.shard.ID(), err)
+			}
+
+			var pieceDigest []byte
+			if p.totalSize >= commp.MinPiecePayload && p.totalSize <= commp.MaxPiecePayload {
+				if pd, _, err := commpCalc.Digest(); err == nil {
+					pieceDigest = pd
+				}
+			}
+
+			p.shard.SetDigests(carMH, carMH, pieceDigest)
+			p.shard.Close()
+			if err := api.Repo.UpdateShard(gctx, p.shard); err != nil {
+				return fmt.Errorf("update shard %s: %w", p.shard.ID(), err)
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return 0, err
+	}
+
+	return len(plans), nil
 }
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.

@@ -31,6 +31,11 @@ import (
 // A CAR header with zero roots.
 var noRootsHeader []byte
 
+// NoRootsHeader returns the precomputed CAR header with zero roots.
+func NoRootsHeader() []byte {
+	return noRootsHeader
+}
+
 func init() {
 	var err error
 	noRootsHeaderWithoutLength, err := cbor.Encode(
@@ -61,6 +66,7 @@ type API struct {
 	Repo             Repo
 	NodeReader       NodeDataGetter
 	MaxNodesPerIndex int
+	MaxOpenShards    int
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
@@ -68,67 +74,102 @@ var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.CarForShardFunc = API{}.CarForShard
 var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error) {
+func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (id.ShardID, []id.ShardID, error) {
+	maxOpen := a.MaxOpenShards
+	if maxOpen <= 0 {
+		maxOpen = 4
+	}
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
+		return id.Nil, nil, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return id.Nil, nil, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
 	node, err := a.Repo.FindNodeByCIDAndSpaceDID(ctx, nodeCID, spaceDID)
 	if err != nil {
-		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+		return id.Nil, nil, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}
 	if node == nil {
-		return false, fmt.Errorf("node %s not found", nodeCID)
+		return id.Nil, nil, fmt.Errorf("node %s not found", nodeCID)
 	}
 
 	var shard *model.Shard
-	var closed bool
+	var closedIDs []id.ShardID
 
-	// Look for an open shard that has room for the node, and close any that don't
-	// have room. (There should only be at most one open shard, but there's no
-	// harm handling multiple if they exist.)
+	// best-fit among current open shards
+	bestRemaining := space.ShardSize() + 1
 	for _, s := range openShards {
 		hasRoom, err := roomInShard(s, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+			return id.Nil, nil, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
 		}
 		if hasRoom {
-			shard = s
-			break
+			remaining := space.ShardSize() - s.Size()
+			if remaining < bestRemaining {
+				bestRemaining = remaining
+				shard = s
+			}
 		}
-		s.Close()
-		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating shard: %w", err)
-		}
-		closed = true
 	}
 
 	// If no such shard exists, create a new one
 	if shard == nil {
+		for _, s := range openShards {
+			hasRoom, err := roomInShard(s, node, space)
+			if err != nil {
+				return id.Nil, nil, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+			}
+			if !hasRoom {
+				s.Close()
+				if err := a.Repo.UpdateShard(ctx, s); err != nil {
+					return id.Nil, nil, fmt.Errorf("updating shard: %w", err)
+				}
+				closedIDs = append(closedIDs, s.ID())
+			}
+		}
+
+		if len(openShards) >= maxOpen {
+			// close the fullest shard to free a slot
+			var fullest *model.Shard
+			var leastRemaining uint64 = space.ShardSize() + 1
+			for _, s := range openShards {
+				if rem := space.ShardSize() - s.Size(); rem < leastRemaining {
+					leastRemaining = rem
+					fullest = s
+				}
+			}
+			if fullest != nil {
+				fullest.Close()
+				if err := a.Repo.UpdateShard(ctx, fullest); err != nil {
+					return id.Nil, nil, fmt.Errorf("updating shard: %w", err)
+				}
+				closedIDs = append(closedIDs, fullest.ID())
+			}
+		}
+
 		shard, err = a.Repo.CreateShard(ctx, uploadID, uint64(len(noRootsHeader)))
 		if err != nil {
-			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
+			return id.Nil, nil, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
+
 		hasRoom, err := roomInShard(shard, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
+			return id.Nil, nil, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
 		}
 		if !hasRoom {
-			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
+			return id.Nil, nil, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
 		}
 	}
 
 	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())
 	if err != nil {
-		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
+		return id.Nil, nil, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
 	}
-	return closed, nil
+	return shard.ID(), closedIDs, nil
 }
 
 func roomInShard(shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
@@ -149,20 +190,20 @@ func nodeEncodingLength(node dagsmodel.Node) uint64 {
 	return pllen + vilen
 }
 
-func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
+func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) ([]id.ShardID, error) {
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return nil, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
-	var closed bool
+	var closed []id.ShardID
 
 	for _, s := range openShards {
 		s.Close()
 		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
+			return nil, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
 		}
-		closed = true
+		closed = append(closed, s.ID())
 	}
 
 	return closed, nil
