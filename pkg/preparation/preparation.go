@@ -51,12 +51,16 @@ type API struct {
 type Option func(cfg *config) error
 
 type config struct {
-	getLocalFSForPathFn func(path string) (fs.FS, error)
-	maxNodesPerIndex    int
+	getLocalFSForPathFn    func(path string) (fs.FS, error)
+	maxNodesPerIndex       int
+	shardUploadParallelism int
 }
+
+const defaultShardUploadParallelism = 6
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
+		shardUploadParallelism: defaultShardUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
 			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
 			// a single file, where opening `"."` gives you the file. `os.DirFS()`
@@ -134,10 +138,11 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	storachaAPI := storacha.API{
-		Repo:             repo,
-		Client:           client,
-		CarForShard:      shardsAPI.CarForShard,
-		IndexesForUpload: shardsAPI.IndexesForUpload,
+		Repo:                   repo,
+		Client:                 client,
+		CarForShard:            shardsAPI.CarForShard,
+		IndexesForUpload:       shardsAPI.IndexesForUpload,
+		ShardUploadParallelism: cfg.shardUploadParallelism,
 	}
 
 	uploadsAPI = uploads.API{
@@ -174,6 +179,16 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
 	return func(cfg *config) error {
 		cfg.maxNodesPerIndex = maxNodesPerIndex
+		return nil
+	}
+}
+
+func WithShardUploadParallelism(shardUploadParallelism int) Option {
+	return func(cfg *config) error {
+		if shardUploadParallelism <= 0 {
+			return fmt.Errorf("parallelism must be greater than 0")
+		}
+		cfg.shardUploadParallelism = shardUploadParallelism
 		return nil
 	}
 }
