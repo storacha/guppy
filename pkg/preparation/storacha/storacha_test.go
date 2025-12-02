@@ -71,15 +71,15 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Add enough nodes to close one shard and create a second one.
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, nil)
 		require.NoError(t, err)
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2, nil)
 		require.NoError(t, err)
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3, nil)
 		require.NoError(t, err)
 
 		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
@@ -200,7 +200,7 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, nil)
 		require.NoError(t, err)
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
