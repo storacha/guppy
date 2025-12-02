@@ -133,6 +133,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
+		RemoveShard:                shardsAPI.RemoveShard,
 	}
 
 	return API{

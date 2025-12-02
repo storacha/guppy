@@ -213,14 +213,17 @@ func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
 	}
 
 	var errs []types.ErrBadNode
+	goodCIDs := cid.NewSet()
 	for _, node := range nodes {
 		_, err := a.NodeReader.GetData(ctx, node)
 		if err != nil {
 			errs = append(errs, types.NewErrBadNode(node.CID(), err))
+		} else {
+			goodCIDs.Add(node.CID())
 		}
 	}
 
-	return types.NewErrBadNodes(errs)
+	return types.NewErrBadNodes(errs, shardID, goodCIDs)
 }
 
 func lengthVarint(size uint64) []byte {
@@ -333,4 +336,8 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 	}
 
 	return indexReaders, nil
+}
+
+func (a API) RemoveShard(ctx context.Context, shardID id.ShardID) error {
+	return a.Repo.DeleteShard(ctx, shardID)
 }

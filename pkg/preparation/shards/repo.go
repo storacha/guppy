@@ -20,4 +20,5 @@ type Repo interface {
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
+	DeleteShard(ctx context.Context, shardID id.ShardID) error
 }

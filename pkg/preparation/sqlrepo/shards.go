@@ -257,3 +257,15 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		return err
 	})
 }
+
+func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM shards
+		WHERE id = ?`,
+		shardID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete shard %s: %w", shardID, err)
+	}
+	return nil
+}
