@@ -56,11 +56,16 @@ This section provides detailed instructions for setting up the Guppy client loca
     git clone https://github.com/storacha/guppy.git
     cd guppy
     go mod download
-    go build -o guppy .
+    make build
     ```
 
 2.  **Run:**
     ```bash
     ./guppy --help
+    ```
+
+3.  **Test:**
+    ```bash
+    make test
     ```
 
