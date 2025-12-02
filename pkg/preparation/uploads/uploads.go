@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -11,6 +13,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -24,11 +27,26 @@ var (
 	tracer = otel.Tracer("preparation/uploads")
 )
 
+// maxConcurrentShardAdds caps shard upload concurrency inside the storacha worker.
+// Defaults to 1 (sequential) to preserve existing retry semantics in tests, but can
+// be overridden via GUPPY_SHARD_CONCURRENCY.
+var maxConcurrentShardAdds = shardConcurrencyFromEnv()
+
+func shardConcurrencyFromEnv() int {
+	if v := os.Getenv("GUPPY_SHARD_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type AddShardForUploadFunc func(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
@@ -39,6 +57,7 @@ type API struct {
 	ExecuteScan                ExecuteScanFunc
 	ExecuteDagScansForUpload   ExecuteDagScansForUploadFunc
 	AddShardsForUpload         AddShardsForUploadFunc
+	AddShardForUpload          AddShardForUploadFunc
 	AddIndexesForUpload        AddIndexesForUploadFunc
 	AddStorachaUploadForUpload AddStorachaUploadForUploadFunc
 	RemoveBadFSEntry           RemoveBadFSEntryFunc
@@ -271,7 +290,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 }
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.
-func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
+func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, closedShardsAvailable <-chan struct{}) error {
 	ctx, span := tracer.Start(ctx, "storacha-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -279,65 +298,107 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 	defer log.Debugf("Storacha worker for upload %s exiting", uploadID)
 	defer span.End()
 
-	return Worker(
-		ctx,
-		blobWork,
+	// Work queue of shards to add; bounded to keep memory in check.
+	shardQueue := make(chan *shardsmodel.Shard, maxConcurrentShardAdds*2)
+	queued := make(map[id.ShardID]struct{})
 
-		// doWork
-		func() error {
-			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
-			if err != nil {
-				log.Debug("Error adding shards for upload ", uploadID, ": ", err)
-				var badNodesErr types.ErrBadNodes
-				if errors.As(err, &badNodesErr) {
-					upload, err := api.Repo.GetUploadByID(ctx, uploadID)
-					if err != nil {
-						return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, err)
-					}
+	enqueueClosed := func() error {
+		shards, err := api.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
+		if err != nil {
+			return err
+		}
+		for _, s := range shards {
+			if _, seen := queued[s.ID()]; seen {
+				continue
+			}
+			queued[s.ID()] = struct{}{}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case shardQueue <- s:
+			}
+		}
+		return nil
+	}
 
-					var cids []cid.Cid
-					for _, e := range badNodesErr.Errs() {
-						cids = append(cids, e.CID())
-					}
-					log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
-					err = api.RemoveBadNodes(ctx, upload.SpaceDID(), cids)
-					if err != nil {
-						return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
-					}
+	eg, gctx := bettererrgroup.WithContext(ctx)
 
-					err = upload.Invalidate()
-					if err != nil {
-						return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
-					}
+	// Feeder: seed with any closed shards (helps resume), then react to signals.
+	eg.Go(func() error {
+		defer close(shardQueue)
+		if err := enqueueClosed(); err != nil {
+			return fmt.Errorf("initial closed shards: %w", err)
+		}
+		for range closedShardsAvailable {
+			if err := enqueueClosed(); err != nil {
+				return fmt.Errorf("enqueue closed shards: %w", err)
+			}
+		}
+		// One last pass after channel close.
+		return enqueueClosed()
+	})
 
-					err = api.Repo.UpdateUpload(ctx, upload)
-					if err != nil {
-						return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
+	// Workers: bounded concurrency.
+	for i := 0; i < maxConcurrentShardAdds; i++ {
+		eg.Go(func() error {
+			for {
+				select {
+				case <-gctx.Done():
+					return gctx.Err()
+				case shard, ok := <-shardQueue:
+					if !ok {
+						return nil
 					}
-
-					// Bubble the error to fail this attempt entirely. We're now ready for
-					// a retry.
-					return badNodesErr
+					if err := api.AddShardForUpload(gctx, shard, spaceDID); err != nil {
+						return err
+					}
 				}
-				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
+			}
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		log.Debug("Error adding shards for upload ", uploadID, ": ", err)
+		var badNodesErr types.ErrBadNodes
+		if errors.As(err, &badNodesErr) {
+			upload, gErr := api.Repo.GetUploadByID(ctx, uploadID)
+			if gErr != nil {
+				return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, gErr)
 			}
 
-			return nil
-		},
-
-		// finalize
-		func() error {
-			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
-			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
+			var cids []cid.Cid
+			for _, e := range badNodesErr.Errs() {
+				cids = append(cids, e.CID())
+			}
+			log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
+			gErr = api.RemoveBadNodes(ctx, upload.SpaceDID(), cids)
+			if gErr != nil {
+				return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, gErr)
 			}
 
-			err = api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
-			if err != nil {
-				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
+			gErr = upload.Invalidate()
+			if gErr != nil {
+				return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, gErr)
 			}
 
-			return nil
-		},
-	)
+			gErr = api.Repo.UpdateUpload(ctx, upload)
+			if gErr != nil {
+				return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, gErr)
+			}
+
+			return badNodesErr
+		}
+		return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
+	}
+
+	// Finalize upload/index once shards are added.
+	if err := api.AddIndexesForUpload(ctx, uploadID, spaceDID); err != nil {
+		return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
+	}
+
+	if err := api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID); err != nil {
+		return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
+	}
+
+	return nil
 }

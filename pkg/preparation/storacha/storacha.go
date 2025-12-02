@@ -38,10 +38,10 @@ import (
 var (
 	log    = logging.Logger("preparation/storacha")
 	tracer = otel.Tracer("preparation/storacha")
-
-	// cap concurrent shard uploads to avoid overwhelming the remote services
-	maxConcurrentShardAdds = 4
 )
+
+// MaxConcurrentShardAdds caps concurrent shard uploads to avoid overwhelming the remote services.
+const MaxConcurrentShardAdds = 4
 
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
@@ -67,6 +67,7 @@ type API struct {
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
+var _ uploads.AddShardForUploadFunc = API{}.AddShardForUpload
 var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
@@ -79,7 +80,7 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 	span.AddEvent("closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
-	sem := make(chan struct{}, maxConcurrentShardAdds)
+	sem := make(chan struct{}, MaxConcurrentShardAdds)
 	eg, gctx := errgroup.WithContext(ctx)
 
 	for _, shard := range closedShards {
@@ -95,6 +96,11 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 
 	return eg.Wait()
+}
+
+// AddShardForUpload adds a single shard to Storacha.
+func (a API) AddShardForUpload(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
+	return a.addShard(ctx, shard, spaceDID)
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
