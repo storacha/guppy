@@ -118,6 +118,8 @@ To bring your own pre-authorized identity, instantiate the client with the optio
 
 Feel free to join in. All welcome. Please [open an issue](https://github.com/storacha/guppy/issues)! PRs are also welcome, but please confirm with the maintainers before doing significant work; we'd hate your efforts to go to waste on work that's already being done, or that's going to run into an issue we're already thinking about.
 
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for technical and logistical details about how to contribute.
+
 ## License
 
 Dual-licensed under [MIT + Apache 2.0](LICENSE.md)
