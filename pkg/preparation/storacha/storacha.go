@@ -65,10 +65,13 @@ var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
 func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
+	defer span.End()
 	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
+	span.AddEvent("closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
 	for _, shard := range closedShards {
 		err := a.addShard(ctx, shard, spaceDID)
