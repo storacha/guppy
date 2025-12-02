@@ -3,17 +3,22 @@ package shards
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"io"
 	"runtime"
 	"sync"
 
+	commcid "github.com/filecoin-project/go-fil-commcid"
+	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	ipldcar "github.com/ipld/go-car"
 	"github.com/ipld/go-car/util"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/multiformats/go-varint"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
@@ -61,14 +66,17 @@ type API struct {
 	Repo             Repo
 	NodeReader       NodeDataGetter
 	MaxNodesPerIndex int
+
+	mu           sync.Mutex
+	shardHashers map[id.ShardID]*shardHashState
 }
 
-var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
-var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
-var _ storacha.CarForShardFunc = API{}.CarForShard
-var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
+var _ uploads.AddNodeToUploadShardsFunc = (*API)(nil).AddNodeToUploadShards
+var _ uploads.CloseUploadShardsFunc = (*API)(nil).CloseUploadShards
+var _ storacha.CarForShardFunc = (*API)(nil).CarForShard
+var _ storacha.IndexesForUploadFunc = (*API)(nil).IndexesForUpload
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error) {
+func (a *API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error) {
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
@@ -87,6 +95,13 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		return false, fmt.Errorf("node %s not found", nodeCID)
 	}
 
+	if data == nil && a.NodeReader != nil {
+		data, err = a.NodeReader.GetData(ctx, node)
+		if err != nil {
+			return false, fmt.Errorf("failed to load data for node %s: %w", nodeCID, err)
+		}
+	}
+
 	var shard *model.Shard
 	var closed bool
 
@@ -96,15 +111,15 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	for _, s := range openShards {
 		hasRoom, err := roomInShard(s, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), node.CID(), err)
 		}
 		if hasRoom {
 			shard = s
 			break
 		}
 		s.Close()
-		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating shard: %w", err)
+		if err := a.finalizeShardDigests(ctx, s); err != nil {
+			return false, fmt.Errorf("finalizing shard %s: %w", s.ID(), err)
 		}
 		closed = true
 	}
@@ -117,16 +132,19 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		}
 		hasRoom, err := roomInShard(shard, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
+			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", node.CID(), err)
 		}
 		if !hasRoom {
-			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
+			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", node.CID(), node.Size(), uploadID, space.ShardSize())
 		}
+		a.initShardHasher(shard)
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, nodeEncodingLength(node)-node.Size())
-	if err != nil {
-		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
+	if err := a.Repo.AddNodeToShard(ctx, shard.ID(), node.CID(), spaceDID, nodeEncodingLength(node)-node.Size()); err != nil {
+		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", node.CID(), shard.ID(), uploadID, err)
+	}
+	if err := a.feedShardHasher(shard.ID(), node, data); err != nil {
+		return false, fmt.Errorf("failed to hash node %s for shard %s: %w", node.CID(), shard.ID(), err)
 	}
 	return closed, nil
 }
@@ -149,7 +167,143 @@ func nodeEncodingLength(node dagsmodel.Node) uint64 {
 	return pllen + vilen
 }
 
-func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
+type shardHashState struct {
+	carHash   hash.Hash
+	commpCalc *commp.Calc
+}
+
+func newShardHashState() *shardHashState {
+	return &shardHashState{
+		carHash:   sha256.New(),
+		commpCalc: &commp.Calc{},
+	}
+}
+
+func (s *shardHashState) write(parts ...[]byte) error {
+	for _, p := range parts {
+		if _, err := s.carHash.Write(p); err != nil {
+			return err
+		}
+		if _, err := s.commpCalc.Write(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *shardHashState) finalize(shardSize uint64) (multihash.Multihash, cid.Cid, error) {
+	carDigest, err := multihash.Encode(s.carHash.Sum(nil), multihash.SHA2_256)
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("encoding car digest: %w", err)
+	}
+
+	pieceDigest, _, err := s.commpCalc.Digest()
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("computing piece digest: %w", err)
+	}
+
+	pieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shardSize)
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("computing piece CID: %w", err)
+	}
+
+	return carDigest, pieceCID, nil
+}
+
+func (a *API) initShardHasher(shard *model.Shard) {
+	// Only initialize when the shard is brand new (header only), otherwise we
+	// risk missing earlier bytes. Older shards will be re-hashed on close.
+	if shard.Size() != uint64(len(noRootsHeader)) || a.NodeReader == nil {
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.shardHashers == nil {
+		a.shardHashers = make(map[id.ShardID]*shardHashState)
+	}
+	if _, ok := a.shardHashers[shard.ID()]; ok {
+		return
+	}
+
+	h := newShardHashState()
+	_ = h.write(noRootsHeader)
+	a.shardHashers[shard.ID()] = h
+}
+
+func (a *API) getShardHasher(shardID id.ShardID) *shardHashState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.shardHashers[shardID]
+}
+
+func (a *API) popShardHasher(shardID id.ShardID) *shardHashState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.shardHashers == nil {
+		return nil
+	}
+	h := a.shardHashers[shardID]
+	delete(a.shardHashers, shardID)
+	return h
+}
+
+func (a *API) feedShardHasher(shardID id.ShardID, node dagsmodel.Node, data []byte) error {
+	h := a.getShardHasher(shardID)
+	if h == nil {
+		return nil
+	}
+
+	if data == nil {
+		return nil
+	}
+
+	if uint64(len(data)) != node.Size() {
+		return fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
+	}
+
+	prefix := lengthVarint(uint64(node.CID().ByteLen()) + node.Size())
+	return h.write(prefix, node.CID().Bytes(), data)
+}
+
+func (a *API) computeShardDigests(ctx context.Context, shard *model.Shard) (multihash.Multihash, cid.Cid, error) {
+	if h := a.popShardHasher(shard.ID()); h != nil {
+		return h.finalize(shard.Size())
+	}
+
+	if a.NodeReader == nil {
+		return nil, cid.Undef, fmt.Errorf("no node reader available to compute shard %s digests", shard.ID())
+	}
+
+	car, err := a.CarForShard(ctx, shard.ID())
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("rehydrating shard %s: %w", shard.ID(), err)
+	}
+
+	h := newShardHashState()
+	if _, err := io.Copy(io.MultiWriter(h.carHash, h.commpCalc), car); err != nil {
+		return nil, cid.Undef, fmt.Errorf("rehashing shard %s: %w", shard.ID(), err)
+	}
+
+	return h.finalize(shard.Size())
+}
+
+func (a *API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error {
+	carDigest, pieceCID, err := a.computeShardDigests(ctx, shard)
+	if err == nil {
+		if err := shard.SetDigests(carDigest, pieceCID); err != nil {
+			return err
+		}
+	} else if a.NodeReader != nil {
+		// If we had a node reader, propagate the error; otherwise leave digests unset.
+		return err
+	}
+
+	return a.Repo.UpdateShard(ctx, shard)
+}
+
+func (a *API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
@@ -159,7 +313,7 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 
 	for _, s := range openShards {
 		s.Close()
-		if err := a.Repo.UpdateShard(ctx, s); err != nil {
+		if err := a.finalizeShardDigests(ctx, s); err != nil {
 			return false, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
 		}
 		closed = true
@@ -174,7 +328,7 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 //     preserving ordering via a small pending map.
 //  3. Propagating errors/cancellations through the pipe while draining to let
 //     workers exit cleanly and bound memory via buffered channels.
-func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+func (a *API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	// Collect nodes up front so DB iteration isn't held during block fetch.
 	nodes := make([]dagsmodel.Node, 0, 2048)
 	if err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
@@ -420,7 +574,7 @@ func (lr *LazyReader) Read(p []byte) (n int, err error) {
 	return lr.r.Read(p)
 }
 
-func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
+func (a *API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
 	if upload.RootCID() == cid.Undef {
 		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
 	}
