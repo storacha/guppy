@@ -25,6 +25,7 @@ type Repo interface {
 	// they should appear in the shard.
 	NodesByShard(ctx context.Context, shardID id.ShardID) iter.Seq2[dagsmodel.Node, error]
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
+	DeleteShard(ctx context.Context, shardID id.ShardID) error
 }
 
 // ShardEncoder is the interface for shard implementations.

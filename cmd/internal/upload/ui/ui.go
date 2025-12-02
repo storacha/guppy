@@ -52,12 +52,14 @@ type uploadModel struct {
 	filesToDAGScan     []sqlrepo.FileInfo
 	shardedFiles       []sqlrepo.FileInfo
 	rootCID            cid.Cid
+	retry              bool
 
 	// Bubbles
 	closedShardSpinners map[id.ShardID]spinner.Model
 
 	// Output
-	err error
+	err              error
+	lastRetriableErr *types.RetriableError
 }
 
 func (m uploadModel) Init() tea.Cmd {
@@ -126,6 +128,11 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
 
 	case error:
+		var retriableError types.RetriableError
+		if m.retry && errors.As(msg, &retriableError) {
+			m.lastRetriableErr = &retriableError
+			return m, tea.Batch(executeUpload(m.ctx, m.api, m.uploads[0]))
+		}
 		m.err = msg
 		return m, tea.Quit
 
@@ -153,6 +160,10 @@ func (m uploadModel) View() string {
 	var output strings.Builder
 
 	style := lipgloss.NewStyle()
+
+	if m.retry {
+		output.WriteString(style.Bold(true).Render("Uploading with auto-retry enabled...\n\n"))
+	}
 
 	output.WriteString("Shards:\n")
 	for _, s := range m.recentAddedShards {
@@ -193,6 +204,23 @@ func (m uploadModel) View() string {
 		{color: shardedColor, value: int(m.openShardsSize)},
 		{color: scannedColor, value: int(m.dagScans)},
 	}, 80))
+
+	if m.lastRetriableErr != nil {
+		output.WriteString("\n\n")
+		output.WriteString(style.Bold(true).Foreground(lipgloss.Color("#FFA500")).Render("Last retriable error: "))
+		if listErr, ok := m.lastRetriableErr.Unwrap().(interface{ Unwrap() []error }); ok {
+			output.WriteString("Multiple errors...\n")
+			for i, e := range listErr.Unwrap() {
+				if i >= 3 {
+					output.WriteString(style.Italic(true).Render(fmt.Sprintf("...and %d more errors\n", len(listErr.Unwrap())-i)))
+					break
+				}
+				output.WriteString(e.Error() + "\n")
+			}
+		} else {
+			output.WriteString(m.lastRetriableErr.Unwrap().Error() + "\n")
+		}
+	}
 
 	output.WriteString("\n\nPress q to quit.\n")
 
@@ -266,7 +294,7 @@ func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) t
 	})
 }
 
-func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) uploadModel {
+func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload, retry bool) uploadModel {
 	if len(uploads) == 0 {
 		panic("no uploads provided to upload model")
 	}
@@ -280,6 +308,7 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		api:     api,
 		uploads: uploads,
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
+		retry:   retry,
 	}
 }
 
@@ -336,7 +365,7 @@ func renderBars(bars []bar, width int) string {
 
 }
 
-func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload) error {
+func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload, retry bool) error {
 	if len(uploads) == 0 {
 		return fmt.Errorf("no uploads provided to upload UI")
 	}
@@ -350,28 +379,32 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 			tea.WithOutput(io.Discard),
 		)
 	}
-	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads), teaOpts...).Run()
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads, retry), teaOpts...).Run()
 	if err != nil {
 		return fmt.Errorf("command failed to run upload UI: %w", err)
 	}
 	um := m.(uploadModel)
 
 	if um.err != nil {
-		var errBadNodes types.ErrBadNodes
-		if errors.As(um.err, &errBadNodes) {
+		var errRetriable types.RetriableError
+
+		if errors.As(um.err, &errRetriable) {
 			var sb strings.Builder
+			underlyingErr := errRetriable.Unwrap()
 			sb.WriteString("\nUpload failed due to out-of-date scan:\n")
-			for i, ebn := range errBadNodes.Errs() {
-				if i >= 3 {
-					sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(errBadNodes.Errs())-i))
-					break
+			if listErr, ok := underlyingErr.(interface{ Unwrap() []error }); ok {
+				for i, e := range listErr.Unwrap() {
+					if i >= 3 {
+						sb.WriteString(fmt.Sprintf("...and %d more errors\n", len(listErr.Unwrap())-i))
+						break
+					}
+					sb.WriteString(e.Error() + "\n")
 				}
-				sb.WriteString(fmt.Sprintf(" - %s: %v\n", ebn.CID(), ebn.Unwrap()))
+			} else {
+				sb.WriteString(underlyingErr.Error() + "\n")
 			}
-			sb.WriteString("\nYou can resume the upload to re-scan and continue.\n")
-
+			sb.WriteString("\nYou can retry the upload to re-scan and continue.\n")
 			fmt.Print(sb.String())
-
 			return nil
 		}
 

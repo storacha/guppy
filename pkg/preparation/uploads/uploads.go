@@ -33,6 +33,7 @@ type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spa
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
 type RemoveBadNodesFunc func(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
+type RemoveShardFunc func(ctx context.Context, shardID id.ShardID) error
 
 type API struct {
 	Repo                       Repo
@@ -43,6 +44,7 @@ type API struct {
 	AddStorachaUploadForUpload AddStorachaUploadForUploadFunc
 	RemoveBadFSEntry           RemoveBadFSEntryFunc
 	RemoveBadNodes             RemoveBadNodesFunc
+	RemoveShard                RemoveShardFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
 	// shard if necessary. It returns true if an existing open shard was closed,
@@ -216,18 +218,21 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				return nil
 			})
 
-			var badFSEntryErr types.ErrBadFSEntry
-			if errors.As(err, &badFSEntryErr) {
+			var badFSEntriesErr types.ErrBadFSEntries
+			if errors.As(err, &badFSEntriesErr) {
 				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
 				if err != nil {
 					return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
 				}
 
-				log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
-				err = api.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID())
-				if err != nil {
-					return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
+				for _, badFSEntryErr := range badFSEntriesErr.Errs() {
+					log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
+					err = api.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID())
+					if err != nil {
+						return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
+					}
 				}
+				log.Debug("Invalidating upload ", uploadID, " after removing bad FS entries")
 
 				err = upload.Invalidate()
 				if err != nil {
@@ -238,10 +243,6 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				if err != nil {
 					return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
 				}
-
-				// Bubble the error to fail this attempt entirely. We're now ready for
-				// a retry.
-				return badFSEntryErr
 			}
 
 			if err != nil {
@@ -321,6 +322,19 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 						return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
 					}
 
+					log.Debug("Removing bad shard for upload ", uploadID, ": ", badNodesErr.ShardID())
+					err = api.RemoveShard(ctx, badNodesErr.ShardID())
+					if err != nil {
+						return fmt.Errorf("removing bad shard %s for upload %s: %w", badNodesErr.ShardID(), uploadID, err)
+					}
+
+					log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
+					for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
+						_, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID)
+						if err != nil {
+							return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
+						}
+					}
 					err = upload.Invalidate()
 					if err != nil {
 						return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
@@ -330,10 +344,6 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 					if err != nil {
 						return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
 					}
-
-					// Bubble the error to fail this attempt entirely. We're now ready for
-					// a retry.
-					return badNodesErr
 				}
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}

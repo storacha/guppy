@@ -18,6 +18,10 @@ import (
 
 var uploadDbPath string
 
+var (
+	retry bool
+)
+
 var uploadCmd = &cobra.Command{
 	Use:     "upload <space>",
 	Aliases: []string{"up"},
@@ -63,7 +67,7 @@ var uploadCmd = &cobra.Command{
 			return cmdutil.NewHandledCliError(fmt.Errorf("no uploads found for space %s", spaceDID))
 		}
 
-		return ui.RunUploadUI(ctx, repo, api, uploads)
+		return ui.RunUploadUI(ctx, repo, api, uploads, retry)
 	},
 }
 
@@ -76,6 +80,7 @@ func init() {
 		filepath.Join(storachaDirPath, "preparation.db"),
 		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
 	)
+	uploadCmd.Flags().BoolVar(&retry, "retry", false, "Auto-retry failed uploads")
 }
 
 var uploadSourcesCmd = &cobra.Command{
