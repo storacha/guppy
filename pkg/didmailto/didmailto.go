@@ -16,3 +16,12 @@ func FromEmail(email string) (did.DID, error) {
 	}
 	return did.Parse("did:mailto:" + parts[1] + ":" + url.QueryEscape(parts[0]))
 }
+
+// FromInput converts either a `did:mailto:` DID or an email address to a
+// `did:mailto:` DID.
+func FromInput(input string) (did.DID, error) {
+	if strings.HasPrefix(input, "did:mailto:") {
+		return did.Parse(input)
+	}
+	return FromEmail(input)
+}

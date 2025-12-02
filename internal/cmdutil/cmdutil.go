@@ -50,7 +50,7 @@ var tracedHttpClient = &http.Client{
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Client {
+func MustGetClient(storePath string, options ...client.Option) *client.Client {
 	data, err := agentdata.ReadFromFile(storePath)
 
 	if err != nil {
@@ -74,25 +74,11 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 		clientOptions = append(clientOptions, client.WithData(data))
 	}
 
-	proofsProvided := len(proofs) > 0
-
-	
-	if !proofsProvided {
-        // Only enable saving if no proofs are provided
-        clientOptions = append(clientOptions,
-            client.WithSaveFn(func(data agentdata.AgentData) error {
-                // 1. Get the directory path from the full file path
-                dir := filepath.Dir(storePath)
-
-                // 2. Create the directory (and any parents) if it doesn't exist
-                if err := os.MkdirAll(dir, 0755); err != nil {
-                    return fmt.Errorf("failed to create config directory: %w", err)
-                }
-
-                return data.WriteToFile(storePath)
-            }),
-        )
-    }
+	clientOptions = append(clientOptions,
+		client.WithSaveFn(func(data agentdata.AgentData) error {
+			return data.WriteToFile(storePath)
+		}),
+	)
 
 	c, err := client.NewClient(
 		append(
@@ -103,10 +89,6 @@ func MustGetClient(storePath string, proofs ...delegation.Delegation) *client.Cl
 	)
 	if err != nil {
 		log.Fatalf("creating client: %s", err)
-	}
-
-	if proofsProvided {
-		c.AddProofs(proofs...)
 	}
 
 	return c

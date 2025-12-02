@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -34,6 +37,7 @@ var loginCmd = &cobra.Command{
 
 		accountDid, err := didmailto.FromEmail(email)
 		if err != nil {
+			cmd.SilenceUsage = false
 			return err
 		}
 
@@ -49,6 +53,22 @@ var loginCmd = &cobra.Command{
 		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
 		s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
 		s.Start()
+
+		// Set up signal handling to ensure spinner stops on interrupt
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigChan)
+
+		go func() {
+			sig := <-sigChan
+			s.Stop()
+			// Exit with 128 + signal number (conventional for signal termination)
+			if s, ok := sig.(syscall.Signal); ok {
+				os.Exit(128 + int(s))
+			}
+			os.Exit(1)
+		}()
+
 		claimedDels, err := result.Unwrap(<-resultChan)
 		s.Stop()
 
@@ -60,7 +80,7 @@ var loginCmd = &cobra.Command{
 			return fmt.Errorf("claiming access: %w", err)
 		}
 
-		fmt.Printf("Successfully logged in as %s!", email)
+		fmt.Printf("Successfully logged in as %s!\n", email)
 		c.AddProofs(claimedDels...)
 
 		return nil

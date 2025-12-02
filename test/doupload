@@ -1,0 +1,222 @@
+#!/bin/zsh
+
+# Performs an upload and retrieval test using the guppy client CLI.
+#
+# Usage: test/doupload.sh
+#
+# The test will:
+# 1. Create a temporary email inbox using maildrop.cc
+# 2. Create a new space
+# 3. Upload some random data to the space
+# 4. Retrieve the full data
+# 5. Retrieve a subdirectory of the data
+# 6. Reset the client and log in again
+# 7. Retrieve the full data again
+# 8. Verify that all retrieved data matches the original
+
+set -e
+set -o pipefail
+
+# Check for dependencies
+if ! command -v jq &> /dev/null; then
+		echo "jq could not be found, please install it to run this script."
+		exit 1
+fi
+if ! command -v htmlq &> /dev/null; then
+		echo "htmlq could not be found, please install it to run this script."
+		exit 1
+fi
+
+# Change to the directory of this script
+cd "$(dirname "$0")"
+
+# Teeing to /dev/fd/3 will show output on stdout while still capturing it.
+exec 3>&1
+
+
+sandbox="doupload-dir"
+
+# Function wrapper to properly invoke guppy with word splitting
+guppy() {
+	go run .. --guppy-dir ./$sandbox/storacha "$@"
+}
+
+dataDir="$sandbox/data"
+outDir1="$sandbox/out1"
+outDir2="$sandbox/out2"
+outDir3="$sandbox/out3"
+
+# Track background processes to kill on exit
+cleanup_pids=()
+
+# Cleanup function to kill background processes and their children
+cleanup() {
+	local pid=
+	for pid in "${cleanup_pids[@]}"; do
+		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+			echo "Cleaning up background process $pid and its children"
+			# Kill all child processes first
+			pkill -P "$pid" 2>/dev/null || true
+			# Then kill the parent
+			kill "$pid" 2>/dev/null || true
+			# Wait a moment, then force kill if still alive
+			sleep 0.1
+			if kill -0 "$pid" 2>/dev/null; then
+				pkill -9 -P "$pid" 2>/dev/null || true
+				kill -9 "$pid" 2>/dev/null || true
+			fi
+		fi
+	done
+}
+
+# Set up trap to cleanup on EXIT, INT, TERM
+trap cleanup EXIT INT TERM
+
+main () {
+	rm -rf "$sandbox"
+	mkdir -p "$sandbox"
+
+	mkdir -p "$dataDir/subdir"
+	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/file1"
+	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/file2"
+	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/subdir/file1"
+	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/subdir/file2"
+
+
+	# Generate a random maildrop email address
+	local random_id=$(head -c 10 < /dev/urandom | base32 | tr "[:upper:]" "[:lower:]")
+	local account="${random_id}@maildrop.cc"
+	echo "🔐 Logging in as $account"
+
+	# Log in
+	log_in "$account"
+
+	echo
+	echo "🎁 Generating new space"
+	output=$(guppy space generate | tee /dev/fd/3)
+	space=$(echo "$output" | grep 'Generated space:' | awk '{print $3}')
+
+	echo
+	echo "📜 Listing space info"
+	guppy space info "$space"
+
+	echo
+	echo "📤 Uploading data from $dataDir to space $space"
+	guppy upload source add "$space" "$dataDir"
+	output=$(guppy upload "$space" | tee /dev/fd/3)
+	rootCID=$(echo "$output" | grep 'Root CID:' | awk '{print $3}')
+
+	echo
+	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
+	guppy retrieve "$space" "$rootCID" "$outDir1"
+
+	echo
+	echo "📥 Retrieving data from only /subdir with root CID $rootCID to $outDir2"
+	guppy retrieve "$space" "$rootCID"/subdir "$outDir2"
+
+
+	echo
+	echo "🔄 Resetting client"
+	guppy reset
+	echo "🔐 Logging in as $account again"
+
+	# Log in again
+	log_in "$account"
+
+	# Remove from cleanup list once completed
+	cleanup_pids=("${cleanup_pids[@]/$login_pid}")
+
+	echo
+	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir3"
+	guppy retrieve "$space" "$rootCID" "$outDir3"
+
+	echo "↔️ Verifying retrieved data matches original"
+	diff -r "$dataDir" "$outDir1"
+	diff -r "$dataDir/subdir" "$outDir2"
+	diff -r "$dataDir" "$outDir3"
+	echo "✅ Data verified!"
+}
+
+log_in() {
+	local account="$1"
+	# Start login in background
+	guppy login "$account" >/dev/null &
+	login_pid=$!
+	cleanup_pids+=("$login_pid")
+
+	# Verify email
+	verify_email "$account"
+
+	# Wait for login to complete
+	wait $login_pid
+
+	# Remove from cleanup list once completed
+	cleanup_pids=("${cleanup_pids[@]/$login_pid}")
+}
+
+seen_message_ids=()
+
+# Function to check maildrop inbox and click verification link
+verify_email() {
+	local email="$1"
+	local inbox_name="${email%%@*}"
+
+	echo "⏳ Waiting for verification email..."
+	local max_attempts=30
+	local attempt=0
+
+	while [ $attempt -lt $max_attempts ]; do
+		# Fetch inbox from Maildrop using GraphQL API
+		local inbox_query='{"query":"query { inbox(mailbox:\"'${inbox_name}'\") { id subject } }"}'
+		local inbox_response=$(curl -s -X POST \
+			-H 'content-type: application/json' \
+			--url https://api.maildrop.cc/graphql \
+			--data "$inbox_query")
+
+		# Find the first message that we haven't seen yet
+		local message_id=""
+		local all_message_ids=($(jq -r '.data.inbox[].id // empty' <<< "$inbox_response"))
+
+		for id in "${all_message_ids[@]}"; do
+			# Check if this ID is in the seen list
+			if [[ ! " ${seen_message_ids[@]} " =~ " ${id} " ]]; then
+				message_id="$id"
+				seen_message_ids+=("$message_id")
+				break
+			fi
+		done
+
+		if [ -n "$message_id" ]; then
+			echo "📬 Found email (ID: $message_id), retrieving verification link..."
+
+			# Fetch the message content (HTML) using GraphQL
+			local message_query='{"query":"query { message(mailbox:\"'${inbox_name}'\", id:\"'${message_id}'\") { html } }"}'
+			local message_response=$(curl -s -X POST \
+				-H 'content-type: application/json' \
+				--url https://api.maildrop.cc/graphql \
+				--data "$message_query")
+
+			# Extract the HTML content from the GraphQL response and decode it
+			local message_html=$(jq -r '.data.message.html' <<< "$message_response")
+
+			# Extract all https links from the HTML
+			local verify_url=$(htmlq --attribute href a.button <<< "$message_html")
+
+			echo "✅ Submitting approval form to: $verify_url"
+			curl -sL -X POST "$verify_url" > /dev/null
+
+			echo "✓ Email verified!"
+			return 0
+		else
+			echo "⚠️ No verification link found in email, retrying..."
+		fi
+
+		attempt=$((attempt + 1))
+		sleep 2
+	done
+
+	echo "❌ Failed to receive verification email after ${max_attempts} attempts"
+	return 1
+}
+
+main

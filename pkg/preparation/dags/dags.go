@@ -50,6 +50,7 @@ var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
+	var badFsEntryErrs []types.ErrBadFSEntry
 	for {
 		ctx, span := tracer.Start(ctx, "dag-scans-batch", trace.WithAttributes(
 			attribute.String("upload.id", uploadID.String()),
@@ -72,6 +73,11 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 
 			log.Debugf("Executing dag scan %s", dagScan.FsEntryID())
 			if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
+				var errBadFSEntry types.ErrBadFSEntry
+				if errors.As(err, &errBadFSEntry) {
+					badFsEntryErrs = append(badFsEntryErrs, errBadFSEntry)
+					continue // Continue with the next dag scan
+				}
 				return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 			}
 
@@ -82,6 +88,9 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 		span.End()
 
 		if executions == 0 {
+			if len(badFsEntryErrs) > 0 {
+				return types.NewErrBadFSEntries(badFsEntryErrs)
+			}
 			return nil // No scans executed, only awaiting children handled and no pending scans left
 		}
 	}

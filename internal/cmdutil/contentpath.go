@@ -8,6 +8,15 @@ import (
 	"github.com/ipfs/go-cid"
 )
 
+// ContentPath parses a content path string and returns the CID and subpath. A
+// content path can take several forms:
+//
+//   - /ipfs/<cid>[/<subpath>]
+//   - ipfs://<cid>[/<subpath>]
+//   - <cid>[/<subpath>]
+//
+// The subpath is returned with no leading `/`. If no subpath is specified in
+// the input, an empty string is returned for it.
 func ContentPath(pathStr string) (cid.Cid, string, error) {
 	switch {
 	case strings.HasPrefix(pathStr, "/"):

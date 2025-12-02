@@ -190,6 +190,43 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
+func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) ([]dagsmodel.Node, error) {
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT
+				nodes.cid,
+				nodes.size,
+				nodes.space_did,
+				nodes.ufsdata,
+				nodes.path,
+				nodes.source_id,
+				nodes.offset
+			FROM nodes_in_shards
+			JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
+			WHERE shard_id = ?
+			ORDER BY nodes_in_shards.shard_offset ASC`,
+		shardID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err)
+	}
+	defer rows.Close()
+
+	var nodes []dagsmodel.Node
+	for rows.Next() {
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
+}
+
 func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
@@ -256,4 +293,16 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		)
 		return err
 	})
+}
+
+func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM shards
+		WHERE id = ?`,
+		shardID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete shard %s: %w", shardID, err)
+	}
+	return nil
 }

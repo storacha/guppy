@@ -1,5 +1,6 @@
 -- enable foreign key constraints
 PRAGMA foreign_keys = ON;
+
 -- enable write ahead logging
 PRAGMA journal_mode = WAL;
 
@@ -147,7 +148,7 @@ CREATE TABLE IF NOT EXISTS nodes_in_shards (
   -- Offset of the node in the shard
   shard_offset INTEGER NOT NULL,
   FOREIGN KEY (node_cid, space_did) REFERENCES nodes(cid, space_did) ON DELETE CASCADE,
-  FOREIGN KEY (shard_id) REFERENCES shards(id),
+  FOREIGN KEY (shard_id) REFERENCES shards(id) ON DELETE CASCADE,
   PRIMARY KEY (node_cid, space_did, shard_id)
 ) STRICT;
 

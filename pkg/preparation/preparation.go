@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
@@ -55,8 +56,23 @@ type config struct {
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
-		getLocalFSForPathFn: func(path string) (fs.FS, error) { return os.DirFS(path), nil },
-		maxNodesPerIndex:    defaultMaxNodesPerIndex,
+		getLocalFSForPathFn: func(path string) (fs.FS, error) {
+			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
+			// a single file, where opening `"."` gives you the file. `os.DirFS()`
+			// gets grumpy if it's pointing at a file, using `fs.Sub()` over it works
+			// just fine. So by being a little roundabout here, we can support both
+			// single files and directories transparently.
+			path, err := filepath.Rel("/", path)
+			if err != nil {
+				return nil, fmt.Errorf("getting relative path: %w", err)
+			}
+			fsys, err := fs.Sub(os.DirFS("/"), path)
+			if err != nil {
+				return nil, fmt.Errorf("getting sub fs: %w", err)
+			}
+			return fsys, nil
+		},
+		maxNodesPerIndex: defaultMaxNodesPerIndex,
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
@@ -113,6 +129,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		Repo:             repo,
 		NodeReader:       nr,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,
+		ShardEncoder:     shards.NewCAREncoder(nr),
 	}
 
 	storachaAPI := storacha.API{
@@ -133,6 +150,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
+		RemoveShard:                shardsAPI.RemoveShard,
 	}
 
 	return API{

@@ -2,8 +2,8 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime/schema"
@@ -21,7 +21,6 @@ import (
 	"github.com/storacha/go-ucanto/principal"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
-	"github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/pkg/agentdata"
@@ -38,10 +37,11 @@ var (
 )
 
 type Client struct {
-	connection     uclient.Connection
-	receiptsClient *receiptclient.Client
-	data           agentdata.AgentData
-	saveFn         func(agentdata.AgentData) error
+	connection       uclient.Connection
+	receiptsClient   *receiptclient.Client
+	data             agentdata.AgentData
+	saveFn           func(agentdata.AgentData) error
+	additionalProofs []delegation.Delegation
 }
 
 // NewClient creates a new client.
@@ -109,14 +109,22 @@ type CapabilityQuery struct {
 //
 // Additionally, this method includes relevant session proofs (ucan/attest delegations)
 // that attest to the returned authorizations.
+//
+// Returns both stored delegations (from c.data.Delegations) and additional proofs
+// (from c.additionalProofs).
 func (c *Client) Proofs(queries ...CapabilityQuery) []delegation.Delegation {
 	now := ucan.Now()
 
 	// Map to track which delegations to include (by CID string)
 	authorizations := make(map[string]delegation.Delegation)
 
+	// Combine stored delegations and additional proofs
+	allDelegations := make([]delegation.Delegation, 0, len(c.data.Delegations)+len(c.additionalProofs))
+	allDelegations = append(allDelegations, c.data.Delegations...)
+	allDelegations = append(allDelegations, c.additionalProofs...)
+
 	// First pass: collect matching authorizations (non-session-proof delegations)
-	for _, del := range c.data.Delegations {
+	for _, del := range allDelegations {
 		// Filter out expired delegations
 		if exp := del.Expiration(); exp != nil && *exp < now {
 			continue
@@ -145,7 +153,7 @@ func (c *Client) Proofs(queries ...CapabilityQuery) []delegation.Delegation {
 	}
 
 	// Second pass: collect session proofs that attest to the authorizations
-	sessionProofs := getSessionProofs(c.data.Delegations, now)
+	sessionProofs := getSessionProofs(allDelegations, now)
 
 	for authCID := range authorizations {
 		if proofsForAuth, exists := sessionProofs[authCID]; exists {
@@ -222,9 +230,11 @@ func matchesAbility(capAbility, queryAbility ucan.Ability) bool {
 }
 
 // matchesResource checks if a capability's resource matches the query resource.
-// Supports "ucan:*" wildcard.
+// A capability matches if:
+//   - The resources match exactly
+//   - The capability has "ucan:*" (matches any query resource)
 func matchesResource(capResource, queryResource ucan.Resource) bool {
-	return queryResource == "ucan:*" || queryResource == capResource
+	return capResource == "ucan:*" || queryResource == capResource
 }
 
 // isSessionProof checks if a delegation is a session proof (ucan/attest capability).
@@ -327,11 +337,23 @@ func invoke[Caveats, Out any](
 	caveats Caveats,
 	options ...delegation.Option,
 ) (invocation.IssuedInvocation, error) {
-	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
+	var err error
+	pfs := make([]delegation.Proof, 0, len(c.Proofs(CapabilityQuery{
+		Can:  capParser.Can(),
+		With: with,
+	})))
+
+	var inv invocation.IssuedInvocation
 	for _, del := range c.Proofs() {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
-	return capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+
+	inv, err = capParser.Invoke(c.Issuer(), c.Connection().ID(), with, caveats, append(options, delegation.WithProof(pfs...))...)
+	if err != nil {
+		return nil, err
+	}
+
+	return inv, nil
 }
 
 func execute[Caveats, Out any](
@@ -349,10 +371,6 @@ func execute[Caveats, Out any](
 
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
 	if err != nil {
-		httpErr := http.NewHTTPError("", 0, nil)
-		if errors.As(err, &httpErr) {
-			log.Errorf(">>> %s\n%s\n%d\n%#v\n", httpErr.Error(), httpErr.Name(), httpErr.Status(), httpErr.Headers())
-		}
 		return nil, nil, fmt.Errorf("sending invocation: %w", err)
 	}
 
@@ -389,6 +407,27 @@ func execute[Caveats, Out any](
 		errorValue, err := nodevalue.NodeValue(errorNode)
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading `%s` error output: %w", capParser.Can(), err)
+		}
+
+		// Try to extract error message if possible
+		if errorMap, ok := errorValue.(map[string]any); ok {
+			if msg, exists := errorMap["message"]; exists {
+				// Add a newline if the message contains multiple lines, for readability
+				if msgStr, ok := msg.(string); ok {
+					if strings.Contains(msgStr, "\n") {
+						msg = "\n" + msgStr
+					}
+				}
+
+				name := "unnamed"
+				if n, exists := errorMap["name"]; exists {
+					if nStr, ok := n.(string); ok {
+						name = nStr
+					}
+				}
+
+				return nil, nil, fmt.Errorf("`%s` failed with %s error: %s", capParser.Can(), name, msg)
+			}
 		}
 		return nil, nil, fmt.Errorf("`%s` failed with unexpected error: %#v", capParser.Can(), errorValue)
 	}

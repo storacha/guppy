@@ -1,32 +1,33 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
+version: 2
 
-# The lines below are called `modelines`. See `:help modeline`
-# Feel free to remove those if you don't want/need to use them.
-# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
-# vim: set ts=2 sw=2 tw=0 fo=cnqoj
-
-version: 1
-
-before:
-  hooks:
-    # You may remove this if you don't use go modules.
-    - go mod tidy
-    # you may remove this if you don't need go generate
-    - go generate ./...
+project_name: guppy
 
 builds:
-  - env:
-      - CGO_ENABLED=0
+  - id: guppy
+    main: ./
+    binary: guppy
+    ldflags:
+      # Sets the version variable in the build package to the build version prefixed with a 'v'
+      # Sets the main.date to a static date for checksum verification. See https://goreleaser.com/customization/builds/#reproducible-builds.
+      - -s -w -X github.com/storacha/guppy/pkg/build.version=v{{.Version}} -X github.com/storacha/guppy/pkg/build.Commit={{.Commit}} -X github.com/storacha/guppy/pkg/build.Date={{.CommitDate}} -X github.com/storacha/guppy/pkg/build.BuiltBy=goreleaser
     goos:
       - linux
-      - windows
       - darwin
-    main: ./cmd/main.go
-    binary: guppy
+      - windows
+    goarch:
+      - 'amd64'
+      - 'arm64'
+    # Change to a static date for checksum verification. See https://goreleaser.com/customization/builds/#reproducible-builds.
+    mod_timestamp: '{{.CommitTimestamp}}'
+    env:
+      - CGO_ENABLED=0
+
+universal_binaries:
+  - replace: true
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     # this name template makes the OS and Arch compatible with the results of `uname`.
     name_template: >-
       w3up_
@@ -38,11 +39,11 @@ archives:
     # use zip for windows archives
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
+      - goos: darwin
+        formats:
+          - zip
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+  disable: true
