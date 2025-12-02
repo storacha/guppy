@@ -30,7 +30,7 @@ type NodeReader struct {
 	repo       Repo
 	checkReads bool
 	dataCache  *lru.Cache[cid.Cid, []byte]
-	// TODO:(forrest) we may consider adding a "close" method to the `NewReader` that closes all cached files when done
+	// TODO:(forrest) we may consider adding a "close" method to the `NodeReader` that closes all cached files when done
 	fileCache  *lru.Cache[string, *cachedFile]
 	fileOpener FileOpenerFn
 }
