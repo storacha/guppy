@@ -37,6 +37,7 @@ type Shard struct {
 	uploadID id.UploadID
 	size     uint64
 	digest   multihash.Multihash
+	pieceCID cid.Cid
 	state    ShardState
 }
 
@@ -47,6 +48,7 @@ func NewShard(uploadID id.UploadID, size uint64) (*Shard, error) {
 		uploadID: uploadID,
 		size:     size,
 		digest:   multihash.Multihash{},
+		pieceCID: cid.Undef,
 		state:    ShardStateOpen,
 	}
 	if _, err := validateShard(s); err != nil {
@@ -88,6 +90,7 @@ type ShardScanner func(
 	uploadID *id.UploadID,
 	size *uint64,
 	digest *multihash.Multihash,
+	pieceCID *cid.Cid,
 	state *ShardState,
 ) error
 
@@ -98,6 +101,7 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 		&shard.uploadID,
 		&shard.size,
 		&shard.digest,
+		&shard.pieceCID,
 		&shard.state,
 	)
 	if err != nil {
@@ -112,6 +116,7 @@ type ShardWriter func(
 	uploadID id.UploadID,
 	size uint64,
 	digest multihash.Multihash,
+	pieceCID cid.Cid,
 	state ShardState,
 ) error
 
@@ -122,6 +127,7 @@ func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 		shard.uploadID,
 		shard.size,
 		shard.digest,
+		shard.pieceCID,
 		shard.state,
 	)
 }
@@ -142,9 +148,23 @@ func (s *Shard) Digest() multihash.Multihash {
 	return s.digest
 }
 
+func (s *Shard) PieceCID() cid.Cid {
+	return s.pieceCID
+}
+
 func (s *Shard) CID() cid.Cid {
 	if s.digest == nil {
 		return cid.Undef
 	}
 	return cid.NewCidV1(uint64(multicodec.Car), s.digest)
+}
+
+func (s *Shard) SetDigests(carDigest multihash.Multihash, pieceCID cid.Cid) error {
+	if carDigest != nil {
+		s.digest = carDigest
+	}
+	if pieceCID != cid.Undef {
+		s.pieceCID = pieceCID
+	}
+	return nil
 }

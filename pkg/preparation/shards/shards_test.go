@@ -53,7 +53,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1.(cidlink.Link).Cid, 1<<14, space.DID(), "some/path", source.ID(), 0)
 		require.NoError(t, err)
 
-		shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid)
+		shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, nil)
 		require.NoError(t, err)
 
 		require.False(t, shardClosed)
@@ -76,7 +76,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2.(cidlink.Link).Cid, 1<<14, space.DID(), "some/other/path", source.ID(), 0)
 		require.NoError(t, err)
 
-		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID2.(cidlink.Link).Cid)
+		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID2.(cidlink.Link).Cid, nil)
 		require.NoError(t, err)
 
 		require.False(t, shardClosed)
@@ -97,7 +97,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3.(cidlink.Link).Cid, 1<<15, space.DID(), "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
 
-		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID3.(cidlink.Link).Cid)
+		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID3.(cidlink.Link).Cid, nil)
 		require.NoError(t, err)
 
 		require.True(t, shardClosed)
@@ -158,7 +158,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1.(cidlink.Link).Cid, 120, space.DID(), "some/path", source.ID(), 0)
 		require.NoError(t, err)
 
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid)
+		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, nil)
 		require.ErrorContains(t, err, "too large to fit in new shard for upload")
 	})
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
@@ -109,7 +110,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		panic(fmt.Sprintf("failed to create node reader: %v", err))
 	}
 
-	shardsAPI := shards.API{
+	shardsAPI := &shards.API{
 		Repo:             repo,
 		NodeReader:       nr,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,

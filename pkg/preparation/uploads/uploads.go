@@ -26,7 +26,7 @@ var (
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error)
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -188,7 +188,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID())
+				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data)
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
