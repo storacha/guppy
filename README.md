@@ -1,13 +1,15 @@
 # guppy
 
-A Storacha client in golang. ⚠️ Heavily WIP. Guppy includes both a CLI command and an underlying Go library which can be used directly.
+> *Storacha's go uploader—and more!* 🐔❤️🐟
 
-**New Contributor?** Check out the [Local Development & Setup Guide](docs/LOCAL_SETUP.md) for detailed Windows/Mac/Linux instructions and troubleshooting.
+A Storacha client in golang. Guppy includes both a CLI command and an underlying Go library which can be used directly.
+
+**New Contributor?** Check out [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed instructions and troubleshooting to get up and running.
 
 ## Install
 
 ```sh
-go install github.com/storacha/guppy@main
+go install github.com/storacha/guppy
 ```
 
 ### Differences from [@storacha/cli](https://www.npmjs.com/package/@storacha/cli)
