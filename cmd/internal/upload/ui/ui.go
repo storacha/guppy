@@ -53,7 +53,7 @@ type uploadModel struct {
 	closedShardsSize uint64
 	openShardsSize   uint64
 	dagScans         uint64
-	retry              bool
+	retry            bool
 
 	// Internal tracking for totals
 	openShardsStats map[id.UploadID]uint64
@@ -159,12 +159,28 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
 
 	case error:
-		var retriableError types.RetriableError
-		if m.retry && errors.As(msg, &retriableError) {
-			m.lastRetriableErr = &retriableError
-			return m, tea.Batch(executeUpload(m.ctx, m.api, m.uploads[0]))
-		}
+
 		m.err = msg
+		return m, tea.Quit
+
+	case uploadErrMsg:
+		var retriableError types.RetriableError
+		if m.retry && errors.As(msg.err, &retriableError) {
+			m.lastRetriableErr = &retriableError
+			var upload *uploadsmodel.Upload
+			for _, u := range m.uploads {
+				if u.ID() == msg.id {
+					upload = u
+					break
+				}
+			}
+			if upload == nil {
+				m.err = fmt.Errorf("could not find upload %s to retry after retriable error", msg.id)
+				return m, tea.Quit
+			}
+			return m, tea.Batch(executeUpload(m.ctx, m.api, upload))
+		}
+		m.err = msg.err
 		return m, tea.Quit
 
 	default:
@@ -281,11 +297,16 @@ type rootCIDMsg struct {
 	cid cid.Cid
 }
 
+type uploadErrMsg struct {
+	id  id.UploadID
+	err error
+}
+
 func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmodel.Upload) tea.Cmd {
 	return func() tea.Msg {
 		rootCID, err := api.ExecuteUpload(ctx, upload)
 		if err != nil {
-			return fmt.Errorf("command failed to execute upload: %w", err)
+			return uploadErrMsg{id: upload.ID(), err: fmt.Errorf("command failed to execute upload: %w", err)}
 		}
 		return rootCIDMsg{id: upload.ID(), cid: rootCID}
 	}
@@ -369,7 +390,7 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		openShardsStats:     make(map[id.UploadID]uint64),
 		dagScanStats:        make(map[id.UploadID]uint64),
 		closedShardSpinners: make(map[id.UploadID]map[id.ShardID]spinner.Model),
-		retry:   retry,
+		retry:               retry,
 	}
 }
 

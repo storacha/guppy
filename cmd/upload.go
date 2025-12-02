@@ -17,14 +17,12 @@ import (
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-
-
 var (
-	uploadDbPath string
-	uploadProofPath string
+	uploadDbPath     string
+	uploadProofPath  string
 	uploadSourceName string
-	uploadAll bool
-	retry bool
+	uploadAll        bool
+	retry            bool
 )
 
 var uploadCmd = &cobra.Command{
