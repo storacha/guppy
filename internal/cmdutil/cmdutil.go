@@ -28,8 +28,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const defaultServiceName = "staging.up.warm.storacha.network"
-const defaultIndexerName = "staging.indexer.warm.storacha.network"
+const defaultServiceName = "up.forge.storacha.network"
+const defaultIndexerName = "indexer.forge.storacha.network"
 
 // envSigner returns a principal.Signer from the environment variable
 // GUPPY_PRIVATE_KEY, if any.
