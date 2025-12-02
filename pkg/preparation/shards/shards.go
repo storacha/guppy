@@ -137,7 +137,13 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	r, w := io.Pipe()
 	go func() {
-		err := a.ShardEncoder.Encode(ctx, a.Repo.NodesByShard(ctx, shardID), w)
+		nodes, err := a.Repo.NodesByShard(ctx, shardID)
+		if err != nil {
+			log.Debug("Error getting nodes for shard:", err)
+			w.CloseWithError(err)
+			return
+		}
+		err = a.ShardEncoder.Encode(ctx, nodes, w)
 		if err != nil {
 			log.Debug("Error encoding shard:", err)
 			w.CloseWithError(a.makeErrBadNodes(ctx, shardID))

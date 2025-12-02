@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"iter"
 
 	cbor "github.com/ipfs/go-ipld-cbor"
 	ipldcar "github.com/ipld/go-car"
@@ -50,17 +49,14 @@ func NewCAREncoder(nodeReader NodeDataGetter) *CAREncoder {
 	return &CAREncoder{nodeReader}
 }
 
-func (c *CAREncoder) Encode(ctx context.Context, nodes iter.Seq2[model.Node, error], w io.Writer) error {
+func (c *CAREncoder) Encode(ctx context.Context, nodes []model.Node, w io.Writer) error {
 	_, err := w.Write(noRootsHeader)
 	if err != nil {
 		return fmt.Errorf("writing CAR header: %w", err)
 	}
 
-	for n, err := range nodes {
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(lengthVarint(uint64(n.CID().ByteLen()) + n.Size()))
+	for _, n := range nodes {
+		_, err := w.Write(lengthVarint(uint64(n.CID().ByteLen()) + n.Size()))
 		if err != nil {
 			return fmt.Errorf("writing varint for %s: %w", n.CID(), err)
 		}

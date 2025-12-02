@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
@@ -191,9 +190,8 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
-func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) iter.Seq2[dagsmodel.Node, error] {
-	return func(yield func(dagsmodel.Node, error) bool) {
-		rows, err := r.db.QueryContext(ctx, `
+func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) ([]dagsmodel.Node, error) {
+	rows, err := r.db.QueryContext(ctx, `
 			SELECT
 				nodes.cid,
 				nodes.size,
@@ -206,30 +204,27 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) iter.Seq2[d
 			JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
 			WHERE shard_id = ?
 			ORDER BY nodes_in_shards.shard_offset ASC`,
-			shardID,
-		)
-		if err != nil {
-			yield(nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err))
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-				return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
-			})
-			if errors.Is(err, sql.ErrNoRows) {
-				return
-			}
-			if err != nil {
-				yield(nil, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err))
-				return
-			}
-			if ok := yield(node, nil); !ok {
-				return
-			}
-		}
+		shardID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err)
 	}
+	defer rows.Close()
+
+	var nodes []dagsmodel.Node
+	for rows.Next() {
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
 }
 
 func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {

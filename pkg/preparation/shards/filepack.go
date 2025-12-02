@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"iter"
 
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 )
@@ -20,11 +19,8 @@ func NewFilepackEncoder(nodeReader NodeDataGetter) *FilepackEncoder {
 	return &FilepackEncoder{nodeReader}
 }
 
-func (f *FilepackEncoder) Encode(ctx context.Context, nodes iter.Seq2[model.Node, error], w io.Writer) error {
-	for n, err := range nodes {
-		if err != nil {
-			return err
-		}
+func (f *FilepackEncoder) Encode(ctx context.Context, nodes []model.Node, w io.Writer) error {
+	for _, n := range nodes {
 		data, err := f.nodeReader.GetData(ctx, n)
 		if err != nil {
 			return fmt.Errorf("getting data for %s: %w", n.CID(), err)

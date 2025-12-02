@@ -3,7 +3,6 @@ package shards
 import (
 	"context"
 	"io"
-	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
@@ -23,7 +22,7 @@ type Repo interface {
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
 	// NodesByShard fetches all the nodes for a given shard, returned in the order
 	// they should appear in the shard.
-	NodesByShard(ctx context.Context, shardID id.ShardID) iter.Seq2[dagsmodel.Node, error]
+	NodesByShard(ctx context.Context, shardID id.ShardID) ([]dagsmodel.Node, error)
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 	DeleteShard(ctx context.Context, shardID id.ShardID) error
 }
@@ -31,7 +30,7 @@ type Repo interface {
 // ShardEncoder is the interface for shard implementations.
 type ShardEncoder interface {
 	// Encode encodes a shard from the sequence of nodes.
-	Encode(ctx context.Context, nodes iter.Seq2[dagsmodel.Node, error], w io.Writer) error
+	Encode(ctx context.Context, nodes []dagsmodel.Node, w io.Writer) error
 	// NodeEncodingLength determines the number of bytes a node will occupy when
 	// encoded in a shard.
 	NodeEncodingLength(node dagsmodel.Node) uint64
