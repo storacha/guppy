@@ -190,7 +190,7 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 		FROM directory_children
 		JOIN fs_entries ON directory_children.child_id = fs_entries.id
 		JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id
-		JOIN nodes ON dag_scans.cid = nodes.cid
+		JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did
 		WHERE directory_children.directory_id = ?`
 	rows, err := r.db.QueryContext(ctx, query, dirScan.FsEntryID())
 	if err != nil {

@@ -37,6 +37,8 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	cobra.EnableTraverseRunHooks = true
+
 	// default storacha dir: ~/.storacha/guppy
 	homedir, err := os.UserHomeDir()
 	if err != nil {
