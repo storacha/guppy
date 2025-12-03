@@ -11,6 +11,13 @@ import (
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 	"github.com/ipfs/go-cid"
 	ipldfmt "github.com/ipfs/go-ipld-format"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	tracer = otel.Tracer("dagfs")
 )
 
 // New creates a new dagFS, a [fs.FS] implementation backed by a UnixFS DAG. The
@@ -40,22 +47,28 @@ func (dfs *dagFS) Open(fullPath string) (fs.File, error) {
 			Err:  fs.ErrInvalid,
 		}
 	}
-	return dfs.open(fullPath)
+	return dfs.open(dfs.ctx, fullPath)
 }
 
-func (dfs *dagFS) open(fullPath string) (fs.File, error) {
+func (dfs *dagFS) open(ctx context.Context, fullPath string) (fs.File, error) {
+	ctx, span := tracer.Start(ctx, "open", trace.WithAttributes(
+		attribute.String("cid", dfs.rootCID.String()),
+		attribute.String("path", fullPath),
+	))
+	defer span.End()
+
 	if fullPath == "." {
 		// Open root directory
-		rootNode, err := dfs.dagService.Get(dfs.ctx, dfs.rootCID)
+		rootNode, err := dfs.dagService.Get(ctx, dfs.rootCID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get root node: %w", err)
 		}
-		return dfs.openNode(rootNode, fullPath)
+		return dfs.openNode(ctx, rootNode, fullPath)
 	} else {
 		dirPath, name := path.Split(fullPath)
 		dirPath = path.Clean(dirPath)
 
-		dirFile, err := dfs.open(dirPath)
+		dirFile, err := dfs.open(ctx, dirPath)
 		if err != nil {
 			if pe, ok := err.(*fs.PathError); ok {
 				e := *pe
@@ -73,7 +86,7 @@ func (dfs *dagFS) open(fullPath string) (fs.File, error) {
 			}
 		}
 
-		childNode, err := dir.uioDir.Find(dfs.ctx, name)
+		childNode, err := dir.uioDir.Find(ctx, name)
 		if err != nil {
 			return nil, &fs.PathError{
 				Op:   "open",
@@ -82,11 +95,17 @@ func (dfs *dagFS) open(fullPath string) (fs.File, error) {
 			}
 		}
 
-		return dfs.openNode(childNode, name)
+		return dfs.openNode(ctx, childNode, name)
 	}
 }
 
-func (dfs *dagFS) openNode(node ipldfmt.Node, name string) (fs.File, error) {
+func (dfs *dagFS) openNode(ctx context.Context, node ipldfmt.Node, name string) (fs.File, error) {
+	ctx, span := tracer.Start(ctx, "openNode", trace.WithAttributes(
+		attribute.String("cid", node.Cid().String()),
+		attribute.String("name", name),
+	))
+	defer span.End()
+
 	switch node := node.(type) {
 	case *merkledag.ProtoNode:
 		fsNode, err := unixfs.ExtractFSNode(node)
@@ -100,13 +119,13 @@ func (dfs *dagFS) openNode(node ipldfmt.Node, name string) (fs.File, error) {
 				return nil, fmt.Errorf("failed to create directory from root node: %w", err)
 			}
 			return &dir{
-				ctx:        dfs.ctx,
+				ctx:        ctx,
 				uioDir:     uioDir,
 				name:       name,
 				dagService: dfs.dagService,
 			}, nil
 		} else {
-			dagReader, err := uio.NewDagReader(dfs.ctx, node, dfs.dagService)
+			dagReader, err := uio.NewDagReader(ctx, node, dfs.dagService)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create file reader: %w", err)
 			}
@@ -118,7 +137,7 @@ func (dfs *dagFS) openNode(node ipldfmt.Node, name string) (fs.File, error) {
 		}
 
 	case *merkledag.RawNode:
-		dagReader, err := uio.NewDagReader(dfs.ctx, node, dfs.dagService)
+		dagReader, err := uio.NewDagReader(ctx, node, dfs.dagService)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file reader: %w", err)
 		}
