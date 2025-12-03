@@ -18,6 +18,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/mattn/go-isatty"
 
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -220,7 +221,7 @@ func (m uploadModel) View() string {
 		uid := u.ID()
 		if shards, ok := m.recentAddedShards[uid]; ok {
 			for _, s := range shards {
-				output.WriteString(renderListItem(style.Foreground(addedShardColor), s.Digest().B58String(), s.Size()))
+				output.WriteString(renderListItem(style.Foreground(addedShardColor), digestutil.Format(s.Digest()), s.Size()))
 			}
 		}
 		if shards, ok := m.recentClosedShards[uid]; ok {

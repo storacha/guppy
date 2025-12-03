@@ -32,6 +32,7 @@ import (
 	spaceindexcap "github.com/storacha/go-libstoracha/capabilities/space/index"
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
@@ -490,7 +491,7 @@ func newIndexAndShardsBlockstore(indexCID cid.Cid, shards ctestutil.BlobMap) (*i
 
 	indexDigest := indexCID.Hash()
 	if !shards.Has(indexDigest) {
-		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCID, indexDigest.B58String())
+		return nil, fmt.Errorf("index CID %s (digest %s) not found in provided shards", indexCID, digestutil.Format(indexDigest))
 	}
 
 	index, err := blobindex.Extract(bytes.NewReader(shards.Get(indexDigest)))
@@ -509,7 +510,7 @@ func (c *indexAndShardsBlockstore) Get(ctx context.Context, key cid.Cid) (blocks
 		for sliceDigest, position := range sliceMap.Iterator() {
 			if bytes.Equal(key.Hash(), sliceDigest) {
 				if !c.shards.Has(shardDigest) {
-					return nil, fmt.Errorf("shard with digest %s not found in provided shards", shardDigest.B58String())
+					return nil, fmt.Errorf("shard with digest %s not found in provided shards", digestutil.Format(shardDigest))
 				}
 				shardBlob := c.shards.Get(shardDigest)
 				return blocks.NewBlockWithCid(shardBlob[position.Offset:position.Offset+position.Length], key)
