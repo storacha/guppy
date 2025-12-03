@@ -17,6 +17,7 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/dagfs"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,7 +35,7 @@ var retrieveCmd = &cobra.Command{
 		80),
 	Args: cobra.ExactArgs(3),
 
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
 		repo, err := makeRepo(ctx)
 		if err != nil {
@@ -86,7 +87,13 @@ var retrieveCmd = &cobra.Command{
 			attribute.String("retrieval.subpath", subpath),
 			attribute.String("retrieval.output_path", outputPath),
 		))
-		defer span.End() // In case of early return
+		defer span.End()
+		defer func() {
+			if retErr != nil {
+				span.RecordError(retErr)
+				span.SetStatus(codes.Error, "")
+			}
+		}()
 
 		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
 		ds := dagservice.NewDAGService(locator, c, space)
