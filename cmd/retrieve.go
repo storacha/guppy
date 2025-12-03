@@ -16,6 +16,9 @@ import (
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/dagfs"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -32,7 +35,7 @@ var retrieveCmd = &cobra.Command{
 		80),
 	Args: cobra.ExactArgs(3),
 
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
 		repo, err := makeRepo(ctx)
 		if err != nil {
@@ -78,6 +81,20 @@ var retrieveCmd = &cobra.Command{
 			return fmt.Errorf("delegating %s: %w", contentcap.RetrieveAbility, err)
 		}
 
+		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
+			attribute.String("retrieval.space", space.DID().String()),
+			attribute.String("retrieval.cid", pathCID.String()),
+			attribute.String("retrieval.subpath", subpath),
+			attribute.String("retrieval.output_path", outputPath),
+		))
+		defer span.End()
+		defer func() {
+			if retErr != nil {
+				span.RecordError(retErr)
+				span.SetStatus(codes.Error, "")
+			}
+		}()
+
 		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
 		ds := dagservice.NewDAGService(locator, c, space)
 		retrievedFs := dagfs.New(ctx, ds, pathCID)
@@ -91,6 +108,9 @@ var retrieveCmd = &cobra.Command{
 		// If it's a directory, copy the whole directory. If it's a file, copy the
 		// file.
 		if _, ok := file.(fs.ReadDirFile); ok {
+			span.SetAttributes(
+				attribute.Bool("retrieval.directory", true),
+			)
 			pathedFs, err := fs.Sub(retrievedFs, subpath)
 			if err != nil {
 				return fmt.Errorf("sub filesystem: %w", err)
@@ -101,6 +121,9 @@ var retrieveCmd = &cobra.Command{
 				return fmt.Errorf("copying retrieved filesystem: %w", err)
 			}
 		} else {
+			span.SetAttributes(
+				attribute.Bool("retrieval.directory", false),
+			)
 			outFile, err := os.Create(outputPath)
 			if err != nil {
 				return fmt.Errorf("creating output file: %w", err)
