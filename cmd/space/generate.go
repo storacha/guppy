@@ -65,18 +65,22 @@ var generateCmd = &cobra.Command{
 				return fmt.Errorf("parsing `--provision-to` account %q: %w", generateFlags.provisionTo, err)
 			}
 			if !slices.Contains(accounts, provisionAccount) {
-				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.provisionTo, generateFlags.provisionTo)
+				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n", generateFlags.provisionTo, generateFlags.provisionTo)
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			case len(accounts) == 1:
 				provisionAccount = accounts[0]
 			default:
-				fmt.Printf("Multiple accounts are logged in. Specify an account with `--provision-to`.")
+				var acctsString string
+				for _, acct := range accounts {
+					acctsString += fmt.Sprintf("- %s\n", acct)
+				}
+				fmt.Printf("Multiple accounts are logged in.\n%s\nSpecify an account with `--provision-to`.\n", acctsString)
 				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
@@ -89,18 +93,22 @@ var generateCmd = &cobra.Command{
 				return fmt.Errorf("parsing `--grant-to` account %q: %w", generateFlags.grantTo, err)
 			}
 			if !slices.Contains(accounts, grantAccount) {
-				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.", generateFlags.grantTo, generateFlags.grantTo)
+				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n", generateFlags.grantTo, generateFlags.grantTo)
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.")
+				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			case len(accounts) == 1:
 				grantAccount = accounts[0]
 			default:
-				fmt.Printf("Multiple accounts are logged in. Specify an account with `--grant-to`.")
+				var acctsString string
+				for _, acct := range accounts {
+					acctsString += fmt.Sprintf("- %s\n", acct)
+				}
+				fmt.Printf("Multiple accounts are logged in.\n%s\nSpecify an account with `--grant-to`.\n", acctsString)
 				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
@@ -112,13 +120,13 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("no account found to grant space access to")
 		}
 
-		fmt.Printf("Provisioning %s to %s...\n", space.DID(), provisionAccount)
+		fmt.Printf("Provisioning %s to %s...\n\n", space.DID(), provisionAccount)
 		_, err = c.ProviderAdd(cmd.Context(), provisionAccount, c.Connection().ID().DID(), space.DID())
 		if err != nil {
 			return fmt.Errorf("provisioning space: %w", err)
 		}
 
-		fmt.Printf("Granting access on %s to %s...\n", space.DID(), grantAccount)
+		fmt.Printf("Granting access on %s to %s...\n\n", space.DID(), grantAccount)
 
 		// Build the capabilities to grant
 		capabilities := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaceAccess))
@@ -135,7 +143,7 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("granting capabilities: %w", err)
 		}
 
-		fmt.Printf("Generated space: %s\n", space.DID())
+		fmt.Printf("Generated space: %s\n\n", space.DID())
 
 		return nil
 	},
