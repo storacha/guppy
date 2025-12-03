@@ -258,4 +258,81 @@ func TestAccessDelegate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "access/delegate")
 	})
+
+	t.Run("prunes nested proofs from delegations", func(t *testing.T) {
+		root := testutil.Must(signer.Generate())(t)
+		middle := testutil.Must(signer.Generate())(t)
+		leaf := testutil.Must(signer.Generate())(t)
+
+		// Root -> Middle
+		rootToMiddle := testutil.Must(delegation.Delegate(
+			root,
+			middle,
+			[]ucan.Capability[ucan.NoCaveats]{
+				ucan.NewCapability("store/add", root.DID().String(), ucan.NoCaveats{}),
+			},
+			delegation.WithNoExpiration(),
+		))(t)
+
+		// Middle -> Leaf (includes Root->Middle as proof)
+		// This creates a "heavy" delegation because it carries the history
+		middleToLeaf := testutil.Must(delegation.Delegate(
+			middle,
+			leaf,
+			[]ucan.Capability[ucan.NoCaveats]{
+				ucan.NewCapability("store/add", root.DID().String(), ucan.NoCaveats{}),
+			},
+			delegation.WithNoExpiration(),
+			delegation.WithProof(delegation.FromDelegation(rootToMiddle)),
+		))(t)
+
+		var receivedProofLinks []ucan.Link
+		var c *client.Client
+
+		connection := ctestutil.NewTestServerConnection(
+			server.WithServiceMethod(
+				access.DelegateAbility,
+				server.Provide(
+					access.Delegate,
+					func(
+						ctx context.Context,
+						cap ucan.Capability[access.DelegateCaveats],
+						inv invocation.Invocation,
+						context server.InvocationContext,
+					) (result.Result[access.DelegateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+						receivedProofLinks = inv.Proofs()
+						return result.Ok[access.DelegateOk, failure.IPLDBuilderFailure](access.DelegateOk{}), nil, nil
+					},
+				),
+			),
+		)
+
+		c = testutil.Must(client.NewClient(
+			client.WithConnection(connection),
+		))(t)
+
+		// Authorize client to call access/delegate
+		accessDelegateProof := testutil.Must(delegation.Delegate(
+			root,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{
+				ucan.NewCapability("access/delegate", root.DID().String(), ucan.NoCaveats{}),
+			},
+			delegation.WithNoExpiration(),
+		))(t)
+		require.NoError(t, c.AddProofs(accessDelegateProof))
+
+		// Action: Call AccessDelegate with the "heavy" delegation
+		_, err := c.AccessDelegate(testContext(t), root.DID(), middleToLeaf)
+		require.NoError(t, err)
+
+		// Verification: Ensure the leaf was sent
+		var foundLeafProof delegation.Proof
+		for _, pl := range receivedProofLinks {
+			if pl.String() == middleToLeaf.Link().String() {
+				foundLeafProof = delegation.FromDelegation(middleToLeaf)
+			}
+		}
+		require.NotNil(t, foundLeafProof, "expected leaf proof link to be sent")
+	})
 }
