@@ -36,6 +36,12 @@ var uploadCmd = &cobra.Command{
 		80),
 	Args: cobra.MinimumNArgs(1),
 
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if uploadDbPath == "" {
+			uploadDbPath = filepath.Join(guppyDirPath, "preparation.db")
+		}
+	},
+
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		space := args[0]
@@ -119,8 +125,8 @@ func init() {
 	uploadCmd.PersistentFlags().StringVar(
 		&uploadDbPath,
 		"db",
-		filepath.Join(guppyDirPath, "preparation.db"),
-		"Path to the preparation database file (default: <storachaDir>/preparation.db)",
+		"",
+		"Path to the preparation database file (default: <guppyDir>/preparation.db)",
 	)
 	uploadCmd.Flags().StringVar(&uploadProofPath, "proof", "", "Path to a UCAN proof file")
 	uploadCmd.Flags().BoolVar(&uploadAll, "all", false, "Upload all sources (even if arguments are provided)")
