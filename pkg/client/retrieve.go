@@ -10,6 +10,7 @@ import (
 	mh "github.com/multiformats/go-multihash"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/failure"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
@@ -121,7 +122,7 @@ func (c *Client) Retrieve(ctx context.Context, space did.DID, location locator.L
 	}
 
 	if !bytes.Equal(expectedHash, dataDigest) {
-		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", expectedHash.B58String(), dataDigest.B58String())
+		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedHash), digestutil.Format(dataDigest))
 	}
 
 	return data, nil

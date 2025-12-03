@@ -10,6 +10,7 @@ import (
 
 	"github.com/multiformats/go-multihash"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/core/result"
@@ -77,7 +78,7 @@ func NewRetrievalClient(t *testing.T, service principal.Signer, testData []byte,
 						urlHashStr := urlPath[6:] // Remove "/blob/" prefix
 
 						// Parse the URL hash
-						urlHash, err := multihash.FromB58String(urlHashStr)
+						urlHash, err := digestutil.Parse(urlHashStr)
 						if err != nil {
 							return nil, nil, serverretrieval.Response{Status: http.StatusBadRequest}, fmt.Errorf("parsing URL hash: %w", err)
 						}

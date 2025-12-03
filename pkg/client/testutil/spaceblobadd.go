@@ -21,6 +21,7 @@ import (
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/piece/digest"
 	"github.com/storacha/go-libstoracha/piece/piece"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -82,7 +83,7 @@ func executeAllocate(
 		return nil, fmt.Errorf("expected allocate capability, got %T", cap)
 	}
 
-	putBlobURL, err := url.Parse(storageURLPrefix + allocateMatch.Value().Nb().Blob.Digest.B58String())
+	putBlobURL, err := url.Parse(storageURLPrefix + digestutil.Format(allocateMatch.Value().Nb().Blob.Digest))
 	if err != nil {
 		return nil, fmt.Errorf("parsing put blob URL: %w", err)
 	}
@@ -573,7 +574,7 @@ func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, fmt.Errorf("unexpected PUT URL: %s", req.URL)
 	}
 	digestString := url[len(storageURLPrefix):]
-	digest, err := multihash.FromB58String(digestString)
+	digest, err := digestutil.Parse(digestString)
 	if err != nil {
 		return nil, fmt.Errorf("decoding multihash: %w", err)
 	}

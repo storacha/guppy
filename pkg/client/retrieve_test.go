@@ -9,6 +9,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
@@ -36,7 +37,7 @@ func TestRetrieve(t *testing.T) {
 		httpClient := testutil.NewRetrievalClient(t, storageProvider, testData)
 
 		// Use URL with hash in path
-		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", dataHash.B58String()))
+		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", digestutil.Format(dataHash)))
 		require.NoError(t, err)
 
 		// Create location commitment
@@ -99,7 +100,7 @@ func TestRetrieve(t *testing.T) {
 		httpClient := testutil.NewRetrievalClient(t, storageProvider, wrongData, testutil.WithoutHashValidation())
 
 		// Use URL with correct hash
-		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", correctHash.B58String()))
+		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", digestutil.Format(correctHash)))
 		require.NoError(t, err)
 
 		// Create location commitment with correct hash
