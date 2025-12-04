@@ -11,7 +11,9 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/core/result"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -41,7 +43,12 @@ var loginCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient(storePath)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %v", err)
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.AgentDataFilePath())
 
 		authOk, err := c.RequestAccess(cmd.Context(), accountDid.String())
 		if err != nil {
@@ -81,12 +88,6 @@ var loginCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Successfully logged in as %s!\n", email)
-		c.AddProofs(claimedDels...)
-
-		return nil
+		return c.AddProofs(claimedDels...)
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(loginCmd)
 }

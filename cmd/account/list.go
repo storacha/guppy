@@ -6,7 +6,9 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var listFlags struct {
@@ -21,7 +23,12 @@ var listCmd = &cobra.Command{
 		"Lists all Storacha accounts currently logged in.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %v", err)
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.AgentDataFilePath())
 
 		accounts := c.Accounts()
 
@@ -51,5 +58,4 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
-	AccountCmd.AddCommand(listCmd)
 }

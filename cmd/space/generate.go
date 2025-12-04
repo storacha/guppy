@@ -12,8 +12,10 @@ import (
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -51,7 +53,12 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("generating signer for space: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %v", err)
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.AgentDataFilePath())
 		accounts := c.Accounts()
 
 		var provisionAccount did.DID
@@ -150,7 +157,6 @@ var generateCmd = &cobra.Command{
 }
 
 func init() {
-	SpaceCmd.AddCommand(generateCmd)
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
 }
@@ -177,7 +183,9 @@ func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, 
 		return nil, fmt.Errorf("creating delegation: %w", err)
 	}
 
-	c.AddProofs(delToStore, delToKeep)
+	if err := c.AddProofs(delToStore, delToKeep); err != nil {
+		return nil, fmt.Errorf("adding delegation proofs: %w", err)
+	}
 
 	// Store the delegation via access/delegate
 	_, err = c.AccessDelegate(ctx, spaceSigner.DID(), delToStore)
