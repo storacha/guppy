@@ -36,8 +36,8 @@ var uploadCmd = &cobra.Command{
 	Args: cobra.MinimumNArgs(1),
 
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if uploadDbPath == "" {
-			uploadDbPath = filepath.Join(guppyDirPath, "preparation.db")
+		if uploadFlags.dbPath == "" {
+			uploadFlags.dbPath = filepath.Join(guppyDirPath, "preparation.db")
 		}
 	},
 
