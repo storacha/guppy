@@ -49,6 +49,8 @@ func NewNodeReader(repo Repo, fileOpener FileOpenerFn, checkReads bool) (*NodeRe
 	}
 	fileCache, err := lru.NewWithEvict[string, *cachedFile](FileHandleCacheSize, func(name string, cf *cachedFile) {
 		if cf != nil && cf.file != nil {
+			cf.mu.Lock()
+			defer cf.mu.Unlock()
 			if err := cf.file.Close(); err != nil {
 				log.Errorw("error closing cached file", "name", name, "err", err)
 			}
