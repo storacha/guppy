@@ -78,7 +78,7 @@ var infoCmd = &cobra.Command{
 			if len(result.Deals) > 0 {
 				fmt.Println("\nDeals:")
 				for _, deal := range result.Deals {
-					fmt.Printf("  - Provider: %d\n", deal.Provider)
+					fmt.Printf("  - Provider: %s\n", deal.Provider)
 					fmt.Printf("    Deal ID: %d\n", deal.Aux.DataSource.DealID)
 				}
 			} else {
