@@ -481,11 +481,13 @@ func TestCarShardCIDs(t *testing.T) {
 
 	totalData := testutil.RandomBytes(t, 1<<15) // 32 KiB
 	expectedDigest, err := multihash.Sum(totalData, multihash.SHA2_256, -1)
+	require.NoError(t, err)
 	calc := &commp.Calc{}
 	calc.Write(totalData)
 	commP, _, err := calc.Digest()
 	require.NoError(t, err)
 	expectedPieceCID, err := commcid.DataCommitmentToPieceCidv2(commP, uint64(len(totalData)))
+	require.NoError(t, err)
 
 	// no shards yet
 	openShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)

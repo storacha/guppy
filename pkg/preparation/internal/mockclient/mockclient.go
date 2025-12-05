@@ -84,7 +84,7 @@ func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space 
 	location := testutil.RandomLocationDelegation(m.T)
 
 	digest := cfg.PrecomputedDigest()
-	if digest == nil || len(digest) == 0 {
+	if len(digest) == 0 {
 		digest, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
 		require.NoError(m.T, err, "summing digest for SpaceBlobAdd")
 	}

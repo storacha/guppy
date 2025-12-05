@@ -312,6 +312,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 
 		data1 := append([]byte("CAR OF SHARD 1"), padding...)
 		shard1Digest, err := multihash.Sum(data1, multihash.SHA2_256, -1)
+		require.NoError(t, err)
 		commp := &commp.Calc{}
 		commp.Write(data1)
 		piece1CID, err := commcid.DataCommitmentToPieceCidv2(commp.Sum(nil), uint64(len(data1)))
@@ -327,6 +328,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 
 		data2 := append([]byte("CAR OF SHARD 2"), padding...)
 		shard2Digest, err := multihash.Sum(data2, multihash.SHA2_256, -1)
+		require.NoError(t, err)
 		commp.Write(data2)
 		piece2CID, err := commcid.DataCommitmentToPieceCidv2(commp.Sum(nil), uint64(len(data2)))
 		require.NoError(t, err)
