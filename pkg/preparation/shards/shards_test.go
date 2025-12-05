@@ -203,7 +203,7 @@ func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byt
 	return data, nil
 }
 
-func TestCarForShard(t *testing.T) {
+func TestReaderForShard(t *testing.T) {
 	t.Run("returns a CAR reader for the shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)

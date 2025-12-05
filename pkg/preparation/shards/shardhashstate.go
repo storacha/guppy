@@ -67,10 +67,12 @@ func (s *shardHashState) marshal() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling digest hash state: %w", err)
 	}
+	s.digestHash.Reset()
 	pieceCIDState, err := s.commpCalc.MarshalBinary()
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling piece CID state: %w", err)
 	}
+	s.commpCalc.Reset()
 	return digestState, pieceCIDState, nil
 }
 
