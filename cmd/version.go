@@ -19,7 +19,3 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("built by: %s\n", build.BuiltBy)
 	},
 }
-
-func init() {
-	rootCmd.AddCommand(versionCmd)
-}

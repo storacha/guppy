@@ -12,13 +12,16 @@ import (
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
-	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client/dagservice"
-	"github.com/storacha/guppy/pkg/client/locator"
-	"github.com/storacha/guppy/pkg/dagfs"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/client/dagservice"
+	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/dagfs"
+	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -37,13 +40,19 @@ var retrieveCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
-		repo, err := makeRepo(ctx)
+
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.PreparationDatabaseFilePath())
 		if err != nil {
 			return err
 		}
 		defer repo.Close()
 
-		c := cmdutil.MustGetClient(storePath)
+		c := cmdutil.MustGetClient(cfg.Repo.AgentDataFilePath())
 		space, err := did.Parse(args[0])
 		if err != nil {
 			cmd.SilenceUsage = false
@@ -138,8 +147,4 @@ var retrieveCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(retrieveCmd)
 }

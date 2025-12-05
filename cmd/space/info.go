@@ -7,7 +7,9 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var infoFlags struct {
@@ -32,7 +34,12 @@ var infoCmd = &cobra.Command{
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %v", err)
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.AgentDataFilePath())
 
 		result, err := c.SpaceInfo(cmd.Context(), spaceDID)
 		if err != nil {
@@ -63,5 +70,4 @@ var infoCmd = &cobra.Command{
 
 func init() {
 	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
-	SpaceCmd.AddCommand(infoCmd)
 }

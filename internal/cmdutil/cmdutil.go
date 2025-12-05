@@ -20,12 +20,13 @@ import (
 	"github.com/storacha/go-ucanto/transport/car"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
+	indexclient "github.com/storacha/indexing-service/pkg/client"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/storacha/guppy/pkg/agentdata"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
-	indexclient "github.com/storacha/indexing-service/pkg/client"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const defaultServiceName = "up.forge.storacha.network"
@@ -49,7 +50,7 @@ var tracedHttpClient = &http.Client{
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. If proofs are provided, they will be added to the client, but the
 // client will not save changes to disk to avoid storing them.
-func MustGetClient(storePath string, options ...client.Option) *client.Client {
+func MustGetClient(storePath string) *client.Client {
 	data, err := agentdata.ReadFromFile(storePath)
 
 	if err != nil {

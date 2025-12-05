@@ -5,13 +5,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
+	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/cmd/account"
+	"github.com/storacha/guppy/cmd/space"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var (
@@ -19,17 +26,18 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
-var guppyDirPath string
-var storePath string
-
 var rootCmd = &cobra.Command{
 	Use:   "guppy",
 	Short: "Interact with the Storacha Network",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
 
-		storePath = filepath.Join(guppyDirPath, "store.json")
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		return os.MkdirAll(cfg.Repo.DataDir, os.ModePerm)
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
@@ -37,20 +45,66 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.EnableTraverseRunHooks = true
+	// Register flags/commands before Cobra parses args so subcommands are available.
+	initFlags()
+	cobra.OnInitialize(initConfig)
+}
 
-	// default storacha dir: ~/.storacha/guppy
-	homedir, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Errorf("failed to get user home directory: %w", err))
-	}
+var cfgFile string
+var defaultConfigFilePath = filepath.Join("guppy", "config.toml")
 
-	rootCmd.PersistentFlags().StringVar(
-		&guppyDirPath,
-		"guppy-dir",
-		filepath.Join(homedir, ".storacha/guppy"),
+func initFlags() {
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
+		"Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+defaultConfigFilePath)
+
+	rootCmd.PersistentFlags().String("data-dir", filepath.Join(lo.Must(os.UserHomeDir()), ".storacha/guppy"),
 		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
+	// bind flag to config
+	cobra.CheckErr(viper.BindPFlag("repo.data_dir", rootCmd.PersistentFlags().Lookup("data-dir")))
+
+	rootCmd.PersistentFlags().String("key-file", "", "Path to a PEM file containing ed25519 private key")
+	// bind flag to config
+	cobra.CheckErr(viper.BindPFlag("identity.key_file", rootCmd.PersistentFlags().Lookup("key-file")))
+	// completions
+	cobra.CheckErr(rootCmd.MarkPersistentFlagFilename("key-file", "pem"))
+
+	rootCmd.AddCommand(
+		account.Cmd,
+		loginCmd,
+		lsCmd,
+		resetCmd,
+		retrieveCmd,
+		space.Cmd,
+		uploadCmd,
+		versionCmd,
+		whoamiCmd,
+	)
+}
+
+func initConfig() {
+	viper.AutomaticEnv()
+	// the two options below will cause keys bound to viper, e.g. identity.key_file to be searched for as
+	// GUPPY_IDENTITY_KEY_FILE
+	viper.SetEnvPrefix("GUPPY")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// if no flag was provided look in $HOME/.config/guppy/config.toml
+	if cfgFile == "" {
+		if configDir, err := os.UserConfigDir(); err == nil {
+			defaultCfgFile := filepath.Join(configDir, defaultConfigFilePath)
+			if inf, err := os.Stat(defaultCfgFile); err == nil && !inf.IsDir() {
+				log.Infof("loading config automatically from: %s", defaultCfgFile)
+				cfgFile = defaultCfgFile
+			}
+		}
+	}
+
+	// a flag was provided, or we found a config file in the default location
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+		cobra.CheckErr(viper.ReadInConfig())
+	}
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.
