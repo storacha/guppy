@@ -1,0 +1,20 @@
+# Schema for the consumer capabilities
+
+# Caveats for the consumer/has capability
+type HasCaveats struct {
+  consumer String
+}
+
+type HasOk struct {
+  has Bool
+}
+
+# Caveats for the consumer/get capability
+type GetCaveats struct {
+  consumer String
+}
+
+type GetOk struct {
+  consumer String
+  provider String
+}
