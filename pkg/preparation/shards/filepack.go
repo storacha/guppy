@@ -40,9 +40,11 @@ func (FilepackEncoder) NodeEncodingLength(node model.Node) uint64 {
 }
 
 func (f *FilepackEncoder) HeaderDigestState() []byte {
+	// Filepack has no header to hash.
 	return nil
 }
 
 func (f *FilepackEncoder) HeaderPieceCIDState() []byte {
 	return nil
+	// Filepack has no header to hash.
 }
