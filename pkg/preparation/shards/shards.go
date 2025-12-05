@@ -412,18 +412,18 @@ func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
 		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
-	var errs []types.ErrBadNode
+	var errs []types.BadNodeError
 	goodCIDs := cid.NewSet()
 	for _, node := range nodes {
 		_, err := a.NodeReader.GetData(ctx, node)
 		if err != nil {
-			errs = append(errs, types.NewErrBadNode(node.CID(), err))
+			errs = append(errs, types.NewBadNodeError(node.CID(), err))
 		} else {
 			goodCIDs.Add(node.CID())
 		}
 	}
 
-	return types.NewErrBadNodes(errs, shardID, goodCIDs)
+	return types.NewBadNodesError(errs, shardID, goodCIDs)
 }
 
 func lengthVarint(size uint64) []byte {

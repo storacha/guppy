@@ -218,7 +218,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				return nil
 			})
 
-			var badFSEntriesErr types.ErrBadFSEntries
+			var badFSEntriesErr types.BadFSEntriesError
 			if errors.As(err, &badFSEntriesErr) {
 				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
 				if err != nil {
@@ -305,7 +305,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				log.Debug("Error adding shards for upload ", uploadID, ": ", err)
-				var badNodesErr types.ErrBadNodes
+				var badNodesErr types.BadNodesError
 				if errors.As(err, &badNodesErr) {
 					upload, err := api.Repo.GetUploadByID(ctx, uploadID)
 					if err != nil {

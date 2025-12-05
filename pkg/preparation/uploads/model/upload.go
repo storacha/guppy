@@ -78,19 +78,19 @@ func (u *Upload) Invalidate() error {
 
 func validateUpload(upload *Upload) error {
 	if upload.id == id.Nil {
-		return types.ErrEmpty{Field: "upload ID"}
+		return types.EmptyError{Field: "upload ID"}
 	}
 	if upload.spaceDID.String() == "" {
-		return types.ErrEmpty{Field: "space DID"}
+		return types.EmptyError{Field: "space DID"}
 	}
 	if upload.sourceID == id.Nil {
-		return types.ErrEmpty{Field: "source ID"}
+		return types.EmptyError{Field: "source ID"}
 	}
 	if upload.createdAt.IsZero() {
-		return types.ErrEmpty{Field: "created at"}
+		return types.EmptyError{Field: "created at"}
 	}
 	if upload.updatedAt.IsZero() {
-		return types.ErrEmpty{Field: "updated at"}
+		return types.EmptyError{Field: "updated at"}
 	}
 	return nil
 }

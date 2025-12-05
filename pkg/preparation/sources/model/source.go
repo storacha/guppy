@@ -67,10 +67,10 @@ func (s *Source) ConnectionParams() ConnectionParams {
 
 func validateSource(s *Source) (*Source, error) {
 	if s.id == id.Nil {
-		return nil, types.ErrEmpty{Field: "id"}
+		return nil, types.EmptyError{Field: "id"}
 	}
 	if s.name == "" {
-		return nil, types.ErrEmpty{Field: "name"}
+		return nil, types.EmptyError{Field: "name"}
 	}
 	return s, nil
 }

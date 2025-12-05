@@ -66,7 +66,7 @@ func NewShard(uploadID id.UploadID, size uint64, digestState []byte, pieceCIDSta
 // validation conditions -- should not be callable externally, all Shards outside this module MUST be valid
 func validateShard(s *Shard) (*Shard, error) {
 	if s.uploadID == id.Nil {
-		return nil, types.ErrEmpty{Field: "uploadID"}
+		return nil, types.EmptyError{Field: "uploadID"}
 	}
 	if !validShardState(s.state) {
 		return nil, fmt.Errorf("invalid shard state: %s", s.state)
