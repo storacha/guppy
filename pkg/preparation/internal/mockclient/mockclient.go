@@ -75,13 +75,19 @@ type uploadAddInvocation struct {
 var _ storacha.Client = (*MockClient)(nil)
 
 func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
+
+	cfg := client.NewSpaceBlobAddConfig(options...)
+
 	contentBytes, err := io.ReadAll(content)
 	require.NoError(m.T, err, "reading content for SpaceBlobAdd")
 
 	location := testutil.RandomLocationDelegation(m.T)
 
-	digest, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
-	require.NoError(m.T, err, "summing digest for SpaceBlobAdd")
+	digest := cfg.PrecomputedDigest()
+	if digest == nil || len(digest) == 0 {
+		digest, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
+		require.NoError(m.T, err, "summing digest for SpaceBlobAdd")
+	}
 
 	dummyPrincipal, err := ed25519signer.Generate()
 	require.NoError(m.T, err)

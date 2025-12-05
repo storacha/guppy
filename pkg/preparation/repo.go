@@ -4,9 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/pressly/goose/v3"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	_ "modernc.org/sqlite"
 )
@@ -38,6 +42,24 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("command failed to execute schema: %w", err)
 	}
+
+	// Disable goose logging
+	// this isn't ideal, but goose doesn't provide a way to disable logging directly
+	// see: https://github.com/pressly/goose/issues/975
+	log.Default().SetOutput(io.Discard)
+
+	goose.SetBaseFS(sqlrepo.MigrationsFS)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return nil, fmt.Errorf("failed to set goose dialect: %w", err)
+	}
+
+	if err := goose.Up(db, "migrations"); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	// Re-enable logging
+	log.Default().SetOutput(os.Stderr)
 
 	repo := sqlrepo.New(db)
 	return repo, nil

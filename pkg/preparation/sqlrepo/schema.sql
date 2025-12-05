@@ -162,7 +162,5 @@ CREATE TABLE IF NOT EXISTS shards (
   -- If NULL, has not yet been calculated (and maybe cannot be, if still
   -- accepting new nodes)
   digest BLOB,
-  -- Precomputed piece CID for the shard's CommP; optional until the shard is closed
-  piece_cid BLOB,
   state TEXT NOT NULL
 ) STRICT;

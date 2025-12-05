@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
@@ -23,6 +24,12 @@ func CreateTestDB(t *testing.T) *sql.DB {
 
 	_, err = db.ExecContext(t.Context(), sqlrepo.Schema)
 	require.NoError(t, err, "failed to execute schema")
+
+	goose.SetBaseFS(sqlrepo.MigrationsFS)
+
+	require.NoError(t, goose.SetDialect("sqlite3"), "failed to set goose dialect")
+
+	require.NoError(t, goose.Up(db, "migrations"), "failed to apply migrations")
 
 	// Disable foreign key checks to simplify test.
 	_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = OFF;")

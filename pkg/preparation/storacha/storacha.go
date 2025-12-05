@@ -3,18 +3,15 @@ package storacha
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 
-	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
@@ -22,6 +19,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
+	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -92,10 +90,6 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	))
 	defer span.End()
 
-	if err := a.ensureShardDigests(ctx, shard); err != nil {
-		return fmt.Errorf("preparing digests for shard %s: %w", shard.ID(), err)
-	}
-
 	car, err := a.CarForShard(ctx, shard.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
@@ -117,7 +111,10 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
 	}
 
-	err = shard.Added(addedBlob.Digest)
+	if addedBlob.Digest.B58String() != shard.Digest().B58String() {
+		return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
+	}
+	err = shard.Added()
 	if err != nil {
 		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
 	}
@@ -144,44 +141,6 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	}
 
 	return nil
-}
-
-func (a API) ensureShardDigests(ctx context.Context, shard *shardsmodel.Shard) error {
-	if shard.Digest() != nil && len(shard.Digest()) > 0 && shard.PieceCID() != cid.Undef {
-		return nil
-	}
-
-	car, err := a.CarForShard(ctx, shard.ID())
-	if err != nil {
-		return fmt.Errorf("failed to get CAR for shard %s while ensuring digests: %w", shard.ID(), err)
-	}
-
-	carHash := sha256.New()
-	commpCalc := &commp.Calc{}
-	if _, err := io.Copy(io.MultiWriter(carHash, commpCalc), car); err != nil {
-		return fmt.Errorf("failed to hash shard %s: %w", shard.ID(), err)
-	}
-
-	carDigest, err := multihash.Encode(carHash.Sum(nil), multihash.SHA2_256)
-	if err != nil {
-		return fmt.Errorf("failed to encode shard digest for %s: %w", shard.ID(), err)
-	}
-
-	pieceDigest, _, err := commpCalc.Digest()
-	if err != nil {
-		return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
-	}
-
-	pieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
-	if err != nil {
-		return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
-	}
-
-	if err := shard.SetDigests(carDigest, pieceCID); err != nil {
-		return fmt.Errorf("failed to set digests on shard %s: %w", shard.ID(), err)
-	}
-
-	return a.Repo.UpdateShard(ctx, shard)
 }
 
 func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID, opts ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
@@ -214,8 +173,8 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 
 	// On shards too small to compute a CommP, just skip the `filecoin/offer`.
 	switch {
-	case shard.Size() < commp.MinPiecePayload:
-		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), commp.MinPiecePayload)
+	case shard.Size() < gtypes.MinPiecePayload:
+		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), gtypes.MinPiecePayload)
 		return nil
 	case shard.Size() > commp.MaxPiecePayload:
 		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is above maximum %d", shard.ID(), shard.Size(), commp.MaxPiecePayload)
