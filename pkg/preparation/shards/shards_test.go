@@ -238,7 +238,7 @@ func TestCarForShard(t *testing.T) {
 			ShardEncoder: shards.NewCAREncoder(nodeReader),
 		}
 
-		carReader, err := api.CarForShard(t.Context(), shard.ID())
+		carReader, err := api.ReaderForShard(t.Context(), shard.ID())
 		require.NoError(t, err)
 
 		// Read in the entire CAR, so we can create an [io.ReaderAt] for the
@@ -314,7 +314,7 @@ func TestCarForShard(t *testing.T) {
 			ShardEncoder: shards.NewCAREncoder(nodeReader),
 		}
 
-		carReader, err := api.CarForShard(t.Context(), shard.ID())
+		carReader, err := api.ReaderForShard(t.Context(), shard.ID())
 		require.NoError(t, err)
 
 		_, err = io.ReadAll(carReader)
@@ -465,7 +465,7 @@ func TestIndexForUpload(t *testing.T) {
 	})
 }
 
-func TestCarShardCIDs(t *testing.T) {
+func TestComputedShardCIDs(t *testing.T) {
 	db := testdb.CreateTestDB(t)
 	repo := sqlrepo.New(db)
 	// we're going to use fileback here because it doesn't add any bytes, making expected CIDs easier to calculate

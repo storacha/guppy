@@ -47,7 +47,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		api := storacha.API{
 			Repo:                   repo,
 			Client:                 &client,
-			CarForShard:            carForShard,
+			ReaderForShard:         carForShard,
 			ShardUploadParallelism: 1,
 		}
 
@@ -173,7 +173,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		api := storacha.API{
 			Repo:                   repo,
 			Client:                 &client,
-			CarForShard:            carForShard,
+			ReaderForShard:         carForShard,
 			ShardUploadParallelism: 1,
 		}
 

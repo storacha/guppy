@@ -1,7 +1,6 @@
 package shards
 
 import (
-	"crypto/sha256"
 	"encoding"
 	"fmt"
 	"hash"
@@ -9,45 +8,52 @@ import (
 
 	commcid "github.com/filecoin-project/go-fil-commcid"
 	"github.com/ipfs/go-cid"
+	"github.com/minio/sha256-simd"
 	"github.com/multiformats/go-multihash"
 	commp "github.com/storacha/go-fil-commp-hashhash"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 
+type marshallableHash interface {
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+	hash.Hash
+}
+
 type shardHashState struct {
-	carHash   hash.Hash
-	commpCalc *commp.Calc
+	digestHash marshallableHash
+	commpCalc  marshallableHash
 }
 
 func newShardHashState() *shardHashState {
 	return &shardHashState{
-		carHash:   sha256.New(),
-		commpCalc: &commp.Calc{},
+		digestHash: sha256.New().(marshallableHash),
+		commpCalc:  &commp.Calc{},
 	}
 }
 
 func fromShard(shard *model.Shard) (*shardHashState, error) {
-	carHash := sha256.New()
+	digestHash := sha256.New().(marshallableHash)
 	commPCalc := &commp.Calc{}
 	if shard.DigestStateUpTo() > 0 {
-		if err := carHash.(encoding.BinaryUnmarshaler).UnmarshalBinary(shard.DigestState()); err != nil {
-			return nil, fmt.Errorf("unmarshaling car hash state: %w", err)
+		if err := digestHash.UnmarshalBinary(shard.DigestState()); err != nil {
+			return nil, fmt.Errorf("unmarshaling digest hash state: %w", err)
 		}
 		if err := commPCalc.UnmarshalBinary(shard.PieceCIDState()); err != nil {
 			return nil, fmt.Errorf("unmarshaling piece CID state: %w", err)
 		}
 	}
 	return &shardHashState{
-		carHash:   carHash,
-		commpCalc: commPCalc,
+		digestHash: digestHash,
+		commpCalc:  commPCalc,
 	}, nil
 }
 
 var _ io.Writer = (*shardHashState)(nil)
 
 func (s *shardHashState) Write(p []byte) (int, error) {
-	if _, err := s.carHash.Write(p); err != nil {
+	if _, err := s.digestHash.Write(p); err != nil {
 		return 0, err
 	}
 	if _, err := s.commpCalc.Write(p); err != nil {
@@ -57,37 +63,34 @@ func (s *shardHashState) Write(p []byte) (int, error) {
 }
 
 func (s *shardHashState) marshal() ([]byte, []byte, error) {
-	carState, err := s.carHash.(encoding.BinaryMarshaler).MarshalBinary()
+	digestState, err := s.digestHash.MarshalBinary()
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshaling car hash state: %w", err)
+		return nil, nil, fmt.Errorf("marshaling digest hash state: %w", err)
 	}
 	pieceCIDState, err := s.commpCalc.MarshalBinary()
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling piece CID state: %w", err)
 	}
-	return carState, pieceCIDState, nil
+	return digestState, pieceCIDState, nil
 }
 
 func (s *shardHashState) finalize(shardSize uint64) (multihash.Multihash, cid.Cid, error) {
-	carDigest, err := multihash.Encode(s.carHash.Sum(nil), multihash.SHA2_256)
+	shardDigest, err := multihash.Encode(s.digestHash.Sum(nil), multihash.SHA2_256)
 	if err != nil {
-		return nil, cid.Undef, fmt.Errorf("encoding car digest: %w", err)
+		return nil, cid.Undef, fmt.Errorf("encoding shard digest: %w", err)
 	}
 
 	// If the shard is too small to form a piece CID, return undefined.
 	if shardSize < types.MinPiecePayload {
-		return carDigest, cid.Undef, nil
+		return shardDigest, cid.Undef, nil
 	}
 
-	pieceDigest, _, err := s.commpCalc.Digest()
-	if err != nil {
-		return nil, cid.Undef, fmt.Errorf("computing piece digest: %w", err)
-	}
+	pieceDigest := s.commpCalc.Sum(nil)
 
 	pieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shardSize)
 	if err != nil {
 		return nil, cid.Undef, fmt.Errorf("computing piece CID: %w", err)
 	}
 
-	return carDigest, pieceCID, nil
+	return shardDigest, pieceCID, nil
 }
