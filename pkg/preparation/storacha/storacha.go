@@ -50,14 +50,14 @@ type Client interface {
 
 var _ Client = (*client.Client)(nil)
 
-type CarForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
+type ReaderForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
 type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
 
 // API provides methods to interact with Storacha.
 type API struct {
 	Repo                   Repo
 	Client                 Client
-	CarForShard            CarForShardFunc
+	ReaderForShard         ReaderForShardFunc
 	IndexesForUpload       IndexesForUploadFunc
 	ShardUploadParallelism int
 }
@@ -73,7 +73,7 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
-	span.AddEvent("closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
+	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
 	// Ensure at least 1 parallelism
 	if a.ShardUploadParallelism < 1 {
@@ -105,7 +105,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	))
 	defer span.End()
 
-	car, err := a.CarForShard(ctx, shard.ID())
+	car, err := a.ReaderForShard(ctx, shard.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 	}

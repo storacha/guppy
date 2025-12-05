@@ -12,7 +12,6 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
@@ -42,7 +41,7 @@ type API struct {
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
-var _ storacha.CarForShardFunc = API{}.CarForShard
+var _ storacha.ReaderForShardFunc = API{}.ReaderForShard
 var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error) {
@@ -143,16 +142,9 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
 	}
 
-	hasher, err := fromShard(shard)
+	hasher, err := a.updatedShardHashState(ctx, shard)
 	if err != nil {
-		return digestStateUpdate{}, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
-	}
-
-	if shard.DigestStateUpTo() < shard.Size() {
-		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), hasher)
-		if err != nil {
-			return digestStateUpdate{}, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
-		}
+		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
 
 	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
@@ -172,28 +164,32 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	}, nil
 }
 
-func (a API) computeShardDigests(ctx context.Context, shard *model.Shard) (multihash.Multihash, cid.Cid, error) {
+func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*shardHashState, error) {
 	h, err := fromShard(shard)
 	if err != nil {
-		return nil, cid.Undef, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
+		return nil, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
 	}
 
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
 		if err != nil {
-			return nil, cid.Undef, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
+			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
 		}
 	}
 
-	return h.finalize(shard.Size())
+	return h, nil
 }
 
 func (a API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error {
-	carDigest, pieceCID, err := a.computeShardDigests(ctx, shard)
+	h, err := a.updatedShardHashState(ctx, shard)
 	if err != nil {
-		return fmt.Errorf("computing digests for shard %s: %w", shard.ID(), err)
+		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
-	if err := shard.Close(carDigest, pieceCID); err != nil {
+	shardDigest, pieceCID, err := h.finalize(shard.Size())
+	if err != nil {
+		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)
+	}
+	if err := shard.Close(shardDigest, pieceCID); err != nil {
 		return err
 	}
 	return a.Repo.UpdateShard(ctx, shard)
@@ -218,13 +214,9 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
-// CarForShard streams a CAR by:
-//  1. Spawning workers to fetch block data and enqueue ordered results.
-//  2. Writing the CAR header, then draining results in index order while
-//     preserving ordering via a small pending map.
-//  3. Propagating errors/cancellations through the pipe while draining to let
-//     workers exit cleanly and bound memory via buffered channels.
-func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+// ReaderForShard uses fastWriteShard connected to a pipe to provide an io.Reader
+// for shard data.
+func (a API) ReaderForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	// cancel when we're done writing or when we hit an error so that worker
 	// goroutines exit promptly.
@@ -243,6 +235,13 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 	return pr, nil
 }
 
+// Fast write streams data from a shard to the given io.Writer
+// using multiple workers to fetch block data in parallel.
+//  1. Spawning workers to fetch block data and enqueue ordered results.
+//  2. Writing the shard header is starting at offset 0, then draining results in index order while
+//     preserving ordering via a small pending map.
+//  3. Propagating errors/cancellations through the pipe while draining to let
+//     workers exit cleanly and bound memory via buffered channels.
 func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint64, pw io.Writer) error {
 	type (
 		job struct {
@@ -303,7 +302,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 	}
 	if offset == 0 {
 		if err := a.ShardEncoder.WriteHeader(ctx, pw); err != nil {
-			return fmt.Errorf("failed to write CAR header: %w", err)
+			return fmt.Errorf("failed to write shard header: %w", err)
 		}
 	}
 
