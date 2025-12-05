@@ -34,7 +34,7 @@ func TestAddNodeToShard(t *testing.T) {
 	}
 
 	uploadID := id.New()
-	shard, err := repo.CreateShard(t.Context(), uploadID, 100)
+	shard, err := repo.CreateShard(t.Context(), uploadID, 100, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), shard.Size())
 

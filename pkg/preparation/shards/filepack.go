@@ -9,14 +9,13 @@ import (
 )
 
 type FilepackEncoder struct {
-	nodeReader NodeDataGetter
 }
 
 var _ ShardEncoder = (*FilepackEncoder)(nil)
 
 // NewFilepackEncoder creates a new shard encoder that outputs filepack encoded shards.
-func NewFilepackEncoder(nodeReader NodeDataGetter) *FilepackEncoder {
-	return &FilepackEncoder{nodeReader}
+func NewFilepackEncoder() *FilepackEncoder {
+	return &FilepackEncoder{}
 }
 
 func (f *FilepackEncoder) WriteHeader(ctx context.Context, w io.Writer) error {
@@ -38,4 +37,12 @@ func (FilepackEncoder) HeaderEncodingLength() uint64 {
 
 func (FilepackEncoder) NodeEncodingLength(node model.Node) uint64 {
 	return node.Size()
+}
+
+func (f *FilepackEncoder) HeaderDigestState() []byte {
+	return nil
+}
+
+func (f *FilepackEncoder) HeaderPieceCIDState() []byte {
+	return nil
 }

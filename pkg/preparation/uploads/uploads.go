@@ -330,7 +330,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 					log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
 					for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
-						_, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID)
+						_, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil)
 						if err != nil {
 							return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
 						}

@@ -16,6 +16,8 @@ import (
 
 // A CAR header with zero roots.
 var noRootsHeader []byte
+var noRootsDigestState []byte
+var noRootsPieceCIDState []byte
 
 func init() {
 	var err error
@@ -36,6 +38,15 @@ func init() {
 	}
 
 	noRootsHeader = buf.Bytes()
+	hasher := newShardHashState()
+	_, err = hasher.Write(noRootsHeader)
+	if err != nil {
+		panic(fmt.Sprintf("failed to hash CAR header: %v", err))
+	}
+	noRootsDigestState, noRootsPieceCIDState, err = hasher.marshal()
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal hash states: %v", err))
+	}
 }
 
 type CAREncoder struct {
@@ -83,4 +94,12 @@ func (c CAREncoder) NodeEncodingLength(node model.Node) uint64 {
 	pllen := uint64(len(cidlink.Link{Cid: cid}.Binary())) + blockSize
 	vilen := uint64(varint.UvarintSize(uint64(pllen)))
 	return pllen + vilen
+}
+
+func (c *CAREncoder) HeaderDigestState() []byte {
+	return noRootsDigestState
+}
+
+func (c *CAREncoder) HeaderPieceCIDState() []byte {
+	return noRootsPieceCIDState
 }
