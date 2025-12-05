@@ -35,6 +35,7 @@ type MockClient struct {
 	SpaceBlobReplicateInvocations []spaceBlobReplicateInvocation
 	FilecoinOfferInvocations      []filecoinOfferInvocation
 	UploadAddInvocations          []uploadAddInvocation
+	UploadRemoveInvocations       []uploadRemoveInvocation
 }
 
 type spaceBlobAddInvocation struct {
@@ -70,6 +71,11 @@ type uploadAddInvocation struct {
 	Space  did.DID
 	Root   ipld.Link
 	Shards []ipld.Link
+}
+
+type uploadRemoveInvocation struct {
+	Space did.DID
+	Root  ipld.Link
 }
 
 var _ storacha.Client = (*MockClient)(nil)
@@ -161,4 +167,13 @@ func (m *MockClient) UploadAdd(ctx context.Context, space did.DID, root ipld.Lin
 	})
 
 	return upload.AddOk{Root: root, Shards: shards}, nil
+}
+
+func (m *MockClient) UploadRemove(ctx context.Context, space did.DID, root ipld.Link) (upload.RemoveOk, error) {
+	m.UploadRemoveInvocations = append(m.UploadRemoveInvocations, uploadRemoveInvocation{
+		Space: space,
+		Root:  root,
+	})
+
+	return upload.RemoveOk{}, nil
 }
