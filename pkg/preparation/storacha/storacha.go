@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
@@ -19,11 +20,12 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
-	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
+
+	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
@@ -99,11 +101,16 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
+	start := time.Now()
+	log.Infow("adding shard", "cid", shard.CID().String(), "id", shard.ID())
 	ctx, span := tracer.Start(ctx, "add-shard", trace.WithAttributes(
 		attribute.String("shard.id", shard.ID().String()),
 		attribute.Int64("shard.size", int64(shard.Size())),
 	))
-	defer span.End()
+	defer func() {
+		log.Infow("added shard", "cid", shard.CID().String(), "id", shard.ID(), "duration", time.Since(start))
+		span.End()
+	}()
 
 	car, err := a.ReaderForShard(ctx, shard.ID())
 	if err != nil {
