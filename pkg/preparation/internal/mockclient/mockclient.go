@@ -29,7 +29,17 @@ import (
 )
 
 type MockClient struct {
-	T                             *testing.T
+	T *testing.T
+
+	// If set, these errors will be immediately returned by the corresponding
+	// methods, to simulate failure. These may be set and removed between calls.
+	SpaceBlobAddError       error
+	SpaceIndexAddError      error
+	SpaceBlobReplicateError error
+	FilecoinOfferError      error
+	UploadAddError          error
+
+	// Output
 	SpaceBlobAddInvocations       []spaceBlobAddInvocation
 	SpaceIndexAddInvocations      []spaceIndexAddInvocation
 	SpaceBlobReplicateInvocations []spaceBlobReplicateInvocation
@@ -75,11 +85,20 @@ type uploadAddInvocation struct {
 var _ storacha.Client = (*MockClient)(nil)
 
 func (m *MockClient) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
-
 	cfg := client.NewSpaceBlobAddConfig(options...)
 
 	contentBytes, err := io.ReadAll(content)
 	require.NoError(m.T, err, "reading content for SpaceBlobAdd")
+
+	if m.SpaceBlobAddError != nil {
+		m.SpaceBlobAddInvocations = append(m.SpaceBlobAddInvocations, spaceBlobAddInvocation{
+			Space:             space,
+			BlobAdded:         contentBytes,
+			ReturnedPDPAccept: nil,
+			ReturnedLocation:  nil,
+		})
+		return client.AddedBlob{}, m.SpaceBlobAddError
+	}
 
 	location := testutil.RandomLocationDelegation(m.T)
 
@@ -123,6 +142,10 @@ func (m *MockClient) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexS
 		RootCID:   rootCID,
 	})
 
+	if m.SpaceIndexAddError != nil {
+		return m.SpaceIndexAddError
+	}
+
 	return nil
 }
 
@@ -134,6 +157,10 @@ func (m *MockClient) FilecoinOffer(ctx context.Context, space did.DID, content i
 		Options: client.NewFilecoinOfferOptions(opts),
 	})
 
+	if m.FilecoinOfferError != nil {
+		return filecoincap.OfferOk{}, m.FilecoinOfferError
+	}
+
 	return filecoincap.OfferOk{Piece: piece}, nil
 }
 
@@ -144,6 +171,10 @@ func (m *MockClient) SpaceBlobReplicate(ctx context.Context, space did.DID, blob
 		ReplicaCount:       replicaCount,
 		LocationCommitment: locationCommitment,
 	})
+
+	if m.SpaceBlobReplicateError != nil {
+		return spaceblobcap.ReplicateOk{}, nil, m.SpaceBlobReplicateError
+	}
 
 	sitePromises := make([]types.Promise, replicaCount)
 	for i := range sitePromises {
@@ -165,6 +196,10 @@ func (m *MockClient) UploadAdd(ctx context.Context, space did.DID, root ipld.Lin
 		Root:   root,
 		Shards: shards,
 	})
+
+	if m.UploadAddError != nil {
+		return upload.AddOk{}, m.UploadAddError
+	}
 
 	return upload.AddOk{Root: root, Shards: shards}, nil
 }

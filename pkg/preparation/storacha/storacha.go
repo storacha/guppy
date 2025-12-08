@@ -85,7 +85,6 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	eg, gctx := errgroup.WithContext(ctx)
 
 	for _, shard := range closedShards {
-		shard := shard
 		sem <- struct{}{}
 		eg.Go(func() error {
 			defer func() { <-sem }()
@@ -105,6 +104,8 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	ctx, span := tracer.Start(ctx, "add-shard", trace.WithAttributes(
 		attribute.String("shard.id", shard.ID().String()),
 		attribute.Int64("shard.size", int64(shard.Size())),
+		attribute.String("shard.digest", shard.Digest().String()),
+		attribute.String("shard.cid", shard.CID().String()),
 	))
 	defer func() {
 		log.Infow("added shard", "cid", shard.CID().String(), "id", shard.ID(), "duration", time.Since(start))
@@ -127,36 +128,52 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		}
 	}()
 
-	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
-	if err != nil {
-		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+	location := shard.Location()
+	pdpAccept := shard.PDPAccept()
+
+	// If we don't have a location commitment yet, we have yet to successfully
+	// `space/blob/add`. (Note that `shard.PDPAccept()` is optional and may be
+	// legitimately nil even if the `space/blob/add` succeeded.)
+	if location == nil {
+		log.Infof("adding shard %s to space %s via `space/blob/add`", shard.ID(), spaceDID)
+		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
+		if err != nil {
+			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+		}
+
+		if addedBlob.Digest.B58String() != shard.Digest().B58String() {
+			return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
+		}
+
+		shard.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
+		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
+			return fmt.Errorf("failed to update shard %s after `space/blob/add`: %w", shard.ID(), err)
+		}
+
+		location = addedBlob.Location
+		pdpAccept = addedBlob.PDPAccept
+	} else {
+		log.Infof("shard %s already has location and PDP accept, skipping `space/blob/add`", shard.ID())
 	}
 
-	if addedBlob.Digest.B58String() != shard.Digest().B58String() {
-		return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
-	}
-	err = shard.Added()
-	if err != nil {
-		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
-	}
-
-	span.SetAttributes(attribute.String("shard.digest", shard.Digest().String()))
-	span.SetAttributes(attribute.String("shard.cid", shard.CID().String()))
-
-	err = a.spaceBlobReplicate(ctx, shard, spaceDID, addedBlob.Location)
+	err = a.spaceBlobReplicate(ctx, shard, spaceDID, location)
 	if err != nil {
 		return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
 	}
 
 	var opts []client.FilecoinOfferOption
-	if addedBlob.PDPAccept != nil {
-		opts = append(opts, client.WithPDPAcceptInvocation(addedBlob.PDPAccept))
+	if pdpAccept != nil {
+		opts = append(opts, client.WithPDPAcceptInvocation(pdpAccept))
 	}
 	err = a.filecoinOffer(ctx, shard, spaceDID, opts...)
 	if err != nil {
 		return err
 	}
 
+	err = shard.Added()
+	if err != nil {
+		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
+	}
 	if err := a.Repo.UpdateShard(ctx, shard); err != nil {
 		return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.CID(), err)
 	}

@@ -318,7 +318,7 @@ func TestReaderForShard(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = io.ReadAll(carReader)
-		var errBadNodes types.ErrBadNodes
+		var errBadNodes types.BadNodesError
 		require.ErrorAs(t, err, &errBadNodes)
 		require.Len(t, errBadNodes.Errs(), 2)
 		require.Equal(t, nodeCID2, errBadNodes.Errs()[0].CID(), "the first error should be for the first bad node encountered")

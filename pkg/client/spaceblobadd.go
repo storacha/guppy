@@ -88,7 +88,7 @@ func WithPrecomputedDigest(d multihash.Multihash, size uint64) SpaceBlobAddOptio
 
 type AddedBlob struct {
 	Digest    multihash.Multihash
-	Location  delegation.Delegation
+	Location  invocation.Invocation
 	PDPAccept invocation.Invocation
 }
 
@@ -399,7 +399,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		return AddedBlob{}, fmt.Errorf("reading location commitment blocks: %w", err)
 	}
 
-	location, err := delegation.NewDelegationView(site, blksReader)
+	location, err := invocation.NewInvocationView(site, blksReader)
 	if err != nil {
 		return AddedBlob{}, fmt.Errorf("creating location delegation: %w", err)
 	}

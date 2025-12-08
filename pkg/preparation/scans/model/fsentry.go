@@ -80,22 +80,22 @@ func (d *Directory) isFsEntry() {}
 
 func validateFsEntry(f *fsEntry) error {
 	if f.id == id.Nil {
-		return types.ErrEmpty{Field: "id"}
+		return types.EmptyError{Field: "id"}
 	}
 	if f.path == "" {
-		return types.ErrEmpty{Field: "path"}
+		return types.EmptyError{Field: "path"}
 	}
 	if f.lastModified.IsZero() {
-		return types.ErrEmpty{Field: "lastModified"}
+		return types.EmptyError{Field: "lastModified"}
 	}
 	if f.checksum == nil {
-		return types.ErrEmpty{Field: "checksum"}
+		return types.EmptyError{Field: "checksum"}
 	}
 	if f.sourceID == id.Nil {
-		return types.ErrEmpty{Field: "sourceID"}
+		return types.EmptyError{Field: "sourceID"}
 	}
 	if !f.spaceDID.Defined() {
-		return types.ErrEmpty{Field: "spaceDID"}
+		return types.EmptyError{Field: "spaceDID"}
 	}
 	return nil
 }

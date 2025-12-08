@@ -4,9 +4,12 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/ipfs/go-cid"
+	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -190,5 +193,49 @@ func (db dbBytes[V]) Scan(value any) error {
 	}
 	*db.v = b
 
+	return nil
+}
+
+// DbInvocation returns a [sql.Scanner] that scans an invocation from a `[]byte`
+// DB value (a `BLOB`), and a [driver.Valuer] that writes an invocation to the DB
+// as a `[]byte` (a `BLOB`), treating nil invocations as `NULL`, and vice versa.
+func DbInvocation(inv *invocation.Invocation) dbInvocation {
+	return dbInvocation{inv: inv}
+}
+
+type dbInvocation struct {
+	inv *invocation.Invocation
+}
+
+var _ driver.Valuer = dbInvocation{}
+var _ sql.Scanner = dbInvocation{}
+
+func (di dbInvocation) Value() (driver.Value, error) {
+	if di.inv == nil || *di.inv == nil {
+		return nil, nil // Return nil for nil invocations
+	}
+	archive := delegation.Archive(*di.inv)
+	bytes, err := io.ReadAll(archive)
+	if err != nil {
+		return nil, fmt.Errorf("failed to archive invocation: %w", err)
+	}
+	return bytes, nil
+}
+
+func (di dbInvocation) Scan(value any) error {
+	if value == nil {
+		*di.inv = nil
+		return nil
+	}
+	switch v := value.(type) {
+	case []byte:
+		inv, err := delegation.Extract(v)
+		if err != nil {
+			return fmt.Errorf("failed to extract invocation: %w", err)
+		}
+		*di.inv = inv
+	default:
+		return fmt.Errorf("unsupported type for invocation scanning: %T (%v)", v, v)
+	}
 	return nil
 }

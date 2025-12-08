@@ -8,11 +8,11 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-type ErrEmpty struct {
+type EmptyError struct {
 	Field string
 }
 
-func (e ErrEmpty) Error() string {
+func (e EmptyError) Error() string {
 	return fmt.Sprintf("%s cannot be empty", e.Field)
 }
 
@@ -32,40 +32,40 @@ func (e RetriableError) Unwrap() error {
 	return e.err
 }
 
-// ErrBadNode indicates that a node cannot be read or is otherwise invalid.
-type ErrBadNode struct {
+// BadNodeError indicates that a node cannot be read or is otherwise invalid.
+type BadNodeError struct {
 	cid cid.Cid
 	err error
 }
 
-func NewErrBadNode(cid cid.Cid, err error) ErrBadNode {
-	return ErrBadNode{cid: cid, err: err}
+func NewBadNodeError(cid cid.Cid, err error) BadNodeError {
+	return BadNodeError{cid: cid, err: err}
 }
 
-func (e ErrBadNode) Error() string {
+func (e BadNodeError) Error() string {
 	return fmt.Sprintf("bad node %s: %s", e.cid, e.err)
 }
 
-func (e ErrBadNode) Unwrap() error {
+func (e BadNodeError) Unwrap() error {
 	return e.err
 }
 
-func (e ErrBadNode) CID() cid.Cid {
+func (e BadNodeError) CID() cid.Cid {
 	return e.cid
 }
 
-// ErrBadNodes wraps multiple ErrBadNode errors from the same operation.
-type ErrBadNodes struct {
-	errs     []ErrBadNode
+// BadNodesError wraps multiple BadNodeError errors from the same operation.
+type BadNodesError struct {
+	errs     []BadNodeError
 	shardID  id.ShardID
 	goodCIDs *cid.Set
 }
 
-func NewErrBadNodes(errs []ErrBadNode, shardID id.ShardID, goodCIDs *cid.Set) error {
-	return RetriableError{err: ErrBadNodes{errs: errs, shardID: shardID, goodCIDs: goodCIDs}}
+func NewBadNodesError(errs []BadNodeError, shardID id.ShardID, goodCIDs *cid.Set) error {
+	return RetriableError{err: BadNodesError{errs: errs, shardID: shardID, goodCIDs: goodCIDs}}
 }
 
-func (e ErrBadNodes) Error() string {
+func (e BadNodesError) Error() string {
 	var messages []string
 	for _, err := range e.errs {
 		messages = append(messages, err.Error())
@@ -74,15 +74,15 @@ func (e ErrBadNodes) Error() string {
 	return fmt.Sprintf("bad nodes:\n%s", strings.Join(messages, "\n"))
 }
 
-func (e ErrBadNodes) ShardID() id.ShardID {
+func (e BadNodesError) ShardID() id.ShardID {
 	return e.shardID
 }
 
-func (e ErrBadNodes) GoodCIDs() *cid.Set {
+func (e BadNodesError) GoodCIDs() *cid.Set {
 	return e.goodCIDs
 }
 
-func (e ErrBadNodes) Unwrap() []error {
+func (e BadNodesError) Unwrap() []error {
 	errs := make([]error, len(e.errs))
 	for i, err := range e.errs {
 		errs[i] = err
@@ -90,45 +90,45 @@ func (e ErrBadNodes) Unwrap() []error {
 	return errs
 }
 
-func (e ErrBadNodes) Errs() []ErrBadNode {
+func (e BadNodesError) Errs() []BadNodeError {
 	return e.errs
 }
 
-// ErrBadFSEntry indicates that a DAG scan cannot be read or is otherwise invalid.
-type ErrBadFSEntry struct {
+// BadFSEntryError indicates that a DAG scan cannot be read or is otherwise invalid.
+type BadFSEntryError struct {
 	fsEntryID id.FSEntryID
 	err       error
 }
 
-func NewErrBadFSEntry(fsEntryID id.FSEntryID, err error) error {
-	return RetriableError{err: ErrBadFSEntry{fsEntryID: fsEntryID, err: err}}
+func NewBadFSEntryError(fsEntryID id.FSEntryID, err error) error {
+	return RetriableError{err: BadFSEntryError{fsEntryID: fsEntryID, err: err}}
 }
 
-func (e ErrBadFSEntry) Error() string {
+func (e BadFSEntryError) Error() string {
 	return fmt.Sprintf("bad DAG scan %s: %s", e.fsEntryID, e.err)
 }
 
-func (e ErrBadFSEntry) Unwrap() error {
+func (e BadFSEntryError) Unwrap() error {
 	return e.err
 }
 
-func (e ErrBadFSEntry) FsEntryID() id.FSEntryID {
+func (e BadFSEntryError) FsEntryID() id.FSEntryID {
 	return e.fsEntryID
 }
 
-type ErrBadFSEntries struct {
-	errs []ErrBadFSEntry
+type BadFSEntriesError struct {
+	errs []BadFSEntryError
 }
 
-func NewErrBadFSEntries(errs []ErrBadFSEntry) error {
-	return RetriableError{err: ErrBadFSEntries{errs: errs}}
+func NewBadFSEntriesError(errs []BadFSEntryError) error {
+	return RetriableError{err: BadFSEntriesError{errs: errs}}
 }
 
-func (e ErrBadFSEntries) Errs() []ErrBadFSEntry {
+func (e BadFSEntriesError) Errs() []BadFSEntryError {
 	return e.errs
 }
 
-func (e ErrBadFSEntries) Error() string {
+func (e BadFSEntriesError) Error() string {
 	var messages []string
 	for _, err := range e.errs {
 		messages = append(messages, err.Error())
@@ -137,7 +137,7 @@ func (e ErrBadFSEntries) Error() string {
 	return fmt.Sprintf("bad DAG scans:\n%s", strings.Join(messages, "\n"))
 }
 
-func (e ErrBadFSEntries) Unwrap() []error {
+func (e BadFSEntriesError) Unwrap() []error {
 	errs := make([]error, len(e.errs))
 	for i, err := range e.errs {
 		errs[i] = err

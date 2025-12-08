@@ -49,8 +49,42 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/ClickHouse/ch-go v0.67.0 // indirect
+	github.com/ClickHouse/clickhouse-go/v2 v2.40.1 // indirect
+	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/coder/websocket v1.8.12 // indirect
+	github.com/elastic/go-sysinfo v1.15.4 // indirect
+	github.com/elastic/go-windows v1.0.2 // indirect
+	github.com/go-faster/city v1.0.1 // indirect
+	github.com/go-faster/errors v0.7.1 // indirect
+	github.com/go-sql-driver/mysql v1.9.3 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.7.5 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
+	github.com/mfridman/xflag v0.1.0 // indirect
+	github.com/microsoft/go-mssqldb v1.9.2 // indirect
+	github.com/paulmach/orb v0.11.1 // indirect
+	github.com/pierrec/lz4/v4 v4.1.22 // indirect
+	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
+	github.com/tursodatabase/libsql-client-go v0.0.0-20240902231107-85af5b9d094d // indirect
+	github.com/vertica/vertica-sql-go v1.3.3 // indirect
+	github.com/ydb-platform/ydb-go-genproto v0.0.0-20241112172322-ea1f63298f77 // indirect
+	github.com/ydb-platform/ydb-go-sdk/v3 v3.108.1 // indirect
+	github.com/ziutek/mymysql v1.5.4 // indirect
+	howett.net/plist v1.0.1 // indirect
 )
 
 require (
@@ -164,4 +198,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-tool github.com/hannahhoward/cbor-gen-for
+tool (
+	github.com/hannahhoward/cbor-gen-for
+	github.com/pressly/goose/v3/cmd/goose
+)
