@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
-
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
