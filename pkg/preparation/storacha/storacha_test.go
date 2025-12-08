@@ -153,6 +153,88 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 	})
 
+	t.Run("does not `space/blob/add` again on retry once it succeeds", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := mockclient.MockClient{T: t}
+
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
+		}
+
+		api := storacha.API{
+			Repo:                   repo,
+			Client:                 &client,
+			ReaderForShard:         carForShard,
+			ShardUploadParallelism: 1,
+		}
+
+		shardsApi := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(nil),
+		}
+
+		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		// Add enough nodes to close one shard and create a second one.
+		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		require.NoError(t, err)
+		data := testutil.RandomBytes(t, int(n.Size()))
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
+		require.NoError(t, err)
+		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
+
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated SpaceBlobAdd error")
+
+		// It should have `space/blob/add`ed (and failed)...
+		require.Len(t, client.SpaceBlobAddInvocations, 1)
+
+		// ...but not have proceeded to `space/blob/replicate` or `filecoin/offer`.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 0)
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+
+		// Now retry: `space/blob/add` succeeds but `space/blob/replicate` fails.
+		client.SpaceBlobAddError = nil
+		client.SpaceBlobReplicateError = fmt.Errorf("simulated SpaceBlobReplicate error")
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated SpaceBlobReplicate error")
+
+		// It should have `space/blob/add`ed again...
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		// ...and then attempted `space/blob/replicate` and failed...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+		// ...but not have proceeded to `filecoin/offer`.
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+
+		// Now retry: `space/blob/replicate` succeeds but `filecoin/offer` fails.
+		client.SpaceBlobReplicateError = nil
+		client.FilecoinOfferError = fmt.Errorf("simulated FilecoinOffer error")
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated FilecoinOffer error")
+
+		// It should NOT `space/blob/add` again...
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		// ...but should have `space/blob/replicate`ed again...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
+		// ...and then attempted `filecoin/offer` and failed.
+		require.Len(t, client.FilecoinOfferInvocations, 1)
+	})
+
 	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)

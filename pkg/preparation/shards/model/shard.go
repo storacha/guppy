@@ -6,6 +6,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -42,6 +43,8 @@ type Shard struct {
 	digestState     []byte
 	pieceCIDState   []byte
 	state           ShardState
+	location        invocation.Invocation
+	pdpAccept       invocation.Invocation
 }
 
 // NewShard creates a new Shard with the given initial size.
@@ -108,6 +111,8 @@ type ShardScanner func(
 	digestState *[]byte,
 	pieceCIDState *[]byte,
 	state *ShardState,
+	location *invocation.Invocation,
+	pdpAccept *invocation.Invocation,
 ) error
 
 func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
@@ -122,6 +127,8 @@ func ReadShardFromDatabase(scanner ShardScanner) (*Shard, error) {
 		&shard.digestState,
 		&shard.pieceCIDState,
 		&shard.state,
+		&shard.location,
+		&shard.pdpAccept,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading shard from database: %w", err)
@@ -140,6 +147,8 @@ type ShardWriter func(
 	digestState []byte,
 	pieceCIDState []byte,
 	state ShardState,
+	location invocation.Invocation,
+	pdpAccept invocation.Invocation,
 ) error
 
 // WriteShardToDatabase writes a Shard to the database using the provided writer function.
@@ -154,6 +163,8 @@ func WriteShardToDatabase(shard *Shard, writer ShardWriter) error {
 		shard.digestState,
 		shard.pieceCIDState,
 		shard.state,
+		shard.location,
+		shard.pdpAccept,
 	)
 }
 
@@ -194,4 +205,20 @@ func (s *Shard) CID() cid.Cid {
 		return cid.Undef
 	}
 	return cid.NewCidV1(uint64(multicodec.Car), s.digest)
+}
+
+func (s *Shard) Location() invocation.Invocation {
+	return s.location
+}
+
+func (s *Shard) PDPAccept() invocation.Invocation {
+	return s.pdpAccept
+}
+
+func (s *Shard) SetLocation(location invocation.Invocation) {
+	s.location = location
+}
+
+func (s *Shard) SetPDPAccept(pdpAccept invocation.Invocation) {
+	s.pdpAccept = pdpAccept
 }
