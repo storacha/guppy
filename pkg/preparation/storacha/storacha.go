@@ -139,8 +139,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 			return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
 		}
 
-		shard.SetLocation(addedBlob.Location)
-		shard.SetPDPAccept(addedBlob.PDPAccept)
+		shard.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
 		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
 			return fmt.Errorf("failed to update shard %s after `space/blob/add`: %w", shard.ID(), err)
 		}

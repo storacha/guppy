@@ -215,10 +215,19 @@ func (s *Shard) PDPAccept() invocation.Invocation {
 	return s.pdpAccept
 }
 
-func (s *Shard) SetLocation(location invocation.Invocation) {
+// SpaceBlobAdded records the location and PDP accept invocations for the shard
+// after a successful `space/blob/add`. The shard must be in `ShardStateClosed`,
+// or it should not have been `space/blob/add`ed to begin with. `location` must
+// be non-nil, because it represents the fact that the shard has truly been
+// added. The `pdpAccept` may be nil.
+func (s *Shard) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocation.Invocation) error {
+	if s.state != ShardStateClosed {
+		return fmt.Errorf("cannot add shard in state %s", s.state)
+	}
+	if location == nil {
+		return fmt.Errorf("location invocation cannot be nil")
+	}
 	s.location = location
-}
-
-func (s *Shard) SetPDPAccept(pdpAccept invocation.Invocation) {
 	s.pdpAccept = pdpAccept
+	return nil
 }
