@@ -137,7 +137,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		}
 		readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
 		readSpan.End()
-		ctx, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
+		_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
 			attribute.Int("content-size", len(contentBytes)),
 		))
 		contentHash, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
