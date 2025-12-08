@@ -355,6 +355,8 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 	defer log.Debugf("Storacha worker for upload %s exiting", uploadID)
 	defer span.End()
 
+	var errs []error
+
 	return Worker(
 		ctx,
 		blobWork,
@@ -363,8 +365,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 		func() error {
 			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				log.Debug("Error adding shards for upload ", uploadID, ": ", err)
-				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
+				errs = append(errs, fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err))
 			}
 
 			return nil
@@ -372,7 +373,12 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// finalize
 		func() error {
-			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
+			err := errors.Join(errs...)
+			if err != nil {
+				return err
+			}
+
+			err = api.AddIndexesForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
 			}

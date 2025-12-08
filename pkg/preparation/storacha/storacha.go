@@ -3,8 +3,10 @@ package storacha
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
@@ -23,7 +25,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
@@ -82,20 +83,31 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 
 	sem := make(chan struct{}, a.ShardUploadParallelism)
-	eg, gctx := errgroup.WithContext(ctx)
+	errCh := make(chan error, len(closedShards))
+	var wg sync.WaitGroup
 
 	for _, shard := range closedShards {
 		sem <- struct{}{}
-		eg.Go(func() error {
+		wg.Go(func() {
 			defer func() { <-sem }()
-			if err := a.addShard(gctx, shard, spaceDID); err != nil {
-				return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+			if err := a.addShard(ctx, shard, spaceDID); err != nil {
+				err = fmt.Errorf("failed to add shard %s for upload %s: %v", shard.ID(), uploadID, err)
+				errCh <- err
+				log.Errorf("%v", err)
+			} else {
+				log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
 			}
-			return nil
 		})
 	}
 
-	return eg.Wait()
+	wg.Wait()
+	close(errCh)
+
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
