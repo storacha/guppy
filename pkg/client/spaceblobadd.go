@@ -8,6 +8,7 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/multiformats/go-multihash"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
@@ -28,10 +29,11 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
-	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 // SpaceBlobAddOption configures options for SpaceBlobAdd.
@@ -120,9 +122,14 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 
 	contentHash := cfg.PrecomputedDigest()
 	contentSizePtr := cfg.PrecomputedSizePtr()
-	if contentSizePtr == nil || contentHash == nil || len(contentHash) == 0 {
-
-		_, readSpan := tracer.Start(ctx, "read-content")
+	needsHash := contentSizePtr == nil || contentHash == nil || len(contentHash) == 0
+	start := time.Now()
+	log.Infow("space blob adding", "space", space, "has_digest", !needsHash)
+	defer func() {
+		log.Infow("space blob added", "space", space, "has_digest", !needsHash, "duration", time.Since(start))
+	}()
+	if needsHash {
+		ctx, readSpan := tracer.Start(ctx, "read-content")
 		contentBytes, err := io.ReadAll(content)
 		if err != nil {
 			readSpan.End()
@@ -427,6 +434,11 @@ func getConcludeReceipt(concludeFx invocation.Invocation) (receipt.AnyReceipt, e
 }
 
 func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body io.Reader) error {
+	start := time.Now()
+	log.Infow("putting blob", "destination", url.String())
+	defer func() {
+		log.Infow("put blob", "destination", url.String(), "duration", time.Since(start))
+	}()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), body)
 	if err != nil {
 		return fmt.Errorf("creating upload request: %w", err)
@@ -440,8 +452,9 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 	if err != nil {
 		return fmt.Errorf("uploading blob: %w", err)
 	}
-	io.ReadAll(resp.Body)
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		log.Warnf("closing upload response body: %v", err)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("uploading blob: %s", resp.Status)
