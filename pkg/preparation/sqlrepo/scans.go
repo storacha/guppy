@@ -22,30 +22,14 @@ func (r *Repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 	if mode.IsDir() {
 		return nil, false, errors.New("cannot create a file with directory mode")
 	}
-	entry, err := r.findFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID, spaceDID)
+	entry, created, err := r.insertOrGetFSEntry(ctx, path, lastModified, mode, size, checksum, sourceID, spaceDID)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to find file entry: %w", err)
+		return nil, false, fmt.Errorf("failed to find or create file entry: %w", err)
 	}
-	if entry != nil {
-		// File already exists, return it
-		if file, ok := entry.(*scanmodel.File); ok {
-			return file, false, nil
-		}
-		return nil, false, errors.New("found entry is not a file")
+	if file, ok := entry.(*scanmodel.File); ok {
+		return file, created, nil
 	}
-
-	newfile, err := scanmodel.NewFile(path, lastModified, mode, size, checksum, sourceID, spaceDID)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to make new file entry: %w", err)
-	}
-
-	err = r.createFSEntry(ctx, newfile)
-
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to persist new file entry: %w", err)
-	}
-
-	return newfile, true, nil
+	return nil, false, errors.New("found entry is not a file")
 }
 
 // FindOrCreateDirectory finds or creates a directory entry in the repository with the given parameters.
@@ -56,30 +40,17 @@ func (r *Repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 	if !mode.IsDir() {
 		return nil, false, errors.New("cannot create a directory with file mode")
 	}
-	entry, err := r.findFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID, spaceDID) // size is not used for directories
+	entry, created, err := r.insertOrGetFSEntry(ctx, path, lastModified, mode, 0, checksum, sourceID, spaceDID) // size is not used for directories
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to find directory entry: %w", err)
+		return nil, false, fmt.Errorf("failed to find or create directory entry: %w", err)
 	}
-	if entry != nil {
-		if dir, ok := entry.(*scanmodel.Directory); ok {
-			// Directory already exists, return it
-			return dir, false, nil
+	if dir, ok := entry.(*scanmodel.Directory); ok {
+		if created {
+			log.Debugf("Created new directory %s: %s", path, dir.ID())
 		}
-		return nil, false, errors.New("found entry is not a directory")
+		return dir, created, nil
 	}
-
-	newdir, err := scanmodel.NewDirectory(path, lastModified, mode, checksum, sourceID, spaceDID)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to make new directory entry: %w", err)
-	}
-
-	err = r.createFSEntry(ctx, newdir)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to persist new directory entry: %w", err)
-	}
-
-	log.Debugf("Created new directory %s: %s", path, newdir.ID())
-	return newdir, true, nil
+	return nil, false, errors.New("found entry is not a directory")
 }
 
 // CreateDirectoryChildren links a directory to its children in the repository.
@@ -173,21 +144,21 @@ func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	return nil, errors.New("found entry is not a file")
 }
 
-func (r *Repo) findFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, error) {
+func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, bool, error) {
+	newID := id.New()
+	// On a conflict we do a no-op DO UPDATE SET path = excluded.path only to enable RETURNING,
+	// so existing row values aren’t changed (last_modified/mode/size/checksum stay as stored)
 	query := `
-		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
-		FROM fs_entries
-		WHERE path = $1
-		  AND last_modified = $2
-		  AND mode = $3
-		  AND size = $4
-		  AND checksum = $5
-		  AND source_id = $6
-		  AND space_did = $7
+		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT(space_did, source_id, path, last_modified, mode, size, checksum)
+		DO UPDATE SET path = excluded.path
+		RETURNING id, path, last_modified, mode, size, checksum, source_id, space_did
 	`
 	row := r.db.QueryRowContext(
 		ctx,
 		query,
+		newID,
 		path,
 		lastModified.Unix(),
 		mode,
@@ -196,6 +167,8 @@ func (r *Repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		sourceID,
 		util.DbDID(&spaceDID),
 	)
+
+	created := true
 	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
 		id *id.FSEntryID,
 		path *string,
@@ -206,7 +179,7 @@ func (r *Repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 		sourceID *id.SourceID,
 		spaceDID *did.DID,
 	) error {
-		return row.Scan(
+		if err := row.Scan(
 			id,
 			path,
 			util.TimestampScanner(lastModified),
@@ -215,46 +188,21 @@ func (r *Repo) findFSEntry(ctx context.Context, path string, lastModified time.T
 			checksum,
 			sourceID,
 			util.DbDID(spaceDID),
-		)
+		); err != nil {
+			return err
+		}
+		if *id != newID {
+			created = false
+		}
+		return nil
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
-	return entry, err
-}
-
-func (r *Repo) createFSEntry(ctx context.Context, entry scanmodel.FSEntry) error {
-	insertQuery := `
-		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
-
-	return scanmodel.WriteFSEntryToDatabase(
-		entry,
-		func(
-			id id.FSEntryID,
-			path string,
-			lastModified time.Time,
-			mode fs.FileMode,
-			size uint64,
-			checksum []byte,
-			sourceID id.SourceID,
-			spaceDID did.DID,
-		) error {
-			_, err := r.db.ExecContext(
-				ctx,
-				insertQuery,
-				id,
-				path,
-				lastModified.Unix(),
-				mode,
-				size,
-				checksum,
-				sourceID,
-				util.DbDID(&spaceDID),
-			)
-			return err
-		})
+	if err != nil {
+		return nil, false, err
+	}
+	return entry, created, nil
 }
 
 func (r *Repo) DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
