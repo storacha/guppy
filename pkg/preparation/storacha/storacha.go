@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
@@ -25,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
@@ -83,31 +83,42 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 
 	sem := make(chan struct{}, a.ShardUploadParallelism)
-	errCh := make(chan error, len(closedShards))
-	var wg sync.WaitGroup
-
+	shardUploadErrorCh := make(chan gtypes.ShardUploadError, len(closedShards))
+	eg, gctx := errgroup.WithContext(ctx)
 	for _, shard := range closedShards {
 		sem <- struct{}{}
-		wg.Go(func() {
+		eg.Go(func() error {
 			defer func() { <-sem }()
-			if err := a.addShard(ctx, shard, spaceDID); err != nil {
-				err = fmt.Errorf("failed to add shard %s for upload %s: %v", shard.ID(), uploadID, err)
-				errCh <- err
+			if err := a.addShard(gctx, shard, spaceDID); err != nil {
+				err = fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+				var errShardUpload gtypes.ShardUploadError
+				if errors.As(err, &errShardUpload) {
+					shardUploadErrorCh <- errShardUpload
+					return nil
+				}
 				log.Errorf("%v", err)
-			} else {
-				log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
+				return err
 			}
+			log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
+			return nil
 		})
 	}
 
-	wg.Wait()
-	close(errCh)
+	terminalErr := eg.Wait()
+	close(shardUploadErrorCh)
 
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
+	if terminalErr != nil {
+		return terminalErr
 	}
-	return errors.Join(errs...)
+
+	var shardUploadErrors []gtypes.ShardUploadError
+	for err := range shardUploadErrorCh {
+		shardUploadErrors = append(shardUploadErrors, err)
+	}
+	if len(shardUploadErrors) > 0 {
+		return gtypes.NewShardUploadErrors(shardUploadErrors)
+	}
+	return nil
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
@@ -150,7 +161,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		log.Infof("adding shard %s to space %s via `space/blob/add`", shard.ID(), spaceDID)
 		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
 		if err != nil {
-			return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+			return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err))
 		}
 
 		if addedBlob.Digest.B58String() != shard.Digest().B58String() {
@@ -170,7 +181,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 
 	err = a.spaceBlobReplicate(ctx, shard, spaceDID, location)
 	if err != nil {
-		return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
+		return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err))
 	}
 
 	var opts []client.FilecoinOfferOption
@@ -179,7 +190,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	}
 	err = a.filecoinOffer(ctx, shard, spaceDID, opts...)
 	if err != nil {
-		return err
+		return gtypes.NewShardUploadError(shard.ID(), err)
 	}
 
 	err = shard.Added()

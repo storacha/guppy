@@ -144,3 +144,50 @@ func (e BadFSEntriesError) Unwrap() []error {
 	}
 	return errs
 }
+
+type ShardUploadError struct {
+	shardID id.ShardID
+	err     error
+}
+
+func NewShardUploadError(shardID id.ShardID, err error) ShardUploadError {
+	return ShardUploadError{shardID: shardID, err: err}
+}
+func (e ShardUploadError) Error() string {
+	return fmt.Sprintf("shard upload %s failed: %s", e.shardID, e.err)
+}
+func (e ShardUploadError) Unwrap() error {
+	return e.err
+}
+func (e ShardUploadError) ShardID() id.ShardID {
+	return e.shardID
+}
+
+type ShardUploadErrors struct {
+	errs []ShardUploadError
+}
+
+func NewShardUploadErrors(errs []ShardUploadError) error {
+	return RetriableError{err: ShardUploadErrors{errs: errs}}
+}
+
+func (e ShardUploadErrors) Errs() []ShardUploadError {
+	return e.errs
+}
+
+func (e ShardUploadErrors) Error() string {
+	var messages []string
+	for _, err := range e.errs {
+		messages = append(messages, err.Error())
+	}
+
+	return fmt.Sprintf("shard uploads failed:\n%s", strings.Join(messages, "\n"))
+}
+
+func (e ShardUploadErrors) Unwrap() []error {
+	errs := make([]error, len(e.errs))
+	for i, err := range e.errs {
+		errs[i] = err
+	}
+	return errs
+}
