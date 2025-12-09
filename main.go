@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,12 +39,25 @@ func main() {
 		return
 	}
 
+	if os.Getenv("GUPPY_PPROF") != "" {
+		startPprofServer()
+	}
+
 	// Handle shutdown properly so nothing leaks.
 	defer func() {
 		err = errors.Join(err, otelShutdown(context.Background()))
 	}()
 
 	err = cmd.ExecuteContext(ctx)
+}
+
+func startPprofServer() {
+	const addr = "localhost:8081"
+	go func() {
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			log.Warnw("pprof server exited", "addr", addr, "err", err)
+		}
+	}()
 }
 
 func setupOTelSDK(ctx context.Context) (func(ctx context.Context) error, error) {
