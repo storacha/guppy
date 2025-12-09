@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld/block"
@@ -255,11 +256,14 @@ func TestLocator(t *testing.T) {
 		// But the mock won't return a location claim for shard2, so we should get an error
 		_, err = locator.Locate(t.Context(), space.DID(), block2Hash)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), block2Hash.String())
+		require.Contains(t, err.Error(), digestutil.Format(block2Hash))
 		require.Contains(t, err.Error(), "no locations found")
 
-		// Verify that we made a second query, but it was location-only
+		// Verify that we made a second query, but it was location-only, and was
+		// targeted at shard2
 		require.Len(t, mockIndexer.Queries, 2, "Should have made two queries")
+		require.Equal(t, shard2Hash, mockIndexer.Queries[1].Hashes[0],
+			"Second query should be for shard2 hash")
 		require.Equal(t, types.QueryTypeLocation, mockIndexer.Queries[1].Type,
 			"Second query should be location-only since index is cached")
 	})
