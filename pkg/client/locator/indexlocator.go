@@ -146,7 +146,7 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 		if ok := errors.As(err, &failedResponseErr); ok {
 			return fmt.Errorf("indexer responded with status %d: %s", failedResponseErr.StatusCode, failedResponseErr.Body)
 		}
-		return fmt.Errorf("querying claims for %s: %w", hash.String(), err)
+		return fmt.Errorf("querying claims for %s: %w", digestutil.Format(hash), err)
 	}
 
 	bs, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(result.Blocks()))
