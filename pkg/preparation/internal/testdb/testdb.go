@@ -2,7 +2,9 @@ package testdb
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -15,8 +17,15 @@ import (
 func CreateTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	// Give each test its own in-memory database to avoid cross-test contention and
+	// limit the connection pool to a single connection so modernc SQLite doesn't
+	// deadlock waiting on internal locks.
+	dsn := fmt.Sprintf("file:guppy-test-%d?mode=memory&cache=shared", time.Now().UnixNano())
+
+	db, err := sql.Open("sqlite", dsn)
 	require.NoError(t, err, "failed to open in-memory SQLite database")
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	t.Cleanup(func() {
 		db.Close()
