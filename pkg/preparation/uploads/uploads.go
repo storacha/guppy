@@ -142,13 +142,19 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	var badFSEntriesErr types.BadFSEntriesError
 	var badNodesErr types.BadNodesError
-
+	var shardUploadErrors types.ShardUploadErrors
 	// Clean up after errors that need it
 	switch {
+
 	case errors.As(workersErr, &badFSEntriesErr):
 		err := a.handleBadFSEntries(ctx, uploadID, spaceDID, badFSEntriesErr)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
+		}
+	case errors.As(workersErr, &shardUploadErrors):
+		err := a.handleBadShardUploads(ctx, uploadID, spaceDID, shardUploadErrors)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
 		}
 	case errors.As(workersErr, &badNodesErr):
 		err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
@@ -190,6 +196,22 @@ func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, space
 	if err != nil {
 		return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
 	}
+	return nil
+}
+
+func (a API) handleBadShardUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadErrors types.ShardUploadErrors) error {
+	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
+	for _, e := range shardUploadErrors.Errs() {
+		// bad nodes error can happen from reading car during upload
+		var badNodesErr types.BadNodesError
+		if errors.As(e.Unwrap(), &badNodesErr) {
+			err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -355,8 +377,6 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 	defer log.Debugf("Storacha worker for upload %s exiting", uploadID)
 	defer span.End()
 
-	var errs []error
-
 	return Worker(
 		ctx,
 		blobWork,
@@ -365,7 +385,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 		func() error {
 			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err))
+				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
 
 			return nil
@@ -373,12 +393,7 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// finalize
 		func() error {
-			err := errors.Join(errs...)
-			if err != nil {
-				return err
-			}
-
-			err = api.AddIndexesForUpload(ctx, uploadID, spaceDID)
+			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
 			}
