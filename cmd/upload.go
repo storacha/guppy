@@ -23,10 +23,11 @@ import (
 )
 
 var uploadFlags struct {
-	dbPath    string
-	proofPath string
-	all       bool
-	retry     bool
+	dbPath      string
+	proofPath   string
+	all         bool
+	retry       bool
+	parallelism uint64
 }
 
 var uploadCmd = &cobra.Command{
@@ -79,7 +80,7 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath), preparation.WithShardUploadParallelism(int(uploadFlags.parallelism)))
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -224,6 +225,7 @@ func init() {
 	uploadCmd.Flags().StringVar(&uploadFlags.proofPath, "proof", "", "Path to a UCAN proof file")
 	uploadCmd.Flags().BoolVar(&uploadFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	uploadCmd.Flags().BoolVar(&uploadFlags.retry, "retry", false, "Auto-retry failed uploads")
+	uploadCmd.Flags().Uint64Var(&uploadFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
 }
 
 var uploadSourceCmd = &cobra.Command{
