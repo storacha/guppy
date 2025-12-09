@@ -49,7 +49,7 @@ var _ uploads.ExecuteDagScansForUploadFunc = API{}.ExecuteDagScansForUpload
 var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
-func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
+func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, scanCB func(scan *model.DAGScan) error, nodeCB func(node model.Node, data []byte) error) error {
 	var badFsEntryErrs []types.BadFSEntryError
 	for {
 		ctx, span := tracer.Start(ctx, "dag-scans-batch", trace.WithAttributes(

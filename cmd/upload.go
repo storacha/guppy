@@ -385,3 +385,86 @@ func init() {
 func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
 	return preparation.OpenRepo(ctx, uploadFlags.dbPath)
 }
+
+func doUpload(ctx context.Context, uploadsToRun []*uploadsmodel.Upload, api preparation.API, send) error {
+
+		type uploadResult struct {
+			upload   *uploadsmodel.Upload
+			cid      cid.Cid
+			attempts int
+		}
+
+		type uploadFailure struct {
+			upload   *uploadsmodel.Upload
+			err      error
+			attempts int
+		}
+
+		var completedUploads []uploadResult
+		var failedUploads []uploadFailure
+		for _, u := range uploadsToRun {
+			start := time.Now()
+			log.Infow("Starting upload", "upload", u.ID())
+			attempt := 0
+			var uploadCID cid.Cid
+			var lastErr error
+
+			for {
+				attempt++
+				uploadCID, err = api.ExecuteUpload(ctx, u)
+				if err == nil {
+					lastErr = nil
+					break
+				}
+
+				var re types.RetriableError
+				if errors.As(err, &re) {
+					lastErr = err
+					if uploadFlags.retry {
+						log.Warnw("Retriable upload error encountered, retrying", "upload", u.ID(), "attempt", attempt,
+							"err", err)
+						continue
+					}
+
+					log.Errorw("Retriable upload error encountered (retry disabled)", "upload", u.ID(), "attempt",
+						attempt, "err", err)
+					break
+				}
+
+				lastErr = err
+				log.Errorw("Upload failed with non-retriable error", "upload", u.ID(), "attempt", attempt, "err", err)
+				break
+			}
+
+			if lastErr != nil {
+				failedUploads = append(failedUploads, uploadFailure{
+					upload:   u,
+					err:      lastErr,
+					attempts: attempt,
+				})
+				log.Errorw("Upload failed", "upload", u.ID(), "duration", time.Since(start), "attempts", attempt, "err",
+					lastErr)
+				continue
+			}
+
+			completedUploads = append(completedUploads, uploadResult{
+				upload:   u,
+				cid:      uploadCID,
+				attempts: attempt,
+			})
+			log.Infow("Completed upload", "upload", u.ID(), "cid", uploadCID.String(), "duration", time.Since(start), "attempts", attempt)
+		}
+
+		for _, u := range completedUploads {
+			cmd.Printf("Upload completed successfully: %s\n", u.cid.String())
+		}
+
+		if len(failedUploads) > 0 {
+			cmd.Println("Uploads failed:")
+			for _, u := range failedUploads {
+				cmd.Printf("- %s: %v\n", u.upload.ID(), u.err)
+			}
+			return cmdutil.NewHandledCliError(fmt.Errorf("%d upload(s) failed", len(failedUploads)))
+		}
+		return nil
+}

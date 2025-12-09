@@ -53,6 +53,7 @@ import (
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
@@ -250,7 +251,7 @@ func TestExecuteUpload(t *testing.T) {
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
 
-		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload, func(upm uploads.UploadProgressMessage) error { return nil })
 		require.NoError(t, err)
 		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
@@ -373,7 +374,7 @@ func TestExecuteUpload(t *testing.T) {
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
 
 		// The first time, it should hit an error (on the third PUT)
-		_, err = api.ExecuteUpload(t.Context(), upload)
+		_, err = api.ExecuteUpload(t.Context(), upload, func(upm uploads.UploadProgressMessage) error { return nil })
 
 		var shardUploadErrors gtypes.ShardUploadErrors
 		require.ErrorAs(t, err, &shardUploadErrors, "expected a ShardUploadErrors error")
@@ -396,7 +397,7 @@ func TestExecuteUpload(t *testing.T) {
 		require.NoError(t, err)
 
 		// The second time, it should succeed
-		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
+		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload, func(upm uploads.UploadProgressMessage) error { return nil })
 		require.NoError(t, err, "expected upload to succeed on retry")
 		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
