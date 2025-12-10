@@ -12,6 +12,7 @@ import (
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/didmailto"
@@ -65,13 +66,14 @@ var generateCmd = &cobra.Command{
 				return fmt.Errorf("parsing `--provision-to` account %q: %w", generateFlags.provisionTo, err)
 			}
 			if !slices.Contains(accounts, provisionAccount) {
-				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n", generateFlags.provisionTo, generateFlags.provisionTo)
+				cmd.PrintErrf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n",
+					generateFlags.provisionTo, generateFlags.provisionTo)
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
+				cmd.PrintErrf("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", provisionAccount))
 			case len(accounts) == 1:
 				provisionAccount = accounts[0]
@@ -80,7 +82,8 @@ var generateCmd = &cobra.Command{
 				for _, acct := range accounts {
 					acctsString += fmt.Sprintf("- %s\n", acct)
 				}
-				fmt.Printf("Multiple accounts are logged in.\n%s\nSpecify an account with `--provision-to`.\n", acctsString)
+				cmd.PrintErrf("Multiple accounts are logged in.\n%s\nSpecify an account with `--provision-to`.\n",
+					acctsString)
 				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
@@ -93,13 +96,14 @@ var generateCmd = &cobra.Command{
 				return fmt.Errorf("parsing `--grant-to` account %q: %w", generateFlags.grantTo, err)
 			}
 			if !slices.Contains(accounts, grantAccount) {
-				fmt.Printf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n", generateFlags.grantTo, generateFlags.grantTo)
+				cmd.PrintErrf("Account %s is not logged in yet. Use `guppy login %s` to log in.\n", generateFlags.grantTo,
+					generateFlags.grantTo)
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			}
 		} else {
 			switch {
 			case len(accounts) == 0:
-				fmt.Printf("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
+				cmd.PrintErr("No accounts are logged in yet. Use `guppy login <account>` to log in.\n")
 				return cmdutil.NewHandledCliError(fmt.Errorf("account %s is not logged in", grantAccount))
 			case len(accounts) == 1:
 				grantAccount = accounts[0]
@@ -108,7 +112,7 @@ var generateCmd = &cobra.Command{
 				for _, acct := range accounts {
 					acctsString += fmt.Sprintf("- %s\n", acct)
 				}
-				fmt.Printf("Multiple accounts are logged in.\n%s\nSpecify an account with `--grant-to`.\n", acctsString)
+				cmd.PrintErrf("Multiple accounts are logged in.\n%s\nSpecify an account with `--grant-to`.\n", acctsString)
 				return cmdutil.NewHandledCliError(fmt.Errorf("multiple accounts are logged in"))
 			}
 		}
@@ -120,19 +124,19 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("no account found to grant space access to")
 		}
 
-		fmt.Printf("Provisioning %s to %s...\n\n", space.DID(), provisionAccount)
+		cmd.PrintErrf("Provisioning %s to %s...\n\n", space.DID(), provisionAccount)
 		_, err = c.ProviderAdd(cmd.Context(), provisionAccount, c.Connection().ID().DID(), space.DID())
 		if err != nil {
 			return fmt.Errorf("provisioning space: %w", err)
 		}
 
-		fmt.Printf("Granting access on %s to %s...\n\n", space.DID(), grantAccount)
+		cmd.PrintErrf("Granting access on %s to %s...\n\n", space.DID(), grantAccount)
 
 		// Build the capabilities to grant
 		capabilities := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaceAccess))
-		for _, cap := range spaceAccess {
+		for _, c := range spaceAccess {
 			capabilities = append(capabilities, ucan.NewCapability(
-				cap,
+				c,
 				space.DID().String(),
 				ucan.NoCaveats{},
 			))
@@ -143,7 +147,11 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("granting capabilities: %w", err)
 		}
 
-		fmt.Printf("Generated space: %s\n\n", space.DID())
+		cmd.PrintErr("Generated space: ")
+		// all other output is printed to stderr, only the space did prints to stdout, allowing:
+		// export SPACE=$(guppy space generate)
+		cmd.Print(space.DID().String())
+		cmd.PrintErr("\n\n")
 
 		return nil
 	},
