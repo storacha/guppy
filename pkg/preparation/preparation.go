@@ -11,6 +11,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/pkg/preparation/dags"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -109,7 +110,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		FileAccessor: scansAPI.OpenFileByID,
 	}
 
-	nr, err := dags.NewNodeReader(repo, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+	nr, err := nodereader.NewNodeReaderOpener(repo.LinksForCID, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
 		source, err := repo.GetSourceByID(ctx, sourceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
@@ -132,9 +133,9 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 
 	shardsAPI := &shards.API{
 		Repo:             repo,
-		NodeReader:       nr,
+		OpenNodeReader:   nr.OpenNodeReader,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,
-		ShardEncoder:     shards.NewCAREncoder(nr),
+		ShardEncoder:     shards.NewCAREncoder(),
 	}
 
 	storachaAPI := storacha.API{

@@ -16,6 +16,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
@@ -27,14 +28,12 @@ import (
 
 var log = logging.Logger("preparation/shards")
 
-type NodeDataGetter interface {
-	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
-}
+type OpenNodeReaderFunc func() (nodereader.NodeReader, error)
 
 // API provides methods to interact with the Shards in the repository.
 type API struct {
 	Repo             Repo
-	NodeReader       NodeDataGetter
+	OpenNodeReader   OpenNodeReaderFunc
 	MaxNodesPerIndex int
 	ShardEncoder     ShardEncoder
 }
@@ -267,7 +266,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 	}
 
 	// must have a NodeReader to fetch block data
-	if a.NodeReader == nil {
+	if a.OpenNodeReader == nil {
 		return fmt.Errorf("no NodeReader configured")
 	}
 
@@ -300,6 +299,13 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 
 		return err
 	}
+
+	nodeReader, err := a.OpenNodeReader()
+	if err != nil {
+		return fmt.Errorf("failed to open node reader for shard %s: %w", shardID, err)
+	}
+	defer nodeReader.Close()
+
 	if offset == 0 {
 		if err := a.ShardEncoder.WriteHeader(ctx, pw); err != nil {
 			return fmt.Errorf("failed to write shard header: %w", err)
@@ -310,10 +316,10 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		go func() {
 			defer workers.Done()
 			for j := range jobs {
-				data, err := a.NodeReader.GetData(ctx, j.node)
+				data, err := nodeReader.GetData(ctx, j.node)
 				if err != nil {
 					// Expand to all bad nodes in the shard to match previous behavior.
-					err = a.makeErrBadNodes(ctx, shardID)
+					err = a.makeErrBadNodes(ctx, shardID, nodeReader)
 				}
 				select {
 				case <-ctx.Done():
@@ -399,7 +405,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 // By communicating upstream all failing nodes from the shard, we can handle
 // them all at once, and avoid having to restart the upload again for each bad
 // node.
-func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
+func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader nodereader.NodeReader) error {
 	// Collect the nodes first, because we can't read data for each node while
 	// holding the lock on the database that ForEachNode has. This means holding a
 	// bunch of nodes in memory, but it's limited to the size of a shard.
@@ -415,7 +421,7 @@ func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
 	var errs []types.BadNodeError
 	goodCIDs := cid.NewSet()
 	for _, node := range nodes {
-		_, err := a.NodeReader.GetData(ctx, node)
+		_, err := nodeReader.GetData(ctx, node)
 		if err != nil {
 			errs = append(errs, types.NewBadNodeError(node.CID(), err))
 		} else {
