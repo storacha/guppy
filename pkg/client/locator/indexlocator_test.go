@@ -77,11 +77,12 @@ func TestLocator(t *testing.T) {
 		// sent to the indexer, whatever they are.
 		requiredDelegations := []delegation.Delegation{
 			testutil.RandomLocationDelegation(t),
-			testutil.RandomEqualsDelegation(t),
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		locations, err := locator.Locate(t.Context(), space.DID(), blockHash)
 		require.NoError(t, err)
@@ -158,7 +159,9 @@ func TestLocator(t *testing.T) {
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim}, []blobindex.ShardedDagIndexView{index})
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// First, locate block1
 		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
@@ -234,7 +237,9 @@ func TestLocator(t *testing.T) {
 
 		// Create a mock indexer that responds differently based on query type
 		mockIndexer := newLocationQueryMockIndexer(claim1, index)
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// First, locate block1 - should return index and claim for shard1
 		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
@@ -326,7 +331,9 @@ func TestLocator(t *testing.T) {
 			space2Claim: claim2,
 			index:       index,
 		}
-		session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		session := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// Locate the block for space1
 		locations1, err := session.Locate(t.Context(), space1.DID(), blockHash)
