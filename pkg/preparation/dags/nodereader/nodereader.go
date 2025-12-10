@@ -29,7 +29,7 @@ const (
 	// this cache is for data read from files, we read BLOCK_SIZE from each file, so this will never grow beyond
 	// 1 GiB
 	DataCacheSize       = 1024
-	FileHandleCacheSize = 1024
+	FileHandleCacheSize = 128
 )
 
 type LinksForCIDFunc func(ctx context.Context, cid cid.Cid, spaceDID did.DID) ([]*model.Link, error)
