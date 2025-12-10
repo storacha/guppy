@@ -19,21 +19,28 @@ import (
 	"github.com/storacha/indexing-service/pkg/types"
 )
 
-func NewIndexLocator(indexer IndexerClient, delegations []delegation.Delegation) *indexLocator {
+// AuthorizeRetrievalFunc creates a content retrieval authorization for the
+// provided space.
+//
+// It should create a short lived delegation that allows the indexing service
+// to retrieve indexes from the space.
+type AuthorizeRetrievalFunc func(space did.DID) (delegation.Delegation, error)
+
+func NewIndexLocator(indexer IndexerClient, authorizeRetrieval AuthorizeRetrievalFunc) *indexLocator {
 	return &indexLocator{
-		indexer:     indexer,
-		delegations: delegations,
-		commitments: make(map[string][]ucan.Capability[assert.LocationCaveats]),
-		inclusions:  make(map[string][]inclusion),
+		indexer:            indexer,
+		authorizeRetrieval: authorizeRetrieval,
+		commitments:        make(map[string][]ucan.Capability[assert.LocationCaveats]),
+		inclusions:         make(map[string][]inclusion),
 	}
 }
 
 type indexLocator struct {
-	indexer     IndexerClient
-	delegations []delegation.Delegation
-	mu          sync.RWMutex
-	commitments map[string][]ucan.Capability[assert.LocationCaveats]
-	inclusions  map[string][]inclusion
+	indexer            IndexerClient
+	authorizeRetrieval AuthorizeRetrievalFunc
+	mu                 sync.RWMutex
+	commitments        map[string][]ucan.Capability[assert.LocationCaveats]
+	inclusions         map[string][]inclusion
 }
 
 type inclusion struct {
@@ -133,9 +140,14 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, hash mh.Mult
 		queryType = types.QueryTypeStandard
 	}
 
+	auth, err := s.authorizeRetrieval(spaceDID)
+	if err != nil {
+		return fmt.Errorf("authorizing retrieval for space %s: %w", spaceDID, err)
+	}
+
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
 		Hashes:      []mh.Multihash{hash},
-		Delegations: s.delegations,
+		Delegations: []delegation.Delegation{auth},
 		Match: types.Match{
 			Subject: []did.DID{spaceDID},
 		},
