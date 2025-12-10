@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/signal"
+	"syscall"
 
 	logging "github.com/ipfs/go-log/v2"
 
@@ -18,14 +20,16 @@ func main() {
 	var err error
 	defer func() {
 		if err != nil {
-			if _, ok := err.(cmdutil.HandledCliError); ok {
+			var handledCliError cmdutil.HandledCliError
+			if errors.As(err, &handledCliError) {
 				os.Exit(1)
 			}
 			log.Fatalln(err)
 		}
 	}()
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Set up OpenTelemetry.
 	otelShutdown, err := setupOTelSDK(ctx)
