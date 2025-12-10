@@ -21,6 +21,7 @@ import (
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
@@ -36,7 +37,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	t.Run("adds nodes to shards", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
-		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder(nil)}
+		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder()}
 		space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(1<<16))
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
@@ -148,7 +149,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	t.Run("with a node too big for a shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
-		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder(nil)}
+		api := shards.API{Repo: repo, ShardEncoder: shards.NewCAREncoder()}
 		space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(128))
 		require.NoError(t, err)
 		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
@@ -186,6 +187,14 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 type stubNodeReader struct {
 	// If set, always returns an error when trying to read these node.
 	errorNodes []cid.Cid
+}
+
+func (s stubNodeReader) OpenNodeReader() (nodereader.NodeReader, error) {
+	return s, nil
+}
+
+func (s stubNodeReader) Close() error {
+	return nil
 }
 
 func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error) {
@@ -233,9 +242,9 @@ func TestReaderForShard(t *testing.T) {
 
 		nodeReader := stubNodeReader{}
 		api := shards.API{
-			Repo:         repo,
-			NodeReader:   nodeReader,
-			ShardEncoder: shards.NewCAREncoder(nodeReader),
+			Repo:           repo,
+			OpenNodeReader: nodeReader.OpenNodeReader,
+			ShardEncoder:   shards.NewCAREncoder(),
 		}
 
 		carReader, err := api.ReaderForShard(t.Context(), shard.ID())
@@ -309,9 +318,9 @@ func TestReaderForShard(t *testing.T) {
 			errorNodes: []cid.Cid{nodeCID2, nodeCID4},
 		}
 		api := shards.API{
-			Repo:         repo,
-			NodeReader:   nodeReader,
-			ShardEncoder: shards.NewCAREncoder(nodeReader),
+			Repo:           repo,
+			OpenNodeReader: nodeReader.OpenNodeReader,
+			ShardEncoder:   shards.NewCAREncoder(),
 		}
 
 		carReader, err := api.ReaderForShard(t.Context(), shard.ID())
@@ -332,8 +341,8 @@ func TestIndexForUpload(t *testing.T) {
 		nodeReader := stubNodeReader{}
 		api := shards.API{
 			Repo:             repo,
-			NodeReader:       nodeReader,
-			ShardEncoder:     shards.NewCAREncoder(nodeReader),
+			OpenNodeReader:   nodeReader.OpenNodeReader,
+			ShardEncoder:     shards.NewCAREncoder(),
 			MaxNodesPerIndex: 5,
 		}
 
@@ -446,9 +455,9 @@ func TestIndexForUpload(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))
 		nodeReader := stubNodeReader{}
 		api := shards.API{
-			Repo:         repo,
-			NodeReader:   nodeReader,
-			ShardEncoder: shards.NewCAREncoder(nodeReader),
+			Repo:           repo,
+			OpenNodeReader: nodeReader.OpenNodeReader,
+			ShardEncoder:   shards.NewCAREncoder(),
 		}
 
 		spaceDID, err := did.Parse("did:storacha:space:example")

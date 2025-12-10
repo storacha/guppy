@@ -50,14 +50,13 @@ func init() {
 }
 
 type CAREncoder struct {
-	nodeReader NodeDataGetter
 }
 
 var _ ShardEncoder = (*CAREncoder)(nil)
 
 // NewCAREncoder creates a new shard encoder that outputs CAR files.
-func NewCAREncoder(nodeReader NodeDataGetter) *CAREncoder {
-	return &CAREncoder{nodeReader}
+func NewCAREncoder() *CAREncoder {
+	return &CAREncoder{}
 }
 
 func (c *CAREncoder) WriteHeader(ctx context.Context, w io.Writer) error {
