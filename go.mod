@@ -36,7 +36,7 @@ require (
 	github.com/spf13/pflag v1.0.6
 	github.com/storacha/go-libstoracha v0.6.7
 	github.com/storacha/go-ucanto v0.7.2-0.20251119232529-559b0a57d38f
-	github.com/storacha/indexing-service v1.12.1
+	github.com/storacha/indexing-service v1.12.2
 	github.com/stretchr/testify v1.11.1
 	github.com/wordgen/wordlists/eff v0.3.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0
