@@ -143,7 +143,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		Client:                 client,
 		ReaderForShard:         shardsAPI.ReaderForShard,
 		IndexesForUpload:       shardsAPI.IndexesForUpload,
-		ShardUploadParallelism: cfg.shardUploadParallelism,
+		BlobUploadParallelism: cfg.shardUploadParallelism,
 	}
 
 	uploadsAPI = uploads.API{

@@ -375,7 +375,7 @@ func TestExecuteUpload(t *testing.T) {
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
 
-		var shardUploadErrors gtypes.ShardUploadErrors
+		var shardUploadErrors gtypes.BlobUploadErrors
 		require.ErrorAs(t, err, &shardUploadErrors, "expected a ShardUploadErrors error")
 
 		underlying := shardUploadErrors.Unwrap()
