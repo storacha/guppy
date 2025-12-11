@@ -224,6 +224,13 @@ func (s *Shard) PDPAccept() invocation.Invocation {
 	return s.pdpAccept
 }
 
+func (s *Shard) String() string {
+	if s.CID() != cid.Undef {
+		return fmt.Sprintf("Shard[id=%s, cid=%s]", s.id, s.CID())
+	}
+	return fmt.Sprintf("Shard[id=%s]", s.id)
+}
+
 // SpaceBlobAdded records the location and PDP accept invocations for the shard
 // after a successful `space/blob/add`. The shard must be in `ShardStateClosed`,
 // or it should not have been `space/blob/add`ed to begin with. `location` must

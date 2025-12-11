@@ -143,7 +143,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	var badFSEntriesErr types.BadFSEntriesError
 	var badNodesErr types.BadNodesError
-	var shardUploadErrors types.ShardUploadErrors
+	var shardUploadErrors types.BlobUploadErrors
 	// Clean up after errors that need it
 	switch {
 
@@ -153,7 +153,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
 		}
 	case errors.As(workersErr, &shardUploadErrors):
-		err := a.handleBadShardUploads(ctx, uploadID, spaceDID, shardUploadErrors)
+		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, shardUploadErrors)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
 		}
@@ -200,7 +200,7 @@ func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, space
 	return nil
 }
 
-func (a API) handleBadShardUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadErrors types.ShardUploadErrors) error {
+func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadErrors types.BlobUploadErrors) error {
 	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
 	for _, e := range shardUploadErrors.Errs() {
 		// bad nodes error can happen from reading car during upload
