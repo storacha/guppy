@@ -11,6 +11,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -25,10 +26,10 @@ var (
 )
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
-type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
-type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
-type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, scanCB func(dagScan *dagmodel.DAGScan) error, nodeCB func(node dagmodel.Node, data []byte) error) error
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, callback func(shard *shardsmodel.Shard) error) error
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, callback func(shard *shardsmodel.Shard) error) error
+type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, cb func(shard *shardsmodel.Shard) error) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
@@ -92,8 +93,54 @@ func signal(work chan<- struct{}) {
 	}
 }
 
+type UploadProgressMessage interface {
+	isUploadProgressMessage()
+}
+
+type FSEntryAddedMessage struct {
+	UploadID id.UploadID
+	FSEntry  scanmodel.FSEntry
+}
+
+type FSEntryScannedMessage struct {
+	UploadID id.UploadID
+	FSEntry  scanmodel.FSEntry
+}
+
+type NodeAddedMesssage struct {
+	UploadID id.UploadID
+	Node     dagmodel.Node
+}
+
+type ShardCreatedMessage struct {
+	UploadID id.UploadID
+	Shard    shardsmodel.Shard
+}
+
+type ShardClosedMessage struct {
+	UploadID id.UploadID
+	Shard    shardsmodel.Shard
+}
+
+type ShardUploadStartedMessage struct {
+	UploadID id.UploadID
+	Shard    shardsmodel.Shard
+}
+
+type ShardUploadCompletedMessage struct {
+	UploadID id.UploadID
+	Shard    shardsmodel.Shard
+}
+
+func (FSEntryAddedMessage) isUploadProgressMessage()         {}
+func (NodeAddedMesssage) isUploadProgressMessage()           {}
+func (ShardCreatedMessage) isUploadProgressMessage()         {}
+func (ShardClosedMessage) isUploadProgressMessage()          {}
+func (ShardUploadStartedMessage) isUploadProgressMessage()   {}
+func (ShardUploadCompletedMessage) isUploadProgressMessage() {}
+
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
-func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) (cid.Cid, error) {
+func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, progressCallback func(message UploadProgressMessage) error) (cid.Cid, error) {
 	ctx, span := tracer.Start(ctx, "execute-upload", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -109,21 +156,21 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	// Start the workers
 	eg, wCtx := bettererrgroup.WithContext(ctx)
 	eg.Go(func() error {
-		err := runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable)
+		err := runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable, progressCallback)
 		if err != nil {
 			return fmt.Errorf("scan worker: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
-		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
+		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable, progressCallback)
 		if err != nil {
 			return fmt.Errorf("DAG scan worker: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
-		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable, progressCallback)
 		if err != nil {
 			return fmt.Errorf("storacha worker: %w", err)
 		}
@@ -239,7 +286,7 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 
 	log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
 	for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
-		_, err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil)
+		_err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil, handleShardCreationUpdate(uploadID, func() {}, progressCallback))
 		if err != nil {
 			return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
 		}
@@ -257,7 +304,7 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 	return nil
 }
 
-func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
+func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}, progressCallback func(message UploadProgressMessage) error) error {
 	ctx, span := tracer.Start(ctx, "scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -272,6 +319,12 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 		// doWork
 		func() error {
 			err := api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
+				if err := progressCallback(FSEntryAddedMessage{
+					UploadID: uploadID,
+					FSEntry:  entry,
+				}); err != nil {
+					return fmt.Errorf("upload progress callback for fs entry %s: %w", entry.ID(), err)
+				}
 				_, isDirectory := entry.(*scanmodel.Directory)
 				_, err := api.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, spaceDID)
 				if err != nil {
@@ -298,13 +351,15 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
-func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
+func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}, progressCallback func(message UploadProgressMessage) error) error {
 	ctx, span := tracer.Start(ctx, "dag-scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
 	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
 	defer span.End()
+
+	shardCreateUpdateCallback := handleShardCreationUpdate(uploadID, func() { signal(closedShardsAvailable) }, progressCallback)
 
 	return Worker(
 		ctx,
@@ -314,13 +369,15 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data)
+				if err := progressCallback(NodeAddedMesssage{
+					UploadID: uploadID,
+					Node:     node,
+				}); err != nil {
+					return fmt.Errorf("upload progress callback for node %s: %w", node.CID(), err)
+				}
+				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, shardCreateUpdateCallback)
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
-				}
-
-				if shardClosed {
-					signal(closedShardsAvailable)
 				}
 
 				return nil
@@ -336,13 +393,9 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		// finalize
 		func() error {
 			// We're out of nodes, so we can close any open shards for this upload.
-			shardClosed, err := api.CloseUploadShards(ctx, uploadID)
+			err := api.CloseUploadShards(ctx, uploadID, shardCreateUpdateCallback)
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
-			}
-
-			if shardClosed {
-				signal(closedShardsAvailable)
 			}
 
 			// Reload the upload to get the latest state from the DB.
@@ -369,7 +422,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 }
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.
-func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
+func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}, progressCallback func(UploadProgressMessage) error) error {
 	ctx, span := tracer.Start(ctx, "storacha-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -383,7 +436,24 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// doWork
 		func() error {
-			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
+			err := api.AddShardsForUpload(ctx, uploadID, spaceDID, func(shard *shardsmodel.Shard) error {
+				if shard.State() == shardsmodel.ShardStateClosed {
+					if err := progressCallback(ShardUploadStartedMessage{
+						UploadID: uploadID,
+						Shard:    *shard,
+					}); err != nil {
+						return fmt.Errorf("upload progress callback for started shard upload %s: %w", shard.ID(), err)
+					}
+				} else {
+					if err := progressCallback(ShardUploadCompletedMessage{
+						UploadID: uploadID,
+						Shard:    *shard,
+					}); err != nil {
+						return fmt.Errorf("upload progress callback for completed shard upload %s: %w", shard.ID(), err)
+					}
+				}
+				return nil
+			})
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
@@ -406,4 +476,26 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 			return nil
 		},
 	)
+}
+
+func handleShardCreationUpdate(uploadID id.UploadID, signal func(), progressCallback func(UploadProgressMessage) error) func(shard *shardsmodel.Shard) error {
+	return func(shard *shardsmodel.Shard) error {
+		if shard.State() == shardsmodel.ShardStateClosed {
+			if err := progressCallback(ShardClosedMessage{
+				UploadID: uploadID,
+				Shard:    *shard,
+			}); err != nil {
+				return fmt.Errorf("upload progress callback for closed shard %s: %w", shard.ID(), err)
+			}
+			signal()
+		} else {
+			if err := progressCallback(ShardCreatedMessage{
+				UploadID: uploadID,
+				Shard:    *shard,
+			}); err != nil {
+				return fmt.Errorf("upload progress callback for created shard %s: %w", shard.ID(), err)
+			}
+		}
+		return nil
+	}
 }

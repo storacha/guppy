@@ -36,7 +36,7 @@ func (r *Repo) FilesToDAGScan(ctx context.Context, uploadID id.UploadID, count i
 			JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
 		 	WHERE dag_scans.upload_id = $1
 			AND dag_scans.cid IS NULL
-			ORDER BY dag_scans.created_at ASC
+			ORDER BY dag_scans.created_at DESC
 			LIMIT $2
 		`,
 		uploadID,
@@ -71,10 +71,9 @@ func (r *Repo) ShardedFiles(ctx context.Context, uploadID id.UploadID, count int
 			JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
       JOIN nodes_in_shards ON nodes_in_shards.node_cid = dag_scans.cid
       JOIN shards ON shards.id = nodes_in_shards.shard_id
--- 		 	WHERE dag_scans.upload_id = X'637a2e3a0ce5448882a080576829696f'
 			WHERE shards.state = 'open'
-			ORDER BY dag_scans.created_at ASC
- 			LIMIT 6
+			ORDER BY dag_scans.created_at DESC
+ 			LIMIT $2
 		`,
 		uploadID,
 		count,

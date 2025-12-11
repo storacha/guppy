@@ -110,7 +110,7 @@ func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File,
 }
 
 // OpenFileByID retrieves a file by its ID and opens it for reading, returning an error if not found or if the file cannot be opened.
-func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id.SourceID, string, error) {
+func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, error) {
 	file, err := a.getFileByID(ctx, fileID)
 	if err != nil {
 		return nil, id.Nil, "", err

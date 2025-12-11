@@ -68,7 +68,7 @@ var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
 var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
-func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, cb func(shard *shardsmodel.Shard) error) error {
 	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
 	defer span.End()
 	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
@@ -89,6 +89,10 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 		sem <- struct{}{}
 		eg.Go(func() error {
 			defer func() { <-sem }()
+			// this is closed but it means the beginning of an upload
+			if err := cb(shard); err != nil {
+				return fmt.Errorf("callback for shard %s failed: %w", shard.ID(), err)
+			}
 			if err := a.addShard(gctx, shard, spaceDID); err != nil {
 				err = fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
 				var errShardUpload gtypes.ShardUploadError
@@ -98,6 +102,9 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 				}
 				log.Errorf("%v", err)
 				return err
+			}
+			if err := cb(shard); err != nil {
+				return fmt.Errorf("callback for shard %s failed: %w", shard.ID(), err)
 			}
 			log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
 			return nil

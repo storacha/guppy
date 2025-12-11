@@ -21,10 +21,12 @@ import (
 	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
+	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
@@ -46,6 +48,7 @@ type uploadModel struct {
 	// State (Maps for multi-upload support)
 	recentAddedShards  map[id.UploadID][]*shardsmodel.Shard
 	recentClosedShards map[id.UploadID][]*shardsmodel.Shard
+	uploadingShards    map[id.UploadID][]*shardsmodel.Shard
 	filesToDAGScan     map[id.UploadID][]sqlrepo.FileInfo
 	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
 
@@ -98,6 +101,21 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
+
+	case uploads.FSEntryAddedMessage:
+		if file, ok := msg.FSEntry.(*scansmodel.File); ok {
+
+			m.filesToDAGScan[msg.UploadID] = append([]sqlrepo.FileInfo{
+				{
+					Path: file.Path(),
+					Size: file.Size(),
+				},
+			}, m.filesToDAGScan[msg.UploadID][:6]...)
+			m.dagScanStats[msg.UploadID] += file.Size()
+		}
+		return m, nil
+
+	case uploads.NodeAddedMesssage:
 
 	case statsMsg:
 		var cmds []tea.Cmd
@@ -157,7 +175,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dagScans += size
 		}
 
-		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
+		return m, tea.Batch(append(cmds)...)
 
 	case error:
 
@@ -179,7 +197,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = fmt.Errorf("could not find upload %s to retry after retriable error", msg.id)
 				return m, tea.Quit
 			}
-			return m, tea.Batch(executeUpload(m.ctx, m.api, upload))
+			return m, nil
 		}
 		m.err = msg.err
 		return m, tea.Quit
@@ -303,7 +321,7 @@ type uploadErrMsg struct {
 	err error
 }
 
-func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmodel.Upload) tea.Cmd {
+func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmodel.Upload) {
 	return func() tea.Msg {
 		rootCID, err := api.ExecuteUpload(ctx, upload)
 		if err != nil {

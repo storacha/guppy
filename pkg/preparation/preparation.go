@@ -214,6 +214,6 @@ func (a API) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id
 	return a.Repo.AddSourceToSpace(ctx, spaceDID, sourceID)
 }
 
-func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload) (cid.Cid, error) {
-	return a.Uploads.ExecuteUpload(ctx, upload.ID(), upload.SpaceDID())
+func (a API) ExecuteUpload(ctx context.Context, upload *uploadsmodel.Upload, progressCallback func(uploads.UploadProgressMessage) error) (cid.Cid, error) {
+	return a.Uploads.ExecuteUpload(ctx, upload.ID(), upload.SpaceDID(), progressCallback)
 }

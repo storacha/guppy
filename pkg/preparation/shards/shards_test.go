@@ -57,10 +57,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		require.NoError(t, err)
 
 		data := testutil.RandomBytes(t, int(n.Size()))
-		shardClosed, err := api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, data)
-		require.NoError(t, err)
-
-		require.False(t, shardClosed)
+		mustAddNodeNodeToUploadShards(t, api, upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, data, false)
 		openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 		require.NoError(t, err)
 		require.Len(t, openShards, 1)
@@ -80,10 +77,8 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2.(cidlink.Link).Cid, 1<<14, space.DID(), "some/other/path", source.ID(), 0)
 		require.NoError(t, err)
 		data = testutil.RandomBytes(t, int(n.Size()))
-		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID2.(cidlink.Link).Cid, data)
-		require.NoError(t, err)
+		mustAddNodeNodeToUploadShards(t, api, upload.ID(), space.DID(), nodeCID2.(cidlink.Link).Cid, data, false)
 
-		require.False(t, shardClosed)
 		openShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
 		require.NoError(t, err)
 		require.Len(t, openShards, 1)
@@ -102,10 +97,8 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		require.NoError(t, err)
 
 		data = testutil.RandomBytes(t, int(n.Size()))
-		shardClosed, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID3.(cidlink.Link).Cid, data)
-		require.NoError(t, err)
+		mustAddNodeNodeToUploadShards(t, api, upload.ID(), space.DID(), nodeCID3.(cidlink.Link).Cid, data, true)
 
-		require.True(t, shardClosed)
 		closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 		require.NoError(t, err)
 		require.Len(t, closedShards, 1)
@@ -126,9 +119,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 
 		// finally, close the last shard with CloseUploadShards()
 
-		shardClosed, err = api.CloseUploadShards(t.Context(), upload.ID())
-		require.NoError(t, err)
-		require.True(t, shardClosed)
+		mustCloseUploadShards(t, api, upload.ID(), true)
 
 		closedShards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 		require.NoError(t, err)
@@ -163,7 +154,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1.(cidlink.Link).Cid, 120, space.DID(), "some/path", source.ID(), 0)
 		require.NoError(t, err)
 
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, nil)
+		err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, nil, func(shard *model.Shard) error { return nil })
 		require.ErrorContains(t, err, "too large to fit in new shard for upload")
 	})
 }
@@ -508,13 +499,10 @@ func TestComputedShardCIDs(t *testing.T) {
 		nodeCID := cid.NewCidV1(cid.Raw, testutil.Must(multihash.Sum(data, multihash.SHA2_256, -1))(t))
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID, 1<<12, space.DID(), fmt.Sprintf("some/path/%d", offset), source.ID(), 0)
 		require.NoError(t, err)
-		_, err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID, data)
-		require.NoError(t, err)
+		mustAddNodeNodeToUploadShards(t, api, upload.ID(), space.DID(), nodeCID, data, false)
 	}
 
-	shardClosed, err := api.CloseUploadShards(t.Context(), upload.ID())
-	require.NoError(t, err)
-	require.True(t, shardClosed)
+	mustCloseUploadShards(t, api, upload.ID(), true)
 
 	closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
 	require.NoError(t, err)
@@ -524,4 +512,28 @@ func TestComputedShardCIDs(t *testing.T) {
 	shard := closedShards[0]
 	require.Equal(t, expectedDigest, shard.Digest())
 	require.Equal(t, expectedPieceCID, shard.PieceCID())
+}
+
+func mustAddNodeNodeToUploadShards(t *testing.T, api shards.API, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, expectShardClosed bool) {
+	var shardClosed bool
+	err := api.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, func(shard *model.Shard) error {
+		if shard.State() == model.ShardStateClosed {
+			shardClosed = true
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectShardClosed, shardClosed)
+}
+
+func mustCloseUploadShards(t *testing.T, api shards.API, uploadID id.UploadID, expectShardClosed bool) {
+	var shardClosed bool
+	err := api.CloseUploadShards(t.Context(), uploadID, func(shard *model.Shard) error {
+		if shard.State() == model.ShardStateClosed {
+			shardClosed = true
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectShardClosed, shardClosed)
 }
