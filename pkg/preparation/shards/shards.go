@@ -215,7 +215,7 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 
 // ReaderForShard uses fastWriteShard connected to a pipe to provide an io.Reader
 // for shard data.
-func (a API) ReaderForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+func (a API) ReaderForShard(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	// cancel when we're done writing or when we hit an error so that worker
 	// goroutines exit promptly.
