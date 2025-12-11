@@ -77,17 +77,17 @@ func TestAddShardsForUpload(t *testing.T) {
 		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
 		data := testutil.RandomBytes(t, int(n.Size()))
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
+		err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data, nil)
 		require.NoError(t, err)
 		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
 		data = testutil.RandomBytes(t, int(n.Size()))
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2, data)
+		err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2, data, nil)
 		require.NoError(t, err)
 		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
 		data = testutil.RandomBytes(t, int(n.Size()))
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3, data)
+		err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3, data, nil)
 		require.NoError(t, err)
 
 		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
@@ -136,7 +136,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Contains(t, shardReadersClosed, firstShard.ID(), "expected first shard reader to be closed now")
 
 		// Now close the upload shards and run it again.
-		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
@@ -206,9 +206,9 @@ func TestAddShardsForUpload(t *testing.T) {
 		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
 		data := testutil.RandomBytes(t, int(n.Size()))
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
+		err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data, nil)
 		require.NoError(t, err)
-		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 
 		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
@@ -312,9 +312,9 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, uint64(len(data)), spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
+		err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data, nil)
 		require.NoError(t, err)
-		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 
 		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
