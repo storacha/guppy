@@ -11,6 +11,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	shardmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -26,8 +27,8 @@ var (
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
-type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *shardmodel.Shard) error) error
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *shardmodel.Shard) error) error
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -239,7 +240,7 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 
 	log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
 	for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
-		_, err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil)
+		err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil, nil)
 		if err != nil {
 			return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
 		}
@@ -314,13 +315,12 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data)
+				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, func(shard *shardmodel.Shard) error {
+					signal(closedShardsAvailable)
+					return nil
+				})
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
-				}
-
-				if shardClosed {
-					signal(closedShardsAvailable)
 				}
 
 				return nil
@@ -336,13 +336,12 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		// finalize
 		func() error {
 			// We're out of nodes, so we can close any open shards for this upload.
-			shardClosed, err := api.CloseUploadShards(ctx, uploadID)
+			err := api.CloseUploadShards(ctx, uploadID, func(shard *shardmodel.Shard) error {
+				signal(closedShardsAvailable)
+				return nil
+			})
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
-			}
-
-			if shardClosed {
-				signal(closedShardsAvailable)
 			}
 
 			// Reload the upload to get the latest state from the DB.

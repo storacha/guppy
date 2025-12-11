@@ -43,27 +43,26 @@ var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.ReaderForShardFunc = API{}.ReaderForShard
 var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error) {
+func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *model.Shard) error) error {
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
+		return fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
-		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
 	node, err := a.Repo.FindNodeByCIDAndSpaceDID(ctx, nodeCID, spaceDID)
 	if err != nil {
-		return false, fmt.Errorf("failed to find node %s: %w", nodeCID, err)
+		return fmt.Errorf("failed to find node %s: %w", nodeCID, err)
 	}
 	if node == nil {
-		return false, fmt.Errorf("node %s not found", nodeCID)
+		return fmt.Errorf("node %s not found", nodeCID)
 	}
 
 	var shard *model.Shard
-	var closed bool
 
 	// Look for an open shard that has room for the node, and close any that don't
 	// have room. (There should only be at most one open shard, but there's no
@@ -71,16 +70,21 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	for _, s := range openShards {
 		hasRoom, err := roomInShard(a.ShardEncoder, s, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), node.CID(), err)
+			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), node.CID(), err)
 		}
 		if hasRoom {
 			shard = s
 			break
 		}
-		if err := a.finalizeShardDigests(ctx, s); err != nil {
-			return false, fmt.Errorf("finalizing shard %s: %w", s.ID(), err)
+		if err := a.closeShard(ctx, s); err != nil {
+			return fmt.Errorf("closing shard %s: %w", s.ID(), err)
 		}
-		closed = true
+		if shardCB != nil {
+			err = shardCB(s)
+			if err != nil {
+				return fmt.Errorf("calling shardCB for closed shard %s: %w", s.ID(), err)
+			}
+		}
 	}
 
 	// If no such shard exists, create a new one
@@ -92,14 +96,14 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 			a.ShardEncoder.HeaderPieceCIDState())
 
 		if err != nil {
-			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
+			return fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
 		hasRoom, err := roomInShard(a.ShardEncoder, shard, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", node.CID(), err)
+			return fmt.Errorf("failed to check room in new shard for node %s: %w", node.CID(), err)
 		}
 		if !hasRoom {
-			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", node.CID(), node.Size(), uploadID, space.ShardSize())
+			return fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", node.CID(), node.Size(), uploadID, space.ShardSize())
 		}
 	}
 
@@ -107,16 +111,16 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	if data != nil {
 		digestStateUpdate, err := a.addNodeToDigestState(ctx, shard, node, data)
 		if err != nil {
-			return false, fmt.Errorf("failed to add node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
+			return fmt.Errorf("failed to add node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
 		}
 		addNodeOptions = append(addNodeOptions, WithDigestStateUpdate(digestStateUpdate.digestStateUpTo, digestStateUpdate.digestState, digestStateUpdate.pieceCIDState))
 	}
 
 	if err := a.Repo.AddNodeToShard(ctx, shard.ID(), node.CID(), spaceDID, a.ShardEncoder.NodeEncodingLength(node)-node.Size(), addNodeOptions...); err != nil {
-		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", node.CID(), shard.ID(), uploadID, err)
+		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", node.CID(), shard.ID(), uploadID, err)
 	}
 
-	return closed, nil
+	return nil
 }
 
 func roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
@@ -179,7 +183,7 @@ func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*sh
 	return h, nil
 }
 
-func (a API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error {
+func (a API) closeShard(ctx context.Context, shard *model.Shard) error {
 	h, err := a.updatedShardHashState(ctx, shard)
 	if err != nil {
 		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
@@ -194,23 +198,26 @@ func (a API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error
 	return a.Repo.UpdateShard(ctx, shard)
 }
 
-func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
+func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID, shardCB func(shard *model.Shard) error) error {
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
 
-		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
+		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
-
-	var closed bool
 
 	for _, s := range openShards {
-		if err := a.finalizeShardDigests(ctx, s); err != nil {
-			return false, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
+		if err := a.closeShard(ctx, s); err != nil {
+			return fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
 		}
-		closed = true
+		if shardCB != nil {
+			err = shardCB(s)
+			if err != nil {
+				return fmt.Errorf("calling shardCB for closed shard %s: %w", s.ID(), err)
+			}
+		}
 	}
 
-	return closed, nil
+	return nil
 }
 
 // ReaderForShard uses fastWriteShard connected to a pipe to provide an io.Reader
