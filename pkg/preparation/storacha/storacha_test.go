@@ -49,10 +49,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                   repo,
-			Client:                 &client,
-			ReaderForShard:         carForShard,
-			ShardUploadParallelism: 1,
+			Repo:                  repo,
+			Client:                &client,
+			ReaderForShard:        carForShard,
+			BlobUploadParallelism: 1,
 		}
 
 		shardsApi := shards.API{
@@ -180,10 +180,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                   repo,
-			Client:                 &client,
-			ReaderForShard:         carForShard,
-			ShardUploadParallelism: 1,
+			Repo:                  repo,
+			Client:                &client,
+			ReaderForShard:        carForShard,
+			BlobUploadParallelism: 1,
 		}
 
 		shardsApi := shards.API{
@@ -288,10 +288,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                   repo,
-			Client:                 &client,
-			ReaderForShard:         carForShard,
-			ShardUploadParallelism: 1,
+			Repo:                  repo,
+			Client:                &client,
+			ReaderForShard:        carForShard,
+			BlobUploadParallelism: 1,
 		}
 
 		shardsApi := shards.API{
@@ -347,10 +347,10 @@ func TestAddIndexesForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                   repo,
-			Client:                 &client,
-			IndexesForUpload:       IndexesForUpload,
-			ShardUploadParallelism: 1,
+			Repo:                  repo,
+			Client:                &client,
+			IndexesForUpload:      IndexesForUpload,
+			BlobUploadParallelism: 1,
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -410,10 +410,10 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                   repo,
-			Client:                 &client,
-			IndexesForUpload:       indexesForUpload,
-			ShardUploadParallelism: 1,
+			Repo:                  repo,
+			Client:                &client,
+			IndexesForUpload:      indexesForUpload,
+			BlobUploadParallelism: 1,
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))

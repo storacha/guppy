@@ -57,11 +57,11 @@ type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload)
 
 // API provides methods to interact with Storacha.
 type API struct {
-	Repo                   Repo
-	Client                 Client
-	ReaderForShard         ReaderForShardFunc
-	IndexesForUpload       IndexesForUploadFunc
-	ShardUploadParallelism int
+	Repo                  Repo
+	Client                Client
+	ReaderForShard        ReaderForShardFunc
+	IndexesForUpload      IndexesForUploadFunc
+	BlobUploadParallelism int
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -77,129 +77,142 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 	}
 	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
+	return a.addBlobs(ctx, closedShards, spaceDID)
+}
+
+func (a API) addBlobs(ctx context.Context, blobs []*shardsmodel.Shard, spaceDID did.DID) error {
 	// Ensure at least 1 parallelism
-	if a.ShardUploadParallelism < 1 {
-		a.ShardUploadParallelism = 1
+	if a.BlobUploadParallelism < 1 {
+		a.BlobUploadParallelism = 1
 	}
 
-	sem := make(chan struct{}, a.ShardUploadParallelism)
-	shardUploadErrorCh := make(chan gtypes.ShardUploadError, len(closedShards))
+	sem := make(chan struct{}, a.BlobUploadParallelism)
+	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(blobs))
 	eg, gctx := errgroup.WithContext(ctx)
-	for _, shard := range closedShards {
+	for _, blob := range blobs {
 		sem <- struct{}{}
 		eg.Go(func() error {
 			defer func() { <-sem }()
-			if err := a.addShard(gctx, shard, spaceDID); err != nil {
-				err = fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
-				var errShardUpload gtypes.ShardUploadError
-				if errors.As(err, &errShardUpload) {
-					shardUploadErrorCh <- errShardUpload
+			if err := a.addBlob(gctx, blob, spaceDID); err != nil {
+				err = fmt.Errorf("failed to add blob %s: %w", blob, err)
+				var errBlobUpload gtypes.BlobUploadError
+				if errors.As(err, &errBlobUpload) {
+					blobUploadErrorCh <- errBlobUpload
 					return nil
 				}
 				log.Errorf("%v", err)
 				return err
 			}
-			log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
+			log.Infof("Successfully added blob %s", blob)
 			return nil
 		})
 	}
 
 	terminalErr := eg.Wait()
-	close(shardUploadErrorCh)
+	close(blobUploadErrorCh)
 
 	if terminalErr != nil {
 		return terminalErr
 	}
 
-	var shardUploadErrors []gtypes.ShardUploadError
-	for err := range shardUploadErrorCh {
-		shardUploadErrors = append(shardUploadErrors, err)
+	var blobUploadErrors []gtypes.BlobUploadError
+	for err := range blobUploadErrorCh {
+		blobUploadErrors = append(blobUploadErrors, err)
 	}
-	if len(shardUploadErrors) > 0 {
-		return gtypes.NewShardUploadErrors(shardUploadErrors)
+	if len(blobUploadErrors) > 0 {
+		return gtypes.NewBlobUploadErrors(blobUploadErrors)
 	}
 	return nil
 }
 
-func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
+func (a API) readerForBlob(ctx context.Context, blob *shardsmodel.Shard) (io.ReadCloser, error) {
+	return a.ReaderForShard(ctx, blob.ID())
+}
+
+func (a API) traceAttributesForBlob(blob *shardsmodel.Shard) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("shard.id", blob.ID().String()),
+		attribute.Int64("shard.size", int64(blob.Size())),
+		attribute.String("shard.digest", blob.Digest().String()),
+		attribute.String("shard.cid", blob.CID().String()),
+	}
+}
+
+func (a API) addBlob(ctx context.Context, blob *shardsmodel.Shard, spaceDID did.DID) error {
 	start := time.Now()
-	log.Infow("adding shard", "cid", shard.CID().String(), "id", shard.ID())
-	ctx, span := tracer.Start(ctx, "add-shard", trace.WithAttributes(
-		attribute.String("shard.id", shard.ID().String()),
-		attribute.Int64("shard.size", int64(shard.Size())),
-		attribute.String("shard.digest", shard.Digest().String()),
-		attribute.String("shard.cid", shard.CID().String()),
-	))
+	log.Infow("adding blob", "cid", blob.CID().String(), "id", blob.ID())
+	ctx, span := tracer.Start(ctx, "add-blob", trace.WithAttributes(a.traceAttributesForBlob(blob)...))
 	defer func() {
-		log.Infow("added shard", "cid", shard.CID().String(), "id", shard.ID(), "duration", time.Since(start))
+		log.Infow("added blob", "cid", blob.CID().String(), "id", blob.ID(), "duration", time.Since(start))
 		span.End()
 	}()
-	shardReader, err := a.ReaderForShard(ctx, shard.ID())
-	// make sure to close the shard reader before returning, even if we return early.
-	defer shardReader.Close()
+
+	blobReader, err := a.readerForBlob(ctx, blob)
 	if err != nil {
-		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
+		return fmt.Errorf("failed to get reader for blob %s: %w", blob.ID(), err)
 	}
+	// make sure to close the shard reader before returning, even if we return early.
+	defer blobReader.Close()
 
 	addReader, addWriter := io.Pipe()
 	defer addReader.Close()
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
 		defer meteredAddWriter.Close()
-		_, err := io.Copy(meteredAddWriter, shardReader)
+		_, err := io.Copy(meteredAddWriter, blobReader)
 		if err != nil {
-			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
+			addWriter.CloseWithError(fmt.Errorf("failed to copy blob bytes to pipe: %w", err))
 		}
 	}()
 
-	location := shard.Location()
-	pdpAccept := shard.PDPAccept()
+	location := blob.Location()
+	pdpAccept := blob.PDPAccept()
 
 	// If we don't have a location commitment yet, we have yet to successfully
 	// `space/blob/add`. (Note that `shard.PDPAccept()` is optional and may be
 	// legitimately nil even if the `space/blob/add` succeeded.)
 	if location == nil {
-		log.Infof("adding shard %s to space %s via `space/blob/add`", shard.ID(), spaceDID)
-		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
+		log.Infof("adding shard %s to space %s via `space/blob/add`", blob.ID(), spaceDID)
+		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(blob.Digest(), blob.Size()))
 		if err != nil {
-			return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err))
+			return gtypes.NewBlobUploadError(blob.String(), fmt.Errorf("failed to add blob %s to space %s: %w", blob.ID(), spaceDID, err))
 		}
 
-		if addedBlob.Digest.B58String() != shard.Digest().B58String() {
-			return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
+		if addedBlob.Digest.B58String() != blob.Digest().B58String() {
+			return fmt.Errorf("added blob %s digest mismatch: expected %x, got %x", blob.ID(), blob.Digest(), addedBlob.Digest)
 		}
 
-		shard.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
-		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
-			return fmt.Errorf("failed to update shard %s after `space/blob/add`: %w", shard.ID(), err)
+		blob.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
+		if err := a.Repo.UpdateShard(ctx, blob); err != nil {
+			return fmt.Errorf("failed to update blob %s after `space/blob/add`: %w", blob.ID(), err)
 		}
 
 		location = addedBlob.Location
 		pdpAccept = addedBlob.PDPAccept
 	} else {
-		log.Infof("shard %s already has location and PDP accept, skipping `space/blob/add`", shard.ID())
+		log.Infof("blob %s already has location and PDP accept, skipping `space/blob/add`", blob.ID())
 	}
 
-	err = a.spaceBlobReplicate(ctx, shard, spaceDID, location)
+	err = a.spaceBlobReplicate(ctx, blob, spaceDID, location)
 	if err != nil {
-		return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err))
+		return gtypes.NewBlobUploadError(blob.String(), fmt.Errorf("failed to replicate blob %s: %w", blob, err))
 	}
 
 	var opts []client.FilecoinOfferOption
 	if pdpAccept != nil {
 		opts = append(opts, client.WithPDPAcceptInvocation(pdpAccept))
 	}
-	err = a.filecoinOffer(ctx, shard, spaceDID, opts...)
+	err = a.filecoinOffer(ctx, blob, spaceDID, opts...)
 	if err != nil {
-		return gtypes.NewShardUploadError(shard.ID(), err)
+		return gtypes.NewBlobUploadError(blob.String(), err)
 	}
 
-	err = shard.Added()
+	err = blob.Added()
 	if err != nil {
-		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
+		return fmt.Errorf("failed to mark blob %s as added: %w", blob.String(), err)
 	}
-	if err := a.Repo.UpdateShard(ctx, shard); err != nil {
-		return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.CID(), err)
+	if err := a.Repo.UpdateShard(ctx, blob); err != nil {
+		return fmt.Errorf("failed to update blob %s after adding to space: %w", blob.String(), err)
 	}
 
 	return nil
