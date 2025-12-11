@@ -40,8 +40,12 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
+		shardReadersClosed := map[id.ShardID]struct{}{}
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+			return &shardCloser{
+				shardReadersClosed: shardReadersClosed,
+				shardID:            shardID,
+				Reader:             bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding))}, nil
 		}
 
 		api := storacha.API{
@@ -128,6 +132,9 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Equal(t, cidlink.Link{Cid: firstShard.CID()}, client.FilecoinOfferInvocations[0].Content)
 		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
 
+		// It should have closed the first shard's reader.
+		require.Contains(t, shardReadersClosed, firstShard.ID(), "expected first shard reader to be closed now")
+
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
@@ -151,6 +158,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[1].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
+
+		// It should have closed the second shard's reader.
+		require.Contains(t, shardReadersClosed, secondShard.ID(), "expected second shard reader to be closed now")
+
 	})
 
 	t.Run("does not `space/blob/add` again on retry once it succeeds", func(t *testing.T) {
@@ -160,8 +171,12 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
+		shardReadersClosed := map[id.ShardID]struct{}{}
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+			return &shardCloser{
+				shardReadersClosed: shardReadersClosed,
+				shardID:            shardID,
+				Reader:             bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding))}, nil
 		}
 
 		api := storacha.API{
@@ -208,6 +223,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, client.SpaceBlobReplicateInvocations, 0)
 		require.Len(t, client.FilecoinOfferInvocations, 0)
 
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard readerto be closed, even though it failed")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
+
 		// Now retry: `space/blob/add` succeeds but `space/blob/replicate` fails.
 		client.SpaceBlobAddError = nil
 		client.SpaceBlobReplicateError = fmt.Errorf("simulated SpaceBlobReplicate error")
@@ -221,6 +243,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		// ...but not have proceeded to `filecoin/offer`.
 		require.Len(t, client.FilecoinOfferInvocations, 0)
 
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
+
 		// Now retry: `space/blob/replicate` succeeds but `filecoin/offer` fails.
 		client.SpaceBlobReplicateError = nil
 		client.FilecoinOfferError = fmt.Errorf("simulated FilecoinOffer error")
@@ -233,6 +262,12 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
 		// ...and then attempted `filecoin/offer` and failed.
 		require.Len(t, client.FilecoinOfferInvocations, 1)
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
 	})
 
 	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
@@ -243,13 +278,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		client := mockclient.MockClient{T: t}
 
 		data := []byte("VERY SHORT CAR")
-		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
 			// Note that the decision to skip `filecoin/offer` is based on the size
 			// listed on the shard, which is based on the size of the nodes added to
 			// it, not the actual CAR bytes (which are written lazily). So the
 			// behavior is triggered by the node below being 1, while the short CAR
 			// is here to cause an error if we *do* try to `filecoin/offer` it.
-			return bytes.NewReader(data), nil
+			return io.NopCloser(bytes.NewReader(data)), nil
 		}
 
 		api := storacha.API{
@@ -438,4 +473,15 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard2Digest)},
 		}, client.UploadAddInvocations[0].Shards)
 	})
+}
+
+type shardCloser struct {
+	io.Reader
+	shardReadersClosed map[id.ShardID]struct{}
+	shardID            id.ShardID
+}
+
+func (sc *shardCloser) Close() error {
+	sc.shardReadersClosed[sc.shardID] = struct{}{}
+	return nil
 }

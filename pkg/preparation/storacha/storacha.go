@@ -52,7 +52,7 @@ type Client interface {
 
 var _ Client = (*client.Client)(nil)
 
-type ReaderForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
+type ReaderForShardFunc func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error)
 type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
 
 // API provides methods to interact with Storacha.
@@ -134,18 +134,18 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 		log.Infow("added shard", "cid", shard.CID().String(), "id", shard.ID(), "duration", time.Since(start))
 		span.End()
 	}()
-
-	car, err := a.ReaderForShard(ctx, shard.ID())
+	shardReader, err := a.ReaderForShard(ctx, shard.ID())
+	// make sure to close the shard reader before returning, even if we return early.
+	defer shardReader.Close()
 	if err != nil {
 		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 	}
 
 	addReader, addWriter := io.Pipe()
-
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
 		defer meteredAddWriter.Close()
-		_, err := io.Copy(meteredAddWriter, car)
+		_, err := io.Copy(meteredAddWriter, shardReader)
 		if err != nil {
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
 		}
