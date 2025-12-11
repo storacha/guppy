@@ -68,7 +68,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	// have room. (There should only be at most one open shard, but there's no
 	// harm handling multiple if they exist.)
 	for _, s := range openShards {
-		hasRoom, err := roomInShard(a.ShardEncoder, s, node, space)
+		hasRoom, err := a.roomInShard(a.ShardEncoder, s, node, space)
 		if err != nil {
 			return fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), node.CID(), err)
 		}
@@ -98,7 +98,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		if err != nil {
 			return fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
-		hasRoom, err := roomInShard(a.ShardEncoder, shard, node, space)
+		hasRoom, err := a.roomInShard(a.ShardEncoder, shard, node, space)
 		if err != nil {
 			return fmt.Errorf("failed to check room in new shard for node %s: %w", node.CID(), err)
 		}
@@ -123,11 +123,15 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	return nil
 }
 
-func roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
+func (a API) roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
 	nodeSize := encoder.NodeEncodingLength(node)
 
 	if shard.Size()+nodeSize > space.ShardSize() {
 		return false, nil // No room in the shard
+	}
+
+	if a.MaxNodesPerIndex > 0 && shard.SliceCount() >= uint64(a.MaxNodesPerIndex) {
+		return false, nil // Shard has reached maximum node count
 	}
 
 	return true, nil

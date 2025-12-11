@@ -29,6 +29,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		id id.ShardID,
 		uploadID id.UploadID,
 		size uint64,
+		sliceCount uint64,
 		digest multihash.Multihash,
 		pieceCID cid.Cid,
 		digestStateUpTo uint64,
@@ -43,6 +44,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 				id,
 				upload_id,
 				size,
+				slice_count,
 				digest,
 				piece_cid,
 				digest_state_up_to,
@@ -51,10 +53,11 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 				state,
 				location_inv,
 				pdp_accept_inv
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			uploadID,
 			size,
+			sliceCount,
 			digest,
 			util.DbCID(&pieceCID),
 			digestStateUpTo,
@@ -79,6 +82,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			id,
 			upload_id,
 			size,
+			slice_count,
 			digest,
 			piece_cid,
 			digest_state_up_to,
@@ -104,6 +108,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			id *id.ShardID,
 			uploadID *id.UploadID,
 			size *uint64,
+			sliceCount *uint64,
 			digest *multihash.Multihash,
 			pieceCID *cid.Cid,
 			digestStateUpTo *uint64,
@@ -113,7 +118,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			location *invocation.Invocation,
 			pdpAccept *invocation.Invocation,
 		) error {
-			return rows.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
+			return rows.Scan(id, uploadID, size, sliceCount, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
 		})
 		if err != nil {
 			return nil, err
@@ -132,6 +137,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 			id,
 			upload_id,
 			size,
+			slice_count,
 			digest,
 			piece_cid,
 			digest_state_up_to,
@@ -149,6 +155,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		id *id.ShardID,
 		uploadID *id.UploadID,
 		size *uint64,
+		sliceCount *uint64,
 		digest *multihash.Multihash,
 		pieceCID *cid.Cid,
 		digestStateUpTo *uint64,
@@ -158,7 +165,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		location *invocation.Invocation,
 		pdpAccept *invocation.Invocation,
 	) error {
-		return row.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
+		return row.Scan(id, uploadID, size, sliceCount, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
 	})
 	if err != nil {
 		return nil, err
@@ -202,8 +209,9 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	}
 
 	_, err = tx.ExecContext(ctx, `
-    UPDATE shards 
-    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?)
+    UPDATE shards
+    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?),
+        slice_count = slice_count + 1
     WHERE id = ?`,
 		offset, util.DbCID(&nodeCID), shardID)
 	if err != nil {
@@ -339,6 +347,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		id id.ShardID,
 		uploadID id.UploadID,
 		size uint64,
+		sliceCount uint64,
 		digest multihash.Multihash,
 		pieceCID cid.Cid,
 		digestStateUpTo uint64,
@@ -353,6 +362,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			SET id = ?,
 			    upload_id = ?,
 			    size = ?,
+			    slice_count = ?,
 			    digest = ?,
 			    piece_cid = ?,
 			    digest_state_up_to = ?,
@@ -365,6 +375,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			id,
 			uploadID,
 			size,
+			sliceCount,
 			digest,
 			util.DbCID(&pieceCID),
 			digestStateUpTo,
