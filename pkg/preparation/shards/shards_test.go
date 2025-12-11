@@ -161,6 +161,85 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 		require.Len(t, openShards, 0)
 	})
 
+	t.Run("limits shards to index slice count", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+
+			// Limit shards to 2 nodes each for testing
+			MaxNodesPerIndex: 2,
+		}
+		space, err := repo.FindOrCreateSpace(t.Context(), testutil.RandomDID(t), "Test Space", spacesmodel.WithShardSize(1<<20))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.FindOrCreateUploads(t.Context(), space.DID(), []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		// Adding one node doesn't close the shard
+
+		nodeCID1 := testutil.RandomCID(t)
+		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1.(cidlink.Link).Cid, 1<<4, space.DID(), "some/path", source.ID(), 0)
+		require.NoError(t, err)
+
+		data := testutil.RandomBytes(t, int(n.Size()))
+		shardClosed := false
+		err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID1.(cidlink.Link).Cid, data, func(shard *model.Shard) error {
+			shardClosed = true
+			return nil
+		})
+		require.NoError(t, err)
+		require.False(t, shardClosed)
+
+		// Adding a second node doesn't close the shard
+
+		nodeCID2 := testutil.RandomCID(t)
+		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2.(cidlink.Link).Cid, 1<<4, space.DID(), "some/other/path", source.ID(), 0)
+		require.NoError(t, err)
+		data = testutil.RandomBytes(t, int(n.Size()))
+		shardClosed = false
+		err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID2.(cidlink.Link).Cid, data, func(shard *model.Shard) error {
+			shardClosed = true
+			return nil
+		})
+		require.NoError(t, err)
+		require.False(t, shardClosed)
+
+		// Adding a third node closes the shard
+
+		nodeCID3 := testutil.RandomCID(t)
+		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3.(cidlink.Link).Cid, 1<<4, space.DID(), "yet/other/path", source.ID(), 0)
+		require.NoError(t, err)
+
+		data = testutil.RandomBytes(t, int(n.Size()))
+		shardClosed = false
+		err = api.AddNodeToUploadShards(t.Context(), upload.ID(), space.DID(), nodeCID3.(cidlink.Link).Cid, data, func(shard *model.Shard) error {
+			shardClosed = true
+			return nil
+		})
+		require.NoError(t, err)
+		require.True(t, shardClosed)
+
+		// We end up with one closed shard with the first two nodes, and one open
+		// shard with the last node
+
+		closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
+		require.NoError(t, err)
+		require.Len(t, closedShards, 1)
+		foundNodeCIDs := nodesInShard(t.Context(), t, db, closedShards[0].ID())
+		require.ElementsMatch(t, []cid.Cid{nodeCID1.(cidlink.Link).Cid, nodeCID2.(cidlink.Link).Cid}, foundNodeCIDs)
+
+		openShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
+		require.NoError(t, err)
+		require.Len(t, openShards, 1)
+		foundNodeCIDs = nodesInShard(t.Context(), t, db, openShards[0].ID())
+		require.ElementsMatch(t, []cid.Cid{nodeCID3.(cidlink.Link).Cid}, foundNodeCIDs)
+	})
+
 	t.Run("with a node too big for a shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
