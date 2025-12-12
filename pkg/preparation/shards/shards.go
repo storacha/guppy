@@ -141,54 +141,52 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
 	}
 
-	hasher, err := a.updatedShardHashState(ctx, shard)
-	if err != nil {
-		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
-	}
+	return withUpdatedShardHashState(ctx, a, shard, func(hasher *shardHashState) (digestStateUpdate, error) {
+		err := a.ShardEncoder.WriteNode(ctx, node, data, hasher)
+		if err != nil {
+			return digestStateUpdate{}, fmt.Errorf("writing node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
+		}
 
-	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
-	if err != nil {
-		return digestStateUpdate{}, fmt.Errorf("writing node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
-	}
+		digestState, pieceCIDState, err := hasher.marshal()
+		if err != nil {
+			return digestStateUpdate{}, fmt.Errorf("marshaling shard %s digest state: %w", shard.ID(), err)
+		}
 
-	digestState, pieceCIDState, err := hasher.marshal()
-	if err != nil {
-		return digestStateUpdate{}, fmt.Errorf("marshaling shard %s digest state: %w", shard.ID(), err)
-	}
-
-	return digestStateUpdate{
-		digestStateUpTo: shard.Size() + a.ShardEncoder.NodeEncodingLength(node),
-		digestState:     digestState,
-		pieceCIDState:   pieceCIDState,
-	}, nil
+		return digestStateUpdate{
+			digestStateUpTo: shard.Size() + a.ShardEncoder.NodeEncodingLength(node),
+			digestState:     digestState,
+			pieceCIDState:   pieceCIDState,
+		}, nil
+	})
 }
 
-func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*shardHashState, error) {
+func withUpdatedShardHashState[T any](ctx context.Context, a API, shard *model.Shard, action func(*shardHashState) (T, error)) (T, error) {
 	h, err := fromShard(shard)
+	defer h.reset()
 	if err != nil {
-		return nil, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
+		var zero T
+		return zero, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
 	}
 
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
 		if err != nil {
-			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
+			var zero T
+			return zero, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
 		}
 	}
 
-	return h, nil
+	return action(h)
 }
 
 func (a API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error {
-	h, err := a.updatedShardHashState(ctx, shard)
-	if err != nil {
-		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
-	}
-	shardDigest, pieceCID, err := h.finalize(shard.Size())
+	sh, err := withUpdatedShardHashState(ctx, a, shard, func(hasher *shardHashState) (shardHashes, error) {
+		return hasher.finalize(shard.Size())
+	})
 	if err != nil {
 		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)
 	}
-	if err := shard.Close(shardDigest, pieceCID); err != nil {
+	if err := shard.Close(sh.shardDigest, sh.pieceCID); err != nil {
 		return err
 	}
 	return a.Repo.UpdateShard(ctx, shard)

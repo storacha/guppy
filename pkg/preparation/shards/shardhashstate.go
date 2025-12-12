@@ -67,32 +67,40 @@ func (s *shardHashState) marshal() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling digest hash state: %w", err)
 	}
-	s.digestHash.Reset()
 	pieceCIDState, err := s.commpCalc.MarshalBinary()
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshaling piece CID state: %w", err)
 	}
-	s.commpCalc.Reset()
 	return digestState, pieceCIDState, nil
 }
 
-func (s *shardHashState) finalize(shardSize uint64) (multihash.Multihash, cid.Cid, error) {
+func (s *shardHashState) reset() {
+	s.digestHash.Reset()
+	s.commpCalc.Reset()
+}
+
+type shardHashes struct {
+	shardDigest multihash.Multihash
+	pieceCID    cid.Cid
+}
+
+func (s *shardHashState) finalize(shardSize uint64) (shardHashes, error) {
 	shardDigest, err := multihash.Encode(s.digestHash.Sum(nil), multihash.SHA2_256)
 	if err != nil {
-		return nil, cid.Undef, fmt.Errorf("encoding shard digest: %w", err)
+		return shardHashes{}, fmt.Errorf("encoding shard digest: %w", err)
 	}
 
 	// If the shard is too small to form a piece CID, return undefined.
 	if shardSize < types.MinPiecePayload {
-		return shardDigest, cid.Undef, nil
+		return shardHashes{shardDigest: shardDigest, pieceCID: cid.Undef}, nil
 	}
 
 	pieceDigest := s.commpCalc.Sum(nil)
 
 	pieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shardSize)
 	if err != nil {
-		return nil, cid.Undef, fmt.Errorf("computing piece CID: %w", err)
+		return shardHashes{}, fmt.Errorf("computing piece CID: %w", err)
 	}
 
-	return shardDigest, pieceCID, nil
+	return shardHashes{shardDigest: shardDigest, pieceCID: pieceCID}, nil
 }
