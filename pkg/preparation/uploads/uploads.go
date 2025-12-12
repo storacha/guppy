@@ -10,6 +10,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	indexmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	shardmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
@@ -28,7 +29,9 @@ var (
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *shardmodel.Shard) error) error
+type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *indexmodel.Index) error) error
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *shardmodel.Shard) error) error
+type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexmodel.Index) error) error
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -48,14 +51,20 @@ type API struct {
 	RemoveShard                RemoveShardFunc
 
 	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
-	// shard if necessary. It returns true if an existing open shard was closed,
-	// false otherwise.
+	// shard if necessary. If a shard is closed as a result, the provided
+	// `shardCB` callback is called with the closed shard. `shardCB` may be nil.
 	AddNodeToUploadShards AddNodeToUploadShardsFunc
 
-	// CloseUploadShards closes any remaining open shard for the upload. It
-	// returns true if an existing open shard was in fact closed, false if there
-	// was no open shard to close.
+	// AddShardToUploadIndexes adds the contents of a shard to the upload's indexes, creating new
+	// indexes if necessary. If an index is closed as a result, the provided
+	// `indexCB` callback is called with the closed index. `indexCB` may be nil.
+	AddShardToUploadIndexes AddShardToUploadIndexesFunc
+
+	// CloseUploadShards closes any remaining open shard for the upload.
 	CloseUploadShards CloseUploadShardsFunc
+
+	// CloseUploadIndexes closes any remaining open index for the upload.
+	CloseUploadIndexes CloseUploadIndexesFunc
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -102,9 +111,10 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	defer span.End()
 
 	var (
-		scansAvailable        = make(chan struct{}, 1)
-		dagScansAvailable     = make(chan struct{}, 1)
-		closedShardsAvailable = make(chan struct{}, 1)
+		scansAvailable         = make(chan struct{}, 1)
+		dagScansAvailable      = make(chan struct{}, 1)
+		closedShardsAvailable  = make(chan struct{}, 1)
+		closedIndexesAvailable = make(chan struct{}, 1)
 	)
 
 	// Start the workers
@@ -117,14 +127,21 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable)
+		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable, closedIndexesAvailable)
 		if err != nil {
 			return fmt.Errorf("DAG scan worker: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
-		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+		err := runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+		if err != nil {
+			return fmt.Errorf("storacha worker: %w", err)
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		err := runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable)
 		if err != nil {
 			return fmt.Errorf("storacha worker: %w", err)
 		}
@@ -148,7 +165,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	switch {
 
 	case errors.As(workersErr, &badFSEntriesErr):
-		err := a.handleBadFSEntries(ctx, uploadID, spaceDID, badFSEntriesErr)
+		err := a.handleBadFSEntries(ctx, uploadID, badFSEntriesErr)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
 		}
@@ -173,7 +190,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	return upload.RootCID(), workersErr
 }
 
-func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, badFSEntriesErr types.BadFSEntriesError) error {
+func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, badFSEntriesErr types.BadFSEntriesError) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
@@ -299,13 +316,24 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and buckets them into shards.
-func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
+func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}, closedIndexesAvailable chan<- struct{}) error {
 	ctx, span := tracer.Start(ctx, "dag-scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
 	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
 	defer span.End()
+
+	handleClosedShard := func(shard *shardmodel.Shard) error {
+		signal(closedShardsAvailable)
+
+		err := api.AddShardToUploadIndexes(ctx, uploadID, shard.ID(), nil)
+		if err != nil {
+			return fmt.Errorf("adding shard to upload index: %w", err)
+		}
+
+		return nil
+	}
 
 	return Worker(
 		ctx,
@@ -315,10 +343,8 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, func(shard *shardmodel.Shard) error {
-					signal(closedShardsAvailable)
-					return nil
-				})
+
+				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, handleClosedShard)
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
@@ -336,12 +362,15 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		// finalize
 		func() error {
 			// We're out of nodes, so we can close any open shards for this upload.
-			err := api.CloseUploadShards(ctx, uploadID, func(shard *shardmodel.Shard) error {
-				signal(closedShardsAvailable)
-				return nil
-			})
+			err := api.CloseUploadShards(ctx, uploadID, handleClosedShard)
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
+			}
+
+			// And then we can close any open indexes for this upload.
+			err = api.CloseUploadIndexes(ctx, uploadID, nil)
+			if err != nil {
+				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
 
 			// Reload the upload to get the latest state from the DB.
@@ -362,23 +391,29 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 			close(closedShardsAvailable)
 
+			// We can't add indexes until the root CID is set, so we signal way down
+			// here. This means that in practice, the index worker only runs once,
+			// after all the shards are closed (but not necessarily added).
+			signal(closedIndexesAvailable)
+			close(closedIndexesAvailable)
+
 			return nil
 		},
 	)
 }
 
-// runStorachaWorker runs the worker that adds shards and indexes to Storacha.
-func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
-	ctx, span := tracer.Start(ctx, "storacha-worker", trace.WithAttributes(
+// runShardWorker runs the worker that adds shards to Storacha.
+func runShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, closedShardsAvailable <-chan struct{}) error {
+	ctx, span := tracer.Start(ctx, "shard-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Storacha worker for upload %s exiting", uploadID)
+	defer log.Debugf("Shard worker for upload %s exiting", uploadID)
 	defer span.End()
 
 	return Worker(
 		ctx,
-		blobWork,
+		closedShardsAvailable,
 
 		// doWork
 		func() error {
@@ -392,17 +427,40 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// finalize
 		func() error {
-			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
-			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
-			}
-
-			err = api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
+			err := api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
 			}
 
 			return nil
 		},
+	)
+}
+
+// runIndexWorker runs the worker that adds indexes to Storacha.
+func runIndexWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, closedIndexesAvailable <-chan struct{}) error {
+	ctx, span := tracer.Start(ctx, "index-worker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer log.Debugf("Index worker for upload %s exiting", uploadID)
+	defer span.End()
+
+	return Worker(
+		ctx,
+		closedIndexesAvailable,
+
+		// doWork
+		func() error {
+			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
+			if err != nil {
+				return fmt.Errorf("`space/blob/add`ing indexes for upload %s: %w", uploadID, err)
+			}
+
+			return nil
+		},
+
+		// finalize
+		nil,
 	)
 }

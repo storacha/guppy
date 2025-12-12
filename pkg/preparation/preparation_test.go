@@ -255,9 +255,10 @@ func TestExecuteUpload(t *testing.T) {
 		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
+
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added")
 
-		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
+		require.Len(t, indexCaps, 1, "expected exactly one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
 		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
 		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
@@ -385,14 +386,19 @@ func TestExecuteUpload(t *testing.T) {
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		// We don't know exactly how many successful PUTs there were, but we know it
 		// should be at least 2 and at most 4.
-		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
-		require.Less(t, putBlobs.Size(), 5, "expected at most 4/5 shards to be added so far")
-		require.GreaterOrEqual(t, len(replicateCaps), 2, "expected at least 2/5 shards to be replicated so far")
-		require.Less(t, len(replicateCaps), 5, "expected at most 4/5 shards to be replicated so far")
+		require.GreaterOrEqual(t, putBlobs.Size(), 3, "expected at least 2/5 shards + 1 index to be added so far")
+		require.LessOrEqual(t, putBlobs.Size(), 5, "expected at most 4/5 shards + 1 index to be added so far")
+		require.GreaterOrEqual(t, len(replicateCaps), 3, "expected at least 2/5 shards + 1 index to be replicated so far")
+		require.LessOrEqual(t, len(replicateCaps), 5, "expected at most 4/5 shards + 1 index to be replicated so far")
 		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
-		require.Less(t, len(offerCaps), 5, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
+		require.LessOrEqual(t, len(offerCaps), 4, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
 
-		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
+		require.Len(t, indexCaps, 1, "expected one `space/index/add` invocation")
+		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
+		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
+		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
+		require.True(t, ok, "expected index link to be a CID link")
+
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
 
 		// Now, retry.
@@ -410,13 +416,8 @@ func TestExecuteUpload(t *testing.T) {
 		require.Len(t, replicateCaps, 6, "expected 5 shards + 1 index to be replicated")
 		require.Len(t, offerCaps, 5, "expected the 5 shards to be `filecoin/offer`ed")
 
-		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
-		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
-		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
-		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
-		require.True(t, ok, "expected index link to be a CID link")
-
-		require.Len(t, uploadAddCaps, 1, "expected only one `upload/add` invocation")
+		require.Len(t, indexCaps, 1, "expected `space/index/add` not to have been invoked again")
+		require.Len(t, uploadAddCaps, 1, "expected  one `upload/add` invocation")
 		require.Equal(t, space.DID().String(), uploadAddCaps[0].With(), "expected `upload/add` invocation to be for the correct space")
 		rootCIDLink, ok := uploadAddCaps[0].Nb().Root.(cidlink.Link)
 		require.True(t, ok, "expected root link to be a CID link")

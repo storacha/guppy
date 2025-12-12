@@ -7,9 +7,11 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
+	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 // Repo defines the interface for interacting with DAG scans, nodes, and links in the repository.
@@ -17,6 +19,7 @@ type Repo interface {
 	CreateShard(ctx context.Context, uploadID id.UploadID, size uint64, digestState, pieceCidState []byte) (*model.Shard, error)
 	UpdateShard(ctx context.Context, shard *model.Shard) error
 	ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error)
+	GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error)
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...AddNodeToShardOption) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
@@ -25,6 +28,17 @@ type Repo interface {
 	NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error)
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 	DeleteShard(ctx context.Context, shardID id.ShardID) error
+
+	// Index methods
+	CreateIndex(ctx context.Context, uploadID id.UploadID) (*indexesmodel.Index, error)
+	UpdateIndex(ctx context.Context, index *indexesmodel.Index) error
+	IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state indexesmodel.IndexState) ([]*indexesmodel.Index, error)
+	GetIndexByID(ctx context.Context, indexID id.IndexID) (*indexesmodel.Index, error)
+	AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error
+	ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error)
+
+	// Upload methods
+	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
 }
 
 // ShardEncoder is the interface for shard implementations.

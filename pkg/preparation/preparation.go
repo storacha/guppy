@@ -139,10 +139,10 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	storachaAPI := storacha.API{
-		Repo:                   repo,
-		Client:                 client,
-		ReaderForShard:         shardsAPI.ReaderForShard,
-		IndexesForUpload:       shardsAPI.IndexesForUpload,
+		Repo:                  repo,
+		Client:                client,
+		ReaderForShard:        shardsAPI.ReaderForShard,
+		ReaderForIndex:        shardsAPI.ReaderForIndex,
 		BlobUploadParallelism: cfg.shardUploadParallelism,
 	}
 
@@ -151,7 +151,9 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
 		AddNodeToUploadShards:      shardsAPI.AddNodeToUploadShards,
+		AddShardToUploadIndexes:    shardsAPI.AddShardToUploadIndexes,
 		CloseUploadShards:          shardsAPI.CloseUploadShards,
+		CloseUploadIndexes:         shardsAPI.CloseUploadIndexes,
 		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
 		AddIndexesForUpload:        storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
