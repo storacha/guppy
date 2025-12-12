@@ -21,6 +21,8 @@ const (
 	// BlobStateClosed indicates that a blob is no longer accepting nodes, but
 	// is not yet added to the space.
 	BlobStateClosed BlobState = "closed"
+	// BlobStateUploaded indicates that a blob has been uploaded to the space, requires post-processing.
+	BlobStateUploaded BlobState = "uploaded"
 	// BlobStateAdded indicates that a blob has been added to the space.
 	BlobStateAdded BlobState = "added"
 )
@@ -42,7 +44,7 @@ type Blob interface {
 
 func validBlobState(state BlobState) bool {
 	switch state {
-	case BlobStateOpen, BlobStateClosed, BlobStateAdded:
+	case BlobStateOpen, BlobStateClosed, BlobStateUploaded, BlobStateAdded:
 		return true
 	default:
 		return false
@@ -112,7 +114,7 @@ func (b *blob) String() string {
 }
 
 func (b *blob) Added() error {
-	if b.state != BlobStateClosed {
+	if b.state != BlobStateUploaded {
 		return fmt.Errorf("cannot add shard in state %s", b.state)
 	}
 	b.state = BlobStateAdded
@@ -206,6 +208,7 @@ func (s *Shard) SpaceBlobAdded(addedBlob client.AddedBlob) error {
 	if addedBlob.Digest.B58String() != s.Digest().B58String() {
 		return fmt.Errorf("added blob %s digest mismatch: expected %x, got %x", s, s.Digest(), addedBlob.Digest)
 	}
+	s.state = BlobStateUploaded
 	s.location = addedBlob.Location
 	s.pdpAccept = addedBlob.PDPAccept
 	return nil
@@ -329,6 +332,7 @@ func (i *Index) SpaceBlobAdded(addedBlob client.AddedBlob) error {
 	if addedBlob.Location == nil {
 		return fmt.Errorf("location invocation cannot be nil")
 	}
+	i.state = BlobStateUploaded
 	i.digest = addedBlob.Digest
 	i.size = addedBlob.Size
 	i.location = addedBlob.Location
