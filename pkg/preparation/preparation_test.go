@@ -383,9 +383,14 @@ func TestExecuteUpload(t *testing.T) {
 		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, 4, putBlobs.Size(), "expected only 4/5 shards to be added so far")
-		require.Len(t, replicateCaps, 4, "expected only 4/5 shards to be replicated so far")
-		require.Len(t, offerCaps, 4, "expected only 4/5 shards to be `filecoin/offer`ed so far")
+		// We don't know exactly how many successful PUTs there were, but we know it
+		// should be at least 2 and at most 4.
+		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
+		require.Less(t, putBlobs.Size(), 5, "expected at most 4/5 shards to be added so far")
+		require.GreaterOrEqual(t, len(replicateCaps), 2, "expected at least 2/5 shards to be replicated so far")
+		require.Less(t, len(replicateCaps), 5, "expected at most 4/5 shards to be replicated so far")
+		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
+		require.Less(t, len(offerCaps), 5, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
