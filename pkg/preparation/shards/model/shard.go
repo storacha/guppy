@@ -7,6 +7,7 @@ import (
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -37,7 +38,7 @@ type Shard struct {
 	id              id.ShardID
 	uploadID        id.UploadID
 	size            uint64
-	sliceCount      uint64
+	sliceCount      int
 	digest          multihash.Multihash
 	pieceCID        cid.Cid
 	digestStateUpTo uint64
@@ -47,6 +48,8 @@ type Shard struct {
 	location        invocation.Invocation
 	pdpAccept       invocation.Invocation
 }
+
+var _ types.Blob = &Shard{}
 
 // NewShard creates a new Shard with the given initial size.
 func NewShard(uploadID id.UploadID, size uint64, digestState []byte, pieceCIDState []byte) (*Shard, error) {
@@ -79,6 +82,7 @@ func validateShard(s *Shard) (*Shard, error) {
 }
 
 // State changes
+
 func (s *Shard) Close(digest multihash.Multihash, pieceCID cid.Cid) error {
 	if s.state != ShardStateOpen {
 		return fmt.Errorf("cannot close shard in state %s", s.state)
@@ -106,7 +110,7 @@ type ShardScanner func(
 	id *id.ShardID,
 	uploadID *id.UploadID,
 	size *uint64,
-	sliceCount *uint64,
+	sliceCount *int,
 	digest *multihash.Multihash,
 	pieceCID *cid.Cid,
 	digestStateUpTo *uint64,
@@ -144,7 +148,7 @@ type ShardWriter func(
 	id id.ShardID,
 	uploadID id.UploadID,
 	size uint64,
-	sliceCount uint64,
+	sliceCount int,
 	digest multihash.Multihash,
 	pieceCID cid.Cid,
 	digestStateUpTo uint64,
@@ -185,7 +189,7 @@ func (s *Shard) Size() uint64 {
 	return s.size
 }
 
-func (s *Shard) SliceCount() uint64 {
+func (s *Shard) SliceCount() int {
 	return s.sliceCount
 }
 
@@ -231,19 +235,24 @@ func (s *Shard) String() string {
 	return fmt.Sprintf("Shard[id=%s]", s.id)
 }
 
-// SpaceBlobAdded records the location and PDP accept invocations for the shard
-// after a successful `space/blob/add`. The shard must be in `ShardStateClosed`,
-// or it should not have been `space/blob/add`ed to begin with. `location` must
-// be non-nil, because it represents the fact that the shard has truly been
-// added. The `pdpAccept` may be nil.
-func (s *Shard) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocation.Invocation) error {
+// SpaceBlobAdded records the result of a successful `space/blob/add`. The shard
+// must be in `ShardStateClosed`, or it should not have been `space/blob/add`ed
+// to begin with. `location` must be non-nil, because it represents the fact
+// that the shard has truly been added. The `pdpAccept` may be nil. The `digest`
+// and `size` of the `addedBlob` must match the shard's digest and size.
+func (s *Shard) SpaceBlobAdded(addedBlob client.AddedBlob) error {
 	if s.state != ShardStateClosed {
 		return fmt.Errorf("cannot add shard in state %s", s.state)
 	}
-	if location == nil {
+	if addedBlob.Location == nil {
 		return fmt.Errorf("location invocation cannot be nil")
 	}
-	s.location = location
-	s.pdpAccept = pdpAccept
+
+	if addedBlob.Digest.B58String() != s.Digest().B58String() {
+		return fmt.Errorf("added blob %s digest mismatch: expected %x, got %x", s, s.Digest(), addedBlob.Digest)
+	}
+
+	s.location = addedBlob.Location
+	s.pdpAccept = addedBlob.PDPAccept
 	return nil
 }

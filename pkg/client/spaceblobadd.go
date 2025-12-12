@@ -88,6 +88,7 @@ func WithPrecomputedDigest(d multihash.Multihash, size uint64) SpaceBlobAddOptio
 
 type AddedBlob struct {
 	Digest    multihash.Multihash
+	Size      uint64
 	Location  invocation.Invocation
 	PDPAccept invocation.Invocation
 }
@@ -153,7 +154,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{
 			Digest: contentHash,
-			Size:   uint64(*contentSizePtr),
+			Size:   *contentSizePtr,
 		},
 	}
 
@@ -413,6 +414,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	}
 	return AddedBlob{
 		Digest:    contentHash,
+		Size:      *contentSizePtr,
 		Location:  location,
 		PDPAccept: pdpAccept,
 	}, nil
