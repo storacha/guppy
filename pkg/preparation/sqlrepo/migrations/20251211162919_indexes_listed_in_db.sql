@@ -9,7 +9,17 @@ CREATE TABLE IF NOT EXISTS indexes (
   -- If NULL, has not yet been calculated (and maybe cannot be, if still
   -- accepting new shards)
   digest BLOB,
-  state TEXT NOT NULL
+  -- The piece CID of the completed index
+  piece_cid BLOB,
+  -- The size of the completed index in bytes
+  size INTEGER NOT NULL DEFAULT 0,
+  -- The total number of slices (nodes) across all shards in this index
+  slice_count INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL,
+  -- The location commitment from space/blob/add
+  location_inv BLOB,
+  -- The PDP accept invocation from space/blob/add
+  pdp_accept_inv BLOB
 ) STRICT;
 
 -- The fact that a shard has been assigned to a index.

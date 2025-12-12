@@ -10,6 +10,19 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
+// IndexWriter is a function that writes index data to storage
+type IndexWriter func(
+	id id.IndexID,
+	uploadID id.UploadID,
+	digest multihash.Multihash,
+	pieceCID cid.Cid,
+	size uint64,
+	sliceCount uint64,
+	state IndexState,
+	location invocation.Invocation,
+	pdpAccept invocation.Invocation,
+) error
+
 // IndexState represents the state of a index.
 type IndexState string
 
@@ -117,4 +130,60 @@ func (i *Index) Added() error {
 	}
 	i.state = IndexStateAdded
 	return nil
+}
+
+func NewIndex(uploadID id.UploadID) (*Index, error) {
+	idx := &Index{
+		id:         id.New(),
+		uploadID:   uploadID,
+		digest:     multihash.Multihash{},
+		pieceCID:   cid.Undef,
+		size:       0,
+		sliceCount: 0,
+		state:      IndexStateOpen,
+	}
+	return idx, nil
+}
+
+func WriteIndexToDatabase(index *Index, writer IndexWriter) error {
+	return writer(
+		index.id,
+		index.uploadID,
+		index.digest,
+		index.pieceCID,
+		index.size,
+		index.sliceCount,
+		index.state,
+		index.location,
+		index.pdpAccept,
+	)
+}
+
+// ReadIndexFromDatabase creates an Index from database values
+func ReadIndexFromDatabase(
+	id id.IndexID,
+	uploadID id.UploadID,
+	digest multihash.Multihash,
+	pieceCID cid.Cid,
+	size uint64,
+	sliceCount uint64,
+	state IndexState,
+	location invocation.Invocation,
+	pdpAccept invocation.Invocation,
+) (*Index, error) {
+	if !validIndexState(state) {
+		return nil, fmt.Errorf("invalid index state: %s", state)
+	}
+
+	return &Index{
+		id:         id,
+		uploadID:   uploadID,
+		digest:     digest,
+		pieceCID:   pieceCID,
+		size:       size,
+		sliceCount: sliceCount,
+		state:      state,
+		location:   location,
+		pdpAccept:  pdpAccept,
+	}, nil
 }

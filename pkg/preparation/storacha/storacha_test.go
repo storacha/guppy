@@ -286,7 +286,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 
 		var shards []*model.Shard
 		recordClosedShard := func(shard *model.Shard) error {
-			shardsApi.AddShardToUploadIndexes(t.Context(), upload.ID(), spaceDID, shard, recordClosedIndex)
+			shardsApi.AddShardToUploadIndexes(t.Context(), upload.ID(), spaceDID, shard.ID(), recordClosedIndex)
 			shards = append(shards, shard)
 			return nil
 		}
