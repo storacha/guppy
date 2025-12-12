@@ -429,6 +429,10 @@ func TestReaderForShard(t *testing.T) {
 	})
 }
 
+func TestAddShardToUploadIndexes(t *testing.T) {
+
+}
+
 func TestIndexForUpload(t *testing.T) {
 	t.Run("returns a reader of an index of the upload", func(t *testing.T) {
 		repo := sqlrepo.New(testdb.CreateTestDB(t))

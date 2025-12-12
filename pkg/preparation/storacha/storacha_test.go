@@ -17,6 +17,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/stretchr/testify/require"
 
+	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/mockclient"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -258,54 +259,96 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		IndexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
-			return []io.Reader{
-				bytes.NewReader([]byte(fmt.Sprintf("INDEX 1 OF UPLOAD: %s", upload.ID()))),
-				bytes.NewReader([]byte(fmt.Sprintf("INDEX 2 OF UPLOAD: %s", upload.ID()))),
-			}, nil
+		carForIndex := func(ctx context.Context, indexID id.IndexID) (io.Reader, error) {
+			return bytes.NewReader(fmt.Append(nil, "CAR OF INDEX: ", indexID, padding)), nil
 		}
 
 		api := storacha.API{
 			Repo:                  repo,
 			Client:                &client,
-			IndexesForUpload:      IndexesForUpload,
+			ReaderForIndex:        carForIndex,
 			BlobUploadParallelism: 1,
 		}
 
-		upload, _ := createUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
+		shardsApi := shards.API{
+			Repo:             repo,
+			ShardEncoder:     shards.NewCAREncoder(),
+			MaxNodesPerIndex: 3,
+		}
 
-		rootCID := testutil.RandomCID(t).(cidlink.Link).Cid
-		upload.SetRootCID(rootCID)
-		err = repo.UpdateUpload(t.Context(), upload)
+		upload, source := createUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<7))
+
+		var indexes []*indexesmodel.Index
+		recordClosedIndex := func(index *indexesmodel.Index) error {
+			indexes = append(indexes, index)
+			return nil
+		}
+
+		var shards []*model.Shard
+		recordClosedShard := func(shard *model.Shard) error {
+			shardsApi.AddShardToUploadIndexes(t.Context(), upload.ID(), spaceDID, shard, recordClosedIndex)
+			shards = append(shards, shard)
+			return nil
+		}
+
+		// Add enough nodes to create three shards and two indexes.
+		for range 5 {
+			addNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, recordClosedShard, 1<<3)
+		}
+		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), recordClosedShard)
 		require.NoError(t, err)
+		require.Len(t, shards, 3)
+		require.Len(t, indexes, 1)
 
 		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
-		expectedIndexBlobs := [][]byte{
-			fmt.Appendf(nil, "INDEX 1 OF UPLOAD: %s", upload.ID()),
-			fmt.Appendf(nil, "INDEX 2 OF UPLOAD: %s", upload.ID()),
-		}
+		// BOOKMARK
 
-		require.Len(t, client.SpaceBlobAddInvocations, len(expectedIndexBlobs))
-		require.Len(t, client.SpaceBlobReplicateInvocations, len(expectedIndexBlobs))
-		require.Len(t, client.SpaceIndexAddInvocations, len(expectedIndexBlobs))
+		// // Reload first index
+		// firstIndex, err := repo.GetIndexByID(t.Context(), firstIndex.ID())
+		// require.NoError(t, err)
+		// require.Equal(t, indexesmodel.IndexStateAdded, firstIndex.State(), "expected first index to be marked as added now")
 
-		for i, blob := range expectedIndexBlobs {
-			require.Equal(t, blob, client.SpaceBlobAddInvocations[i].BlobAdded)
-			require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[i].Space)
+		// This run should `space/blob/add` the first, closed index.
+		expectedData := fmt.Append(nil, "CAR OF INDEX: ", indexes[0].ID(), padding)
+		require.Len(t, client.SpaceBlobAddInvocations, 1)
+		require.Equal(t, expectedData, client.SpaceBlobAddInvocations[0].BlobAdded)
+		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
 
-			require.Equal(t, client.SpaceBlobAddInvocations[i].ReturnedLocation, client.SpaceBlobReplicateInvocations[i].LocationCommitment)
-			require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[i].Space)
-			require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[i].ReplicaCount)
+		// Then it should `space/blob/replicate` it.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+		require.Equal(t, indexes[0].Digest(), client.SpaceBlobReplicateInvocations[0].Blob.Digest)
+		// require.Equal(t, indexes[0].Size(), client.SpaceBlobReplicateInvocations[0].Blob.Size)
+		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[0].Space)
+		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[0].ReplicaCount)
+		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
 
-			indexCID, err := cid.V1Builder{Codec: uint64(multicodec.Car), MhType: multihash.SHA2_256}.Sum(blob)
-			require.NoError(t, err)
+		// Then it should `filecoin/offer` it.
+		require.Len(t, client.FilecoinOfferInvocations, 1)
+		require.Equal(t, spaceDID, client.FilecoinOfferInvocations[0].Space)
+		require.Equal(t, cidlink.Link{Cid: indexes[0].CID()}, client.FilecoinOfferInvocations[0].Content)
+		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
 
-			require.Equal(t, indexCID, client.SpaceIndexAddInvocations[i].IndexCID)
-			require.Equal(t, uint64(len(blob)), client.SpaceIndexAddInvocations[i].IndexSize)
-			require.Equal(t, rootCID, client.SpaceIndexAddInvocations[i].RootCID)
-		}
+		// Now close the upload indexes and run it again.
+		err = shardsApi.CloseUploadIndexes(t.Context(), upload.ID(), recordClosedIndex)
+		require.NoError(t, err)
+		require.Len(t, indexes, 2)
+		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+
+		// This run should `space/blob/add` the second, newly closed shard.
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		require.Equal(t, fmt.Append(nil, "CAR OF INDEX: ", indexes[1].ID(), padding), client.SpaceBlobAddInvocations[1].BlobAdded)
+		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
+
+		// Then it should `space/blob/replicate` it.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
+		require.Equal(t, indexes[1].Digest(), client.SpaceBlobReplicateInvocations[1].Blob.Digest)
+		// require.Equal(t, indexes[1].Size(), client.SpaceBlobReplicateInvocations[1].Blob.Size)
+		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[1].Space)
+		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
+		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 	})
 }
 
@@ -317,14 +360,14 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{}
 
-		indexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
-			return []io.Reader{}, nil
-		}
+		// indexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
+		// 	return []io.Reader{}, nil
+		// }
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &client,
-			IndexesForUpload:      indexesForUpload,
+			Repo:   repo,
+			Client: &client,
+			// IndexesForUpload:      indexesForUpload,
 			BlobUploadParallelism: 1,
 		}
 

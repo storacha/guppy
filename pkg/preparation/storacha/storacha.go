@@ -1,7 +1,6 @@
 package storacha
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,7 +31,6 @@ import (
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
-	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var (
@@ -53,14 +51,17 @@ type Client interface {
 var _ Client = (*client.Client)(nil)
 
 type ReaderForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
-type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
+type ReaderForIndexFunc func(ctx context.Context, indexID id.IndexID) (io.Reader, error)
+
+// type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
 
 // API provides methods to interact with Storacha.
 type API struct {
-	Repo                  Repo
-	Client                Client
-	ReaderForShard        ReaderForShardFunc
-	IndexesForUpload      IndexesForUploadFunc
+	Repo           Repo
+	Client         Client
+	ReaderForShard ReaderForShardFunc
+	ReaderForIndex ReaderForIndexFunc
+	// IndexesForUpload      IndexesForUploadFunc
 	BlobUploadParallelism int
 }
 
@@ -267,49 +268,49 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 }
 
 func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
-	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
-	if err != nil {
-		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
-	}
-	if upload.RootCID() == cid.Undef {
-		return fmt.Errorf("no root CID set yet on upload %s", upload.ID())
-	}
+	// upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
+	// }
+	// if upload.RootCID() == cid.Undef {
+	// 	return fmt.Errorf("no root CID set yet on upload %s", upload.ID())
+	// }
 
-	indexReaders, err := a.IndexesForUpload(ctx, upload)
-	if err != nil {
-		return fmt.Errorf("failed to get index for upload %s: %w", uploadID, err)
-	}
-	for _, indexReader := range indexReaders {
-		indexBytes, err := io.ReadAll(indexReader)
-		if err != nil {
-			return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
-		}
+	// indexReaders, err := a.IndexesForUpload(ctx, upload)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get index for upload %s: %w", uploadID, err)
+	// }
+	// for _, indexReader := range indexReaders {
+	// 	indexBytes, err := io.ReadAll(indexReader)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
+	// 	}
 
-		addedBlob, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
-		if err != nil {
-			return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
-		}
+	// 	addedBlob, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
+	// 	}
 
-		_, _, err = a.Client.SpaceBlobReplicate(
-			ctx,
-			spaceDID,
-			types.Blob{
-				Digest: addedBlob.Digest,
-				Size:   uint64(len(indexBytes)),
-			},
-			3,
-			addedBlob.Location,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to replicate index: %w", err)
-		}
+	// 	_, _, err = a.Client.SpaceBlobReplicate(
+	// 		ctx,
+	// 		spaceDID,
+	// 		types.Blob{
+	// 			Digest: addedBlob.Digest,
+	// 			Size:   uint64(len(indexBytes)),
+	// 		},
+	// 		3,
+	// 		addedBlob.Location,
+	// 	)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to replicate index: %w", err)
+	// 	}
 
-		indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Digest)
-		err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
-		if err != nil {
-			return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)
-		}
-	}
+	// 	indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Digest)
+	// 	err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)
+	// 	}
+	// }
 
 	return nil
 }

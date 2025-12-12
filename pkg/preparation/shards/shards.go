@@ -1,7 +1,6 @@
 package shards
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
+	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
@@ -39,9 +39,11 @@ type API struct {
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
+var _ uploads.AddShardToUploadIndexesFunc = API{}.AddShardToUploadIndexes
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.ReaderForShardFunc = API{}.ReaderForShard
-var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
+
+// var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
 func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *model.Shard) error) error {
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
@@ -449,39 +451,85 @@ func lengthVarint(size uint64) []byte {
 	return buf[:n]
 }
 
-// LazyReader calls a function to provide its bytes the first time it's
-// necessary, then holds the value buffered in memory.
-type LazyReader struct {
-	fn func() ([]byte, error)
-	r  *bytes.Reader
+func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.Reader, error) {
+	return nil, nil
 }
 
-// LazyReader implements io.Reader. It could implement anything that
-// [bytes.Reader] does, but we'll have to implement each method we want
-// separately.
-var _ io.Reader = (*LazyReader)(nil)
+func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardID id.ShardID, indexCB func(index *indexesmodel.Index) error) error {
+	// nodes, err := a.Repo.NodesByShard(ctx, shardID, 0)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to get nodes for shard %s: %w", shardID, err)
+	// }
+	// return nil
 
-// NewLazyReader creates a new [LazyReader] with the given function
-func NewLazyReader(fn func() ([]byte, error)) *LazyReader {
-	return &LazyReader{fn: fn}
-}
-
-func (lr *LazyReader) materialize() error {
-	if lr.r == nil {
-		data, err := lr.fn()
-		if err != nil {
-			return err
-		}
-		lr.r = bytes.NewReader(data)
+	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
+	if err != nil {
+		return fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
+
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.IndexStateOpen)
+	if err != nil {
+		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
+	}
+
+	shard, err := a.Repo.GetShardByID(ctx, shardID)
+	if err != nil {
+		return fmt.Errorf("failed to find node %s: %w", shardID, err)
+	}
+	if shard == nil {
+		return fmt.Errorf("node %s not found", shardID)
+	}
+
+	var index *indexesmodel.Index
+
+	// Look for an open index that has room for the node, and close any that don't
+	// have room. (There should only be at most one open index, but there's no
+	// harm handling multiple if they exist.)
+	for _, s := range openIndexes {
+		hasRoom, err := a.roomInIndex(s, shard, space)
+		if err != nil {
+			return fmt.Errorf("failed to check room in index %s for node %s: %w", s.ID(), shard.CID(), err)
+		}
+		if hasRoom {
+			index = s
+			break
+		}
+		if err := a.closeIndex(ctx, s); err != nil {
+			return fmt.Errorf("closing index %s: %w", s.ID(), err)
+		}
+		if indexCB != nil {
+			err = indexCB(s)
+			if err != nil {
+				return fmt.Errorf("calling indexCB for closed index %s: %w", s.ID(), err)
+			}
+		}
+	}
+
+	// If no such index exists, create a new one
+	if index == nil {
+		index, err = a.Repo.CreateIndex(ctx, uploadID)
+
+		if err != nil {
+			return fmt.Errorf("failed to create new index for upload %s: %w", uploadID, err)
+		}
+		hasRoom, err := a.roomInIndex(index, shard, space)
+		if err != nil {
+			return fmt.Errorf("failed to check room in new index for shard %s: %w", shard.CID(), err)
+		}
+		if !hasRoom {
+			return fmt.Errorf("shard %s (%d slices) too large to fit in new index for upload %s (MaxNodesPerIndex: %d)", shard.CID(), shard.SliceCount(), uploadID, a.MaxNodesPerIndex)
+		}
+	}
+
+	if err := a.Repo.AddShardToIndex(ctx, index.ID(), shard.CID(), spaceDID); err != nil {
+		return fmt.Errorf("failed to add shard %s to index %s for upload %s: %w", shard.CID(), index.ID(), uploadID, err)
+	}
+
 	return nil
 }
 
-func (lr *LazyReader) Read(p []byte) (n int, err error) {
-	if err := lr.materialize(); err != nil {
-		return 0, err
-	}
-	return lr.r.Read(p)
+func (a API) CloseUploadIndexes(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexesmodel.Index) error) error {
+	return nil
 }
 
 func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
@@ -497,7 +545,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 	var indexes []blobindex.ShardedDagIndexView
 	// Keep track of how many slices are in the current index, rather than sum
 	// them constantly.
-	currentIndexSliceCount := 0
+	currentIndexeSliceCount := 0
 
 	currentIndex := func() blobindex.ShardedDagIndexView {
 		return indexes[len(indexes)-1]
@@ -506,7 +554,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 	startNewIndex := func() {
 		nextIndex := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
 		indexes = append(indexes, nextIndex)
-		currentIndexSliceCount = 0
+		currentIndexeSliceCount = 0
 	}
 
 	startNewIndex()
@@ -531,7 +579,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 			return nil, fmt.Errorf("shard %s has %d nodes, exceeding max of %d", s.ID(), shardSlices.Size(), a.MaxNodesPerIndex)
 		}
 
-		if currentIndexSliceCount+shardSlices.Size() > a.MaxNodesPerIndex {
+		if currentIndexeSliceCount+shardSlices.Size() > a.MaxNodesPerIndex {
 			startNewIndex()
 		}
 
@@ -540,7 +588,7 @@ func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) 
 		}
 
 		currentIndex().Shards().Set(s.Digest(), shardSlices)
-		currentIndexSliceCount += shardSlices.Size()
+		currentIndexeSliceCount += shardSlices.Size()
 	}
 
 	indexReaders := make([]io.Reader, 0, len(indexes))
