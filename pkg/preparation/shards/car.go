@@ -39,6 +39,7 @@ func init() {
 
 	noRootsHeader = buf.Bytes()
 	hasher := newShardHashState()
+	defer hasher.reset()
 	_, err = hasher.Write(noRootsHeader)
 	if err != nil {
 		panic(fmt.Sprintf("failed to hash CAR header: %v", err))
