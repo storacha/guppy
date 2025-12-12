@@ -142,6 +142,7 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	}
 
 	addReader, addWriter := io.Pipe()
+	defer addReader.Close()
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
 		defer meteredAddWriter.Close()
