@@ -369,10 +369,8 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			err := api.CloseUploadShards(ctx, uploadID, func(shard *shardmodel.Shard) error {
 				signal(closedShardsAvailable)
 
-				err := api.AddShardToUploadIndexes(ctx, uploadID, spaceDID, shard.ID(), func(index *indexmodel.Index) error {
-					signal(closedIndexesAvailable)
-					return nil
-				})
+				// Add the closed shard to indexes (but don't close indexes yet - root CID not set)
+				err := api.AddShardToUploadIndexes(ctx, uploadID, spaceDID, shard.ID(), nil)
 				if err != nil {
 					return fmt.Errorf("adding shard to upload index: %w", err)
 				}
@@ -381,15 +379,6 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			})
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
-			}
-
-			// Close any open indexes for this upload
-			err = api.CloseUploadIndexes(ctx, uploadID, func(index *indexmodel.Index) error {
-				signal(closedIndexesAvailable)
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
 
 			// Reload the upload to get the latest state from the DB.
@@ -406,6 +395,15 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			}
 			if err := api.Repo.UpdateUpload(ctx, upload); err != nil {
 				return fmt.Errorf("updating upload: %w", err)
+			}
+
+			// Close any open indexes for this upload (requires root CID to be set)
+			err = api.CloseUploadIndexes(ctx, uploadID, func(index *indexmodel.Index) error {
+				signal(closedIndexesAvailable)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
 
 			close(closedShardsAvailable)

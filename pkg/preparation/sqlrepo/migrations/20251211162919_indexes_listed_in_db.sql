@@ -25,13 +25,12 @@ CREATE TABLE IF NOT EXISTS indexes (
 -- The fact that a shard has been assigned to a index.
 CREATE TABLE IF NOT EXISTS shards_in_indexes (
   -- Which shard we're talking about
-  shard_cid BLOB NOT NULL,
-  space_did BLOB NOT NULL,
+  shard_id BLOB NOT NULL,
   -- Which index this shard is in
   index_id BLOB NOT NULL,
-  FOREIGN KEY (shard_cid, space_did) REFERENCES shards(cid, space_did) ON DELETE CASCADE,
+  FOREIGN KEY (shard_id) REFERENCES shards(id) ON DELETE CASCADE,
   FOREIGN KEY (index_id) REFERENCES indexes(id) ON DELETE CASCADE,
-  PRIMARY KEY (shard_cid, space_did, index_id)
+  PRIMARY KEY (shard_id, index_id)
 ) STRICT;
 -- +goose StatementEnd
 

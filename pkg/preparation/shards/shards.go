@@ -603,8 +603,8 @@ func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, 
 		}
 	}
 
-	if err := a.Repo.AddShardToIndex(ctx, index.ID(), shard.CID(), spaceDID); err != nil {
-		return fmt.Errorf("failed to add shard %s to index %s for upload %s: %w", shard.CID(), index.ID(), uploadID, err)
+	if err := a.Repo.AddShardToIndex(ctx, index.ID(), shard.ID()); err != nil {
+		return fmt.Errorf("failed to add shard %s to index %s for upload %s: %w", shard.ID(), index.ID(), uploadID, err)
 	}
 
 	return nil

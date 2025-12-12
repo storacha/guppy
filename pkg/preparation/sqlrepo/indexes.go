@@ -9,7 +9,6 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
-	"github.com/storacha/go-ucanto/did"
 	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -228,15 +227,14 @@ func (r *Repo) UpdateIndex(ctx context.Context, index *indexesmodel.Index) error
 	})
 }
 
-func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardCID cid.Cid, spaceDID did.DID) error {
+func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error {
 	// First, get the shard's slice count
 	var sliceCount uint64
 	err := r.db.QueryRowContext(ctx, `
 		SELECT slice_count
 		FROM shards
-		WHERE cid = ? AND space_did = ?`,
-		shardCID,
-		spaceDID,
+		WHERE id = ?`,
+		shardID,
 	).Scan(&sliceCount)
 	if err != nil {
 		return fmt.Errorf("failed to get shard slice count: %w", err)
@@ -244,14 +242,13 @@ func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardCID
 
 	// Add the shard to the index
 	_, err = r.db.ExecContext(ctx, `
-		INSERT INTO shards_in_indexes (shard_cid, space_did, index_id)
-		VALUES (?, ?, ?)`,
-		shardCID,
-		spaceDID,
+		INSERT INTO shards_in_indexes (shard_id, index_id)
+		VALUES (?, ?)`,
+		shardID,
 		indexID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to add shard %s to index %s: %w", shardCID, indexID, err)
+		return fmt.Errorf("failed to add shard %s to index %s: %w", shardID, indexID, err)
 	}
 
 	// Update the index's slice count
@@ -285,7 +282,7 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*shard
 			s.location_inv,
 			s.pdp_accept_inv
 		FROM shards s
-		INNER JOIN shards_in_indexes si ON s.cid = si.shard_cid AND s.space_did = si.space_did
+		INNER JOIN shards_in_indexes si ON s.id = si.shard_id
 		WHERE si.index_id = ?
 		ORDER BY s.id`,
 		indexID,

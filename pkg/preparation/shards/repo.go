@@ -34,7 +34,7 @@ type Repo interface {
 	UpdateIndex(ctx context.Context, index *indexesmodel.Index) error
 	IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state indexesmodel.IndexState) ([]*indexesmodel.Index, error)
 	GetIndexByID(ctx context.Context, indexID id.IndexID) (*indexesmodel.Index, error)
-	AddShardToIndex(ctx context.Context, indexID id.IndexID, shardCID cid.Cid, spaceDID did.DID) error
+	AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error
 	ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error)
 
 	// Upload methods
