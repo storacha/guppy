@@ -303,13 +303,6 @@ func TestAddIndexesForUpload(t *testing.T) {
 		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
-		// BOOKMARK
-
-		// // Reload first index
-		// firstIndex, err := repo.GetIndexByID(t.Context(), firstIndex.ID())
-		// require.NoError(t, err)
-		// require.Equal(t, indexesmodel.IndexStateAdded, firstIndex.State(), "expected first index to be marked as added now")
-
 		// This run should `space/blob/add` the first, closed index.
 		expectedData := fmt.Append(nil, "CAR OF INDEX: ", indexes[0].ID(), padding)
 		require.Len(t, client.SpaceBlobAddInvocations, 1)

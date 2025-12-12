@@ -34,29 +34,32 @@ func validIndexState(state IndexState) bool {
 
 // TK: Extract commonalities with Index?
 type Index struct {
-	id              id.IndexID
-	uploadID        id.UploadID
-	digest          multihash.Multihash
-	pieceCID        cid.Cid
-	digestStateUpTo uint64
-	digestState     []byte
-	pieceCIDState   []byte
-	state           IndexState
-	location        invocation.Invocation
-	pdpAccept       invocation.Invocation
+	id         id.IndexID
+	uploadID   id.UploadID
+	digest     multihash.Multihash
+	pieceCID   cid.Cid
+	size       uint64
+	sliceCount uint64
+	state      IndexState
+	location   invocation.Invocation
+	pdpAccept  invocation.Invocation
 }
 
 func (i *Index) ID() id.IndexID {
 	return i.id
 }
 
+func (i *Index) UploadID() id.UploadID {
+	return i.uploadID
+}
+
 func (i *Index) State() IndexState {
 	return i.state
 }
 
-// func (i *Index) SliceCount() uint64 {
-// 	return i.sliceCount
-// }
+func (i *Index) SliceCount() uint64 {
+	return i.sliceCount
+}
 
 func (i *Index) Digest() multihash.Multihash {
 	return i.digest
@@ -66,16 +69,8 @@ func (i *Index) PieceCID() cid.Cid {
 	return i.pieceCID
 }
 
-func (i *Index) DigestStateUpTo() uint64 {
-	return i.digestStateUpTo
-}
-
-func (i *Index) DigestState() []byte {
-	return i.digestState
-}
-
-func (i *Index) PieceCIDState() []byte {
-	return i.pieceCIDState
+func (i *Index) Size() uint64 {
+	return i.size
 }
 
 func (i *Index) CID() cid.Cid {
@@ -98,4 +93,28 @@ func (i *Index) String() string {
 		return fmt.Sprintf("Index[id=%s, cid=%s]", i.id, i.CID())
 	}
 	return fmt.Sprintf("Index[id=%s]", i.id)
+}
+
+func (i *Index) Close(indexDigest multihash.Multihash, pieceCID cid.Cid, size uint64) error {
+	if i.state != IndexStateOpen {
+		return fmt.Errorf("cannot close index %s in state %s", i.id, i.state)
+	}
+	i.digest = indexDigest
+	i.pieceCID = pieceCID
+	i.size = size
+	i.state = IndexStateClosed
+	return nil
+}
+
+func (i *Index) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocation.Invocation) {
+	i.location = location
+	i.pdpAccept = pdpAccept
+}
+
+func (i *Index) Added() error {
+	if i.state != IndexStateClosed {
+		return fmt.Errorf("cannot mark index %s as added in state %s", i.id, i.state)
+	}
+	i.state = IndexStateAdded
+	return nil
 }

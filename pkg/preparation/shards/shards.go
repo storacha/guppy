@@ -451,56 +451,139 @@ func lengthVarint(size uint64) []byte {
 	return buf[:n]
 }
 
+func (a API) readerForIndexID(ctx context.Context, indexID id.IndexID) (io.Reader, error) {
+	index, err := a.Repo.GetIndexByID(ctx, indexID)
+	if err != nil {
+		return nil, fmt.Errorf("getting index %s: %w", indexID, err)
+	}
+
+	// Get the upload to retrieve the root CID
+	upload, err := a.Repo.GetUploadByID(ctx, index.UploadID())
+	if err != nil {
+		return nil, fmt.Errorf("getting upload for index %s: %w", indexID, err)
+	}
+	if upload.RootCID() == cid.Undef {
+		return nil, fmt.Errorf("no root CID set yet for upload %s (index %s)", upload.ID(), indexID)
+	}
+
+	// Build the index by reading shards from the database
+	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
+
+	// Query shards that belong to this index
+	shards, err := a.Repo.ShardsForIndex(ctx, indexID)
+	if err != nil {
+		return nil, fmt.Errorf("getting shards for index %s: %w", indexID, err)
+	}
+
+	// Add all shards in this index
+	for _, s := range shards {
+		shardSlices := blobindex.NewMultihashMap[blobindex.Position](-1)
+
+		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
+			position := blobindex.Position{
+				Offset: shardOffset,
+				Length: node.Size(),
+			}
+			shardSlices.Set(node.CID().Hash(), position)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("iterating nodes in shard %s: %w", s.ID(), err)
+		}
+
+		if s.Digest() == nil || len(s.Digest()) == 0 {
+			return nil, fmt.Errorf("shard %s has no digest set", s.ID())
+		}
+		indexView.Shards().Set(s.Digest(), shardSlices)
+	}
+
+	return blobindex.Archive(indexView)
+}
+
 func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.Reader, error) {
-	return nil, nil
+	return a.readerForIndexID(ctx, indexID)
+}
+
+func (a API) roomInIndex(index *indexesmodel.Index, shard *model.Shard, space *spacesmodel.Space) (bool, error) {
+	if a.MaxNodesPerIndex > 0 && index.SliceCount()+shard.SliceCount() > uint64(a.MaxNodesPerIndex) {
+		return false, nil // Index would exceed maximum slice count
+	}
+
+	return true, nil
+}
+
+func (a API) closeIndex(ctx context.Context, index *indexesmodel.Index) error {
+	// Read the index data to compute its digest and piece CID
+	indexReader, err := a.readerForIndexID(ctx, index.ID())
+	if err != nil {
+		return fmt.Errorf("getting reader for index %s: %w", index.ID(), err)
+	}
+
+	// Hash the index data
+	indexData, err := io.ReadAll(indexReader)
+	if err != nil {
+		return fmt.Errorf("reading index %s data for hashing: %w", index.ID(), err)
+	}
+
+	// Compute digest
+	hasher := newShardHashState()
+	_, err = hasher.Write(indexData)
+	if err != nil {
+		return fmt.Errorf("hashing index %s: %w", index.ID(), err)
+	}
+
+	indexDigest, pieceCID, err := hasher.finalize(uint64(len(indexData)))
+	if err != nil {
+		return fmt.Errorf("finalizing digests for index %s: %w", index.ID(), err)
+	}
+
+	if err := index.Close(indexDigest, pieceCID, uint64(len(indexData))); err != nil {
+		return err
+	}
+
+	return a.Repo.UpdateIndex(ctx, index)
 }
 
 func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardID id.ShardID, indexCB func(index *indexesmodel.Index) error) error {
-	// nodes, err := a.Repo.NodesByShard(ctx, shardID, 0)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get nodes for shard %s: %w", shardID, err)
-	// }
-	// return nil
-
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
 		return fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
-	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.IndexStateOpen)
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateOpen)
 	if err != nil {
 		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
 	}
 
 	shard, err := a.Repo.GetShardByID(ctx, shardID)
 	if err != nil {
-		return fmt.Errorf("failed to find node %s: %w", shardID, err)
+		return fmt.Errorf("failed to find shard %s: %w", shardID, err)
 	}
 	if shard == nil {
-		return fmt.Errorf("node %s not found", shardID)
+		return fmt.Errorf("shard %s not found", shardID)
 	}
 
 	var index *indexesmodel.Index
 
-	// Look for an open index that has room for the node, and close any that don't
+	// Look for an open index that has room for the shard, and close any that don't
 	// have room. (There should only be at most one open index, but there's no
 	// harm handling multiple if they exist.)
-	for _, s := range openIndexes {
-		hasRoom, err := a.roomInIndex(s, shard, space)
+	for _, idx := range openIndexes {
+		hasRoom, err := a.roomInIndex(idx, shard, space)
 		if err != nil {
-			return fmt.Errorf("failed to check room in index %s for node %s: %w", s.ID(), shard.CID(), err)
+			return fmt.Errorf("failed to check room in index %s for shard %s: %w", idx.ID(), shard.CID(), err)
 		}
 		if hasRoom {
-			index = s
+			index = idx
 			break
 		}
-		if err := a.closeIndex(ctx, s); err != nil {
-			return fmt.Errorf("closing index %s: %w", s.ID(), err)
+		if err := a.closeIndex(ctx, idx); err != nil {
+			return fmt.Errorf("closing index %s: %w", idx.ID(), err)
 		}
 		if indexCB != nil {
-			err = indexCB(s)
+			err = indexCB(idx)
 			if err != nil {
-				return fmt.Errorf("calling indexCB for closed index %s: %w", s.ID(), err)
+				return fmt.Errorf("calling indexCB for closed index %s: %w", idx.ID(), err)
 			}
 		}
 	}
@@ -508,7 +591,6 @@ func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, 
 	// If no such index exists, create a new one
 	if index == nil {
 		index, err = a.Repo.CreateIndex(ctx, uploadID)
-
 		if err != nil {
 			return fmt.Errorf("failed to create new index for upload %s: %w", uploadID, err)
 		}
@@ -529,6 +611,23 @@ func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, 
 }
 
 func (a API) CloseUploadIndexes(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexesmodel.Index) error) error {
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateOpen)
+	if err != nil {
+		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
+	}
+
+	for _, idx := range openIndexes {
+		if err := a.closeIndex(ctx, idx); err != nil {
+			return fmt.Errorf("updating index %s for upload %s: %w", idx.ID(), uploadID, err)
+		}
+		if indexCB != nil {
+			err = indexCB(idx)
+			if err != nil {
+				return fmt.Errorf("calling indexCB for closed index %s: %w", idx.ID(), err)
+			}
+		}
+	}
+
 	return nil
 }
 

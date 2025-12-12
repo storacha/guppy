@@ -27,6 +27,7 @@ import (
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
+	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -241,6 +242,23 @@ func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, s
 	return err
 }
 
+func (a API) spaceBlobReplicateForIndex(ctx context.Context, index *indexesmodel.Index, spaceDID did.DID, locationCommitment delegation.Delegation) error {
+	ctx, span := tracer.Start(ctx, "space-blob-replicate-index")
+	defer span.End()
+
+	_, _, err := a.Client.SpaceBlobReplicate(
+		ctx,
+		spaceDID,
+		types.Blob{
+			Digest: index.Digest(),
+			Size:   index.Size(),
+		},
+		3,
+		locationCommitment,
+	)
+	return err
+}
+
 func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, opts ...client.FilecoinOfferOption) error {
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
@@ -267,52 +285,145 @@ func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceD
 	return nil
 }
 
-func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
-	// upload, err := a.Repo.GetUploadByID(ctx, uploadID)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
-	// }
-	// if upload.RootCID() == cid.Undef {
-	// 	return fmt.Errorf("no root CID set yet on upload %s", upload.ID())
-	// }
+func (a API) addIndexBlobs(ctx context.Context, indexes []*indexesmodel.Index, uploadID id.UploadID, spaceDID did.DID) error {
+	// Ensure at least 1 parallelism
+	if a.BlobUploadParallelism < 1 {
+		a.BlobUploadParallelism = 1
+	}
 
-	// indexReaders, err := a.IndexesForUpload(ctx, upload)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to get index for upload %s: %w", uploadID, err)
-	// }
-	// for _, indexReader := range indexReaders {
-	// 	indexBytes, err := io.ReadAll(indexReader)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to read index for upload %s: %w", uploadID, err)
-	// 	}
+	sem := make(chan struct{}, a.BlobUploadParallelism)
+	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(indexes))
+	eg, gctx := errgroup.WithContext(ctx)
+	for _, index := range indexes {
+		sem <- struct{}{}
+		eg.Go(func() error {
+			defer func() { <-sem }()
+			if err := a.addIndexBlob(gctx, index, uploadID, spaceDID); err != nil {
+				err = fmt.Errorf("failed to add index blob %s: %w", index, err)
+				var errBlobUpload gtypes.BlobUploadError
+				if errors.As(err, &errBlobUpload) {
+					blobUploadErrorCh <- errBlobUpload
+					return nil
+				}
+				log.Errorf("%v", err)
+				return err
+			}
+			log.Infof("Successfully added index blob %s", index)
+			return nil
+		})
+	}
 
-	// 	addedBlob, err := a.Client.SpaceBlobAdd(ctx, bytes.NewReader(indexBytes), spaceDID)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to add index to space %s: %w", spaceDID, err)
-	// 	}
+	terminalErr := eg.Wait()
+	close(blobUploadErrorCh)
 
-	// 	_, _, err = a.Client.SpaceBlobReplicate(
-	// 		ctx,
-	// 		spaceDID,
-	// 		types.Blob{
-	// 			Digest: addedBlob.Digest,
-	// 			Size:   uint64(len(indexBytes)),
-	// 		},
-	// 		3,
-	// 		addedBlob.Location,
-	// 	)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to replicate index: %w", err)
-	// 	}
+	if terminalErr != nil {
+		return terminalErr
+	}
 
-	// 	indexCID := cid.NewCidV1(uint64(multicodec.Car), addedBlob.Digest)
-	// 	err = a.Client.SpaceIndexAdd(ctx, indexCID, uint64(len(indexBytes)), upload.RootCID(), spaceDID)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to add index link to space %s: %w", spaceDID, err)
-	// 	}
-	// }
+	var blobUploadErrors []gtypes.BlobUploadError
+	for err := range blobUploadErrorCh {
+		blobUploadErrors = append(blobUploadErrors, err)
+	}
+	if len(blobUploadErrors) > 0 {
+		return gtypes.NewBlobUploadErrors(blobUploadErrors)
+	}
+	return nil
+}
+
+func (a API) addIndexBlob(ctx context.Context, index *indexesmodel.Index, uploadID id.UploadID, spaceDID did.DID) error {
+	start := time.Now()
+	log.Infow("adding index blob", "cid", index.CID().String(), "id", index.ID())
+	ctx, span := tracer.Start(ctx, "add-index-blob", trace.WithAttributes(
+		attribute.String("index.id", index.ID().String()),
+		attribute.Int64("index.size", int64(index.Size())),
+		attribute.String("index.digest", index.Digest().String()),
+		attribute.String("index.cid", index.CID().String()),
+	))
+	defer func() {
+		log.Infow("added index blob", "cid", index.CID().String(), "id", index.ID(), "duration", time.Since(start))
+		span.End()
+	}()
+
+	indexReader, err := a.ReaderForIndex(ctx, index.ID())
+	if err != nil {
+		return fmt.Errorf("failed to get reader for index %s: %w", index.ID(), err)
+	}
+
+	addReader, addWriter := io.Pipe()
+
+	go func() {
+		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
+		defer meteredAddWriter.Close()
+		_, err := io.Copy(meteredAddWriter, indexReader)
+		if err != nil {
+			addWriter.CloseWithError(fmt.Errorf("failed to copy index bytes to pipe: %w", err))
+		}
+	}()
+
+	location := index.Location()
+
+	// If we don't have a location commitment yet, we have yet to successfully
+	// `space/blob/add`.
+	if location == nil {
+		log.Infof("adding index %s to space %s via `space/blob/add`", index.ID(), spaceDID)
+		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(index.Digest(), index.Size()))
+		if err != nil {
+			return gtypes.NewBlobUploadError(index.String(), fmt.Errorf("failed to add index %s to space %s: %w", index.ID(), spaceDID, err))
+		}
+
+		if addedBlob.Digest.B58String() != index.Digest().B58String() {
+			return fmt.Errorf("added index %s digest mismatch: expected %x, got %x", index.ID(), index.Digest(), addedBlob.Digest)
+		}
+
+		index.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
+		if err := a.Repo.UpdateIndex(ctx, index); err != nil {
+			return fmt.Errorf("failed to update index %s after `space/blob/add`: %w", index.ID(), err)
+		}
+
+		location = addedBlob.Location
+	} else {
+		log.Infof("index %s already has location, skipping `space/blob/add`", index.ID())
+	}
+
+	err = a.spaceBlobReplicateForIndex(ctx, index, spaceDID, location)
+	if err != nil {
+		return gtypes.NewBlobUploadError(index.String(), fmt.Errorf("failed to replicate index %s: %w", index, err))
+	}
+
+	// Add the index link to the upload
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
+	}
+
+	indexCID := cid.NewCidV1(uint64(multicodec.Car), index.Digest())
+	err = a.Client.SpaceIndexAdd(ctx, indexCID, index.Size(), upload.RootCID(), spaceDID)
+	if err != nil {
+		return gtypes.NewBlobUploadError(index.String(), fmt.Errorf("failed to add index link for %s: %w", index, err))
+	}
+
+	err = index.Added()
+	if err != nil {
+		return fmt.Errorf("failed to mark index %s as added: %w", index.String(), err)
+	}
+	if err := a.Repo.UpdateIndex(ctx, index); err != nil {
+		return fmt.Errorf("failed to update index %s after adding to space: %w", index.String(), err)
+	}
 
 	return nil
+}
+
+func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+	ctx, span := tracer.Start(ctx, "add-indexes-for-upload")
+	defer span.End()
+
+	closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateClosed)
+	if err != nil {
+		return fmt.Errorf("failed to get closed indexes for upload %s: %w", uploadID, err)
+	}
+	span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
+
+	return a.addIndexBlobs(ctx, closedIndexes, uploadID, spaceDID)
 }
 
 func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {

@@ -29,7 +29,8 @@ var (
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *shardmodel.Shard) error) error
-type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shard *shardmodel.Shard, indexCB func(index *indexmodel.Index) error) error
+type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardID id.ShardID, indexCB func(index *indexmodel.Index) error) error
+type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexmodel.Index) error) error
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *shardmodel.Shard) error) error
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -63,6 +64,11 @@ type API struct {
 	// returns true if an existing open shard was in fact closed, false if there
 	// was no open shard to close.
 	CloseUploadShards CloseUploadShardsFunc
+
+	// CloseUploadIndexes closes any remaining open index for the upload. If an
+	// index is closed, the provided `indexCB` callback is called with the closed
+	// index. `indexCB` may be nil.
+	CloseUploadIndexes CloseUploadIndexesFunc
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -333,7 +339,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, func(shard *shardmodel.Shard) error {
 					signal(closedShardsAvailable)
 
-					err := api.AddShardToUploadIndexes(ctx, uploadID, spaceDID, shard, func(index *indexmodel.Index) error {
+					err := api.AddShardToUploadIndexes(ctx, uploadID, spaceDID, shard.ID(), func(index *indexmodel.Index) error {
 						signal(closedIndexesAvailable)
 						return nil
 					})
@@ -362,10 +368,28 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			// We're out of nodes, so we can close any open shards for this upload.
 			err := api.CloseUploadShards(ctx, uploadID, func(shard *shardmodel.Shard) error {
 				signal(closedShardsAvailable)
+
+				err := api.AddShardToUploadIndexes(ctx, uploadID, spaceDID, shard.ID(), func(index *indexmodel.Index) error {
+					signal(closedIndexesAvailable)
+					return nil
+				})
+				if err != nil {
+					return fmt.Errorf("adding shard to upload index: %w", err)
+				}
+
 				return nil
 			})
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
+			}
+
+			// Close any open indexes for this upload
+			err = api.CloseUploadIndexes(ctx, uploadID, func(index *indexmodel.Index) error {
+				signal(closedIndexesAvailable)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
 
 			// Reload the upload to get the latest state from the DB.
@@ -385,6 +409,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 			}
 
 			close(closedShardsAvailable)
+			close(closedIndexesAvailable)
 
 			return nil
 		},
