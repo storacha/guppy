@@ -52,6 +52,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
@@ -244,6 +245,7 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
+			preparation.WithShardUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
@@ -365,18 +367,25 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
+			preparation.WithShardUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
 
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
-		require.ErrorIs(t, err, assert.AnError, "expected error on third PUT request")
+
+		var shardUploadErrors gtypes.ShardUploadErrors
+		require.ErrorAs(t, err, &shardUploadErrors, "expected a ShardUploadErrors error")
+
+		underlying := shardUploadErrors.Unwrap()
+		require.Len(t, underlying, 1, "expected exactly one underlying error")
+		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, 2, putBlobs.Size(), "expected only 2 shards to be added so far")
-		require.Len(t, replicateCaps, 2, "expected only 2 shards to be replicated so far")
-		require.Len(t, offerCaps, 2, "expected only 2 shards to be `filecoin/offer`ed so far")
+		require.Equal(t, 4, putBlobs.Size(), "expected only 4/5 shards to be added so far")
+		require.Len(t, replicateCaps, 4, "expected only 4/5 shards to be replicated so far")
+		require.Len(t, offerCaps, 4, "expected only 4/5 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")

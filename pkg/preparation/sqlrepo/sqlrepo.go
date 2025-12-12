@@ -2,13 +2,16 @@ package sqlrepo
 
 import (
 	"database/sql"
-	_ "embed"
+	"embed"
 
 	logging "github.com/ipfs/go-log/v2"
 )
 
 //go:embed schema.sql
 var Schema string
+
+//go:embed migrations/*.sql
+var MigrationsFS embed.FS
 
 var log = logging.Logger("preparation/sqlrepo")
 

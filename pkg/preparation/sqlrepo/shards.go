@@ -8,6 +8,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
+	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/shards"
@@ -18,8 +19,8 @@ import (
 
 var _ shards.Repo = (*Repo)(nil)
 
-func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint64) (*model.Shard, error) {
-	shard, err := model.NewShard(uploadID, size)
+func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint64, digestState, pieceCidState []byte) (*model.Shard, error) {
+	shard, err := model.NewShard(uploadID, size, digestState, pieceCidState)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,13 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		pieceCID cid.Cid,
+		digestStateUpTo uint64,
+		digestState []byte,
+		pieceCIDState []byte,
 		state model.ShardState,
+		location invocation.Invocation,
+		pdpAccept invocation.Invocation,
 	) error {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO shards (
@@ -37,13 +44,25 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 				upload_id,
 				size,
 				digest,
-				state
-			) VALUES (?, ?, ?, ?, ?)`,
+				piece_cid,
+				digest_state_up_to,
+				digest_state,
+				piece_cid_state,
+				state,
+				location_inv,
+				pdp_accept_inv
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id,
 			uploadID,
 			size,
 			digest,
+			util.DbCID(&pieceCID),
+			digestStateUpTo,
+			util.DbBytes(&digestState),
+			util.DbBytes(&pieceCIDState),
 			state,
+			util.DbInvocation(&location),
+			util.DbInvocation(&pdpAccept),
 		)
 		return err
 	})
@@ -61,7 +80,13 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			upload_id,
 			size,
 			digest,
-			state
+			piece_cid,
+			digest_state_up_to,
+			digest_state,
+			piece_cid_state,
+			state,
+			location_inv,
+			pdp_accept_inv
 		FROM shards
 		WHERE upload_id = ?
 		  AND state = ?`,
@@ -80,9 +105,15 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			uploadID *id.UploadID,
 			size *uint64,
 			digest *multihash.Multihash,
+			pieceCID *cid.Cid,
+			digestStateUpTo *uint64,
+			digestState *[]byte,
+			pieceCIDState *[]byte,
 			state *model.ShardState,
+			location *invocation.Invocation,
+			pdpAccept *invocation.Invocation,
 		) error {
-			return rows.Scan(id, uploadID, size, util.DbBytes(digest), state)
+			return rows.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
 		})
 		if err != nil {
 			return nil, err
@@ -102,7 +133,13 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 			upload_id,
 			size,
 			digest,
-			state
+			piece_cid,
+			digest_state_up_to,
+			digest_state,
+			piece_cid_state,
+			state,
+			location_inv,
+			pdp_accept_inv
 		FROM shards
 		WHERE id = ?`,
 		shardID,
@@ -113,9 +150,15 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		uploadID *id.UploadID,
 		size *uint64,
 		digest *multihash.Multihash,
+		pieceCID *cid.Cid,
+		digestStateUpTo *uint64,
+		digestState *[]byte,
+		pieceCIDState *[]byte,
 		state *model.ShardState,
+		location *invocation.Invocation,
+		pdpAccept *invocation.Invocation,
 	) error {
-		return row.Scan(id, uploadID, size, util.DbBytes(digest), state)
+		return row.Scan(id, uploadID, size, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
 	})
 	if err != nil {
 		return nil, err
@@ -130,12 +173,14 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 // of the length varint + the length of the CID bytes. The node's block will be
 // indexed as appearing at `shard.size + offset`, running for `node.size` bytes,
 // and then the shard size will be increased by `offset + node.size`.
-func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64) error {
+func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...shards.AddNodeToShardOption) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	config := shards.NewAddNodeConfig(options...)
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO nodes_in_shards (
@@ -165,6 +210,25 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		return err
 	}
 
+	if config.HasDigestStateUpdate() {
+		digestState := config.DigestStateUpdate().DigestState()
+		pieceCIDState := config.DigestStateUpdate().PieceCIDState()
+		_, err = tx.ExecContext(ctx, `
+			UPDATE shards
+			SET digest_state_up_to = ?,
+			    digest_state = ?,
+			    piece_cid_state = ?
+			WHERE id = ?`,
+			config.DigestStateUpdate().DigestStateUpTo(),
+			util.DbBytes(&digestState),
+			util.DbBytes(&pieceCIDState),
+			shardID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update digest state for shard %s: %w", shardID, err)
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -190,7 +254,7 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
-func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) ([]dagsmodel.Node, error) {
+func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error) {
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT
 				nodes.cid,
@@ -203,8 +267,10 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID) ([]dagsmode
 			FROM nodes_in_shards
 			JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
 			WHERE shard_id = ?
+			AND nodes_in_shards.shard_offset >= ?
 			ORDER BY nodes_in_shards.shard_offset ASC`,
 		shardID,
+		startOffset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err)
@@ -274,7 +340,13 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		uploadID id.UploadID,
 		size uint64,
 		digest multihash.Multihash,
+		pieceCID cid.Cid,
+		digestStateUpTo uint64,
+		digestState []byte,
+		pieceCIDState []byte,
 		state model.ShardState,
+		location invocation.Invocation,
+		pdpAccept invocation.Invocation,
 	) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE shards
@@ -282,13 +354,25 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			    upload_id = ?,
 			    size = ?,
 			    digest = ?,
-			    state = ?
+			    piece_cid = ?,
+			    digest_state_up_to = ?,
+					digest_state = ?,
+			    piece_cid_state = ?,
+			    state = ?,
+			    location_inv = ?,
+			    pdp_accept_inv = ?
 			WHERE id = ?`,
 			id,
 			uploadID,
 			size,
 			digest,
+			util.DbCID(&pieceCID),
+			digestStateUpTo,
+			util.DbBytes(&digestState),
+			util.DbBytes(&pieceCIDState),
 			state,
+			util.DbInvocation(&location),
+			util.DbInvocation(&pdpAccept),
 			id,
 		)
 		return err

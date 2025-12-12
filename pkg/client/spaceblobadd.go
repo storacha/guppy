@@ -8,6 +8,7 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/multiformats/go-multihash"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
@@ -28,30 +29,66 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
-	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 // SpaceBlobAddOption configures options for SpaceBlobAdd.
-type SpaceBlobAddOption func(*spaceBlobAddConfig)
+type SpaceBlobAddOption func(*SpaceBlobAddConfig)
 
-// spaceBlobAddConfig holds configuration for SpaceBlobAdd.
-type spaceBlobAddConfig struct {
-	putClient *http.Client
+// SpaceBlobAddConfig holds configuration for SpaceBlobAdd.
+type SpaceBlobAddConfig struct {
+	putClient          *http.Client
+	precomputedDigest  multihash.Multihash
+	precomputedSizePtr *uint64
+}
+
+func (s *SpaceBlobAddConfig) PutClient() *http.Client {
+	return s.putClient
+}
+
+func (s *SpaceBlobAddConfig) PrecomputedDigest() multihash.Multihash {
+	return s.precomputedDigest
+}
+
+func (s *SpaceBlobAddConfig) PrecomputedSizePtr() *uint64 {
+	return s.precomputedSizePtr
+}
+
+// NewSpaceBlobAddConfig creates a new SpaceBlobAddConfig with the given options.
+func NewSpaceBlobAddConfig(options ...SpaceBlobAddOption) *SpaceBlobAddConfig {
+	cfg := &SpaceBlobAddConfig{
+		putClient: &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
+	}
+	for _, opt := range options {
+		opt(cfg)
+	}
+	return cfg
 }
 
 // WithPutClient configures the HTTP client to use for uploading blobs.
 func WithPutClient(client *http.Client) SpaceBlobAddOption {
-	return func(cfg *spaceBlobAddConfig) {
+	return func(cfg *SpaceBlobAddConfig) {
 		cfg.putClient = client
+	}
+}
+
+// WithPrecomputedDigest supplies a previously computed digest/size so we can skip re-hashing.
+func WithPrecomputedDigest(d multihash.Multihash, size uint64) SpaceBlobAddOption {
+	return func(cfg *SpaceBlobAddConfig) {
+		cfg.precomputedDigest = d
+		cfg.precomputedSizePtr = &size
 	}
 }
 
 type AddedBlob struct {
 	Digest    multihash.Multihash
-	Location  delegation.Delegation
+	Location  invocation.Invocation
 	PDPAccept invocation.Invocation
 }
 
@@ -77,39 +114,46 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	defer span.End()
 
 	// Configure options
-	cfg := &spaceBlobAddConfig{
-		putClient: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		},
-	}
-	for _, opt := range options {
-		opt(cfg)
-	}
-	putClient := cfg.putClient
+	cfg := NewSpaceBlobAddConfig(options...)
 
-	_, readSpan := tracer.Start(ctx, "read-content")
-	contentBytes, err := io.ReadAll(content)
-	if err != nil {
+	putClient := cfg.PutClient()
+
+	contentReader := content
+
+	contentHash := cfg.PrecomputedDigest()
+	contentSizePtr := cfg.PrecomputedSizePtr()
+	needsHash := contentSizePtr == nil || contentHash == nil || len(contentHash) == 0
+	start := time.Now()
+	log.Infow("space blob adding", "space", space, "has_digest", !needsHash)
+	defer func() {
+		log.Infow("space blob added", "space", space, "has_digest", !needsHash, "duration", time.Since(start))
+	}()
+	if needsHash {
+		ctx, readSpan := tracer.Start(ctx, "read-content")
+		contentBytes, err := io.ReadAll(content)
+		if err != nil {
+			readSpan.End()
+			return AddedBlob{}, fmt.Errorf("reading content: %w", err)
+		}
+		readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
 		readSpan.End()
-		return AddedBlob{}, fmt.Errorf("reading content: %w", err)
-	}
-	readSpan.SetAttributes(attribute.Int("content-size", len(contentBytes)))
-	readSpan.End()
-
-	_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
-		attribute.Int("content-size", len(contentBytes)),
-	))
-	contentHash, err := multihash.Sum(contentBytes, multihash.SHA2_256, -1)
-	if err != nil {
+		_, hashSpan := tracer.Start(ctx, "hash-content", trace.WithAttributes(
+			attribute.Int("content-size", len(contentBytes)),
+		))
+		contentHash, err = multihash.Sum(contentBytes, multihash.SHA2_256, -1)
+		if err != nil {
+			hashSpan.End()
+			return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
+		}
 		hashSpan.End()
-		return AddedBlob{}, fmt.Errorf("computing content multihash: %w", err)
+		contentReader = bytes.NewReader(contentBytes)
+		contentSize := uint64(len(contentBytes))
+		contentSizePtr = &contentSize
 	}
-	hashSpan.End()
-
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{
 			Digest: contentHash,
-			Size:   uint64(len(contentBytes)),
+			Size:   uint64(*contentSizePtr),
 		},
 	}
 
@@ -265,7 +309,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 	}
 
 	if url != nil && headers != nil {
-		if err := putBlob(ctx, putClient, url, headers, contentBytes); err != nil {
+		if err := putBlob(ctx, putClient, url, headers, contentReader); err != nil {
 			return AddedBlob{}, fmt.Errorf("putting blob: %w", err)
 		}
 	}
@@ -355,7 +399,7 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		return AddedBlob{}, fmt.Errorf("reading location commitment blocks: %w", err)
 	}
 
-	location, err := delegation.NewDelegationView(site, blksReader)
+	location, err := invocation.NewInvocationView(site, blksReader)
 	if err != nil {
 		return AddedBlob{}, fmt.Errorf("creating location delegation: %w", err)
 	}
@@ -389,8 +433,13 @@ func getConcludeReceipt(concludeFx invocation.Invocation) (receipt.AnyReceipt, e
 	return rcpt, nil
 }
 
-func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), bytes.NewReader(body))
+func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers http.Header, body io.Reader) error {
+	start := time.Now()
+	log.Infow("putting blob", "destination", url.String())
+	defer func() {
+		log.Infow("put blob", "destination", url.String(), "duration", time.Since(start))
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), body)
 	if err != nil {
 		return fmt.Errorf("creating upload request: %w", err)
 	}
@@ -403,8 +452,9 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 	if err != nil {
 		return fmt.Errorf("uploading blob: %w", err)
 	}
-	io.ReadAll(resp.Body)
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		log.Warnf("closing upload response body: %v", err)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("uploading blob: %s", resp.Status)

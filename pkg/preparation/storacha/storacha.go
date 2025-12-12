@@ -3,10 +3,11 @@ package storacha
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"time"
 
-	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -23,10 +24,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
 	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
+	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -49,15 +52,16 @@ type Client interface {
 
 var _ Client = (*client.Client)(nil)
 
-type CarForShardFunc func(ctx context.Context, shardID id.ShardID) (io.Reader, error)
+type ReaderForShardFunc func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error)
 type IndexesForUploadFunc func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error)
 
 // API provides methods to interact with Storacha.
 type API struct {
-	Repo             Repo
-	Client           Client
-	CarForShard      CarForShardFunc
-	IndexesForUpload IndexesForUploadFunc
+	Repo                   Repo
+	Client                 Client
+	ReaderForShard         ReaderForShardFunc
+	IndexesForUpload       IndexesForUploadFunc
+	ShardUploadParallelism int
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -65,78 +69,135 @@ var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
 func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
+	defer span.End()
 	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
+	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
-	for _, shard := range closedShards {
-		err := a.addShard(ctx, shard, spaceDID)
-		if err != nil {
-			return fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
-		}
+	// Ensure at least 1 parallelism
+	if a.ShardUploadParallelism < 1 {
+		a.ShardUploadParallelism = 1
 	}
 
+	sem := make(chan struct{}, a.ShardUploadParallelism)
+	shardUploadErrorCh := make(chan gtypes.ShardUploadError, len(closedShards))
+	eg, gctx := errgroup.WithContext(ctx)
+	for _, shard := range closedShards {
+		sem <- struct{}{}
+		eg.Go(func() error {
+			defer func() { <-sem }()
+			if err := a.addShard(gctx, shard, spaceDID); err != nil {
+				err = fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+				var errShardUpload gtypes.ShardUploadError
+				if errors.As(err, &errShardUpload) {
+					shardUploadErrorCh <- errShardUpload
+					return nil
+				}
+				log.Errorf("%v", err)
+				return err
+			}
+			log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
+			return nil
+		})
+	}
+
+	terminalErr := eg.Wait()
+	close(shardUploadErrorCh)
+
+	if terminalErr != nil {
+		return terminalErr
+	}
+
+	var shardUploadErrors []gtypes.ShardUploadError
+	for err := range shardUploadErrorCh {
+		shardUploadErrors = append(shardUploadErrors, err)
+	}
+	if len(shardUploadErrors) > 0 {
+		return gtypes.NewShardUploadErrors(shardUploadErrors)
+	}
 	return nil
 }
 
 func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
+	start := time.Now()
+	log.Infow("adding shard", "cid", shard.CID().String(), "id", shard.ID())
 	ctx, span := tracer.Start(ctx, "add-shard", trace.WithAttributes(
 		attribute.String("shard.id", shard.ID().String()),
 		attribute.Int64("shard.size", int64(shard.Size())),
+		attribute.String("shard.digest", shard.Digest().String()),
+		attribute.String("shard.cid", shard.CID().String()),
 	))
-	defer span.End()
-
-	car, err := a.CarForShard(ctx, shard.ID())
+	defer func() {
+		log.Infow("added shard", "cid", shard.CID().String(), "id", shard.ID(), "duration", time.Since(start))
+		span.End()
+	}()
+	shardReader, err := a.ReaderForShard(ctx, shard.ID())
+	// make sure to close the shard reader before returning, even if we return early.
+	defer shardReader.Close()
 	if err != nil {
 		return fmt.Errorf("failed to get CAR reader for shard %s: %w", shard.ID(), err)
 	}
 
 	addReader, addWriter := io.Pipe()
-	commpCalc := &commp.Calc{}
-
+	defer addReader.Close()
 	go func() {
 		meteredAddWriter := meteredwriter.New(ctx, addWriter, "add-writer")
-		meteredCommpCalc := meteredwriter.New(ctx, commpCalc, "commp-calc")
 		defer meteredAddWriter.Close()
-		defer meteredCommpCalc.Close()
-		mw := io.MultiWriter(
-			meteredAddWriter,
-			meteredCommpCalc,
-		)
-		_, err := io.Copy(mw, car)
+		_, err := io.Copy(meteredAddWriter, shardReader)
 		if err != nil {
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
 		}
 	}()
 
-	addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID)
-	if err != nil {
-		return fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err)
+	location := shard.Location()
+	pdpAccept := shard.PDPAccept()
+
+	// If we don't have a location commitment yet, we have yet to successfully
+	// `space/blob/add`. (Note that `shard.PDPAccept()` is optional and may be
+	// legitimately nil even if the `space/blob/add` succeeded.)
+	if location == nil {
+		log.Infof("adding shard %s to space %s via `space/blob/add`", shard.ID(), spaceDID)
+		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
+		if err != nil {
+			return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to add shard %s to space %s: %w", shard.ID(), spaceDID, err))
+		}
+
+		if addedBlob.Digest.B58String() != shard.Digest().B58String() {
+			return fmt.Errorf("added shard %s digest mismatch: expected %x, got %x", shard.ID(), shard.Digest(), addedBlob.Digest)
+		}
+
+		shard.SpaceBlobAdded(addedBlob.Location, addedBlob.PDPAccept)
+		if err := a.Repo.UpdateShard(ctx, shard); err != nil {
+			return fmt.Errorf("failed to update shard %s after `space/blob/add`: %w", shard.ID(), err)
+		}
+
+		location = addedBlob.Location
+		pdpAccept = addedBlob.PDPAccept
+	} else {
+		log.Infof("shard %s already has location and PDP accept, skipping `space/blob/add`", shard.ID())
 	}
 
-	err = shard.Added(addedBlob.Digest)
+	err = a.spaceBlobReplicate(ctx, shard, spaceDID, location)
 	if err != nil {
-		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
-	}
-
-	span.SetAttributes(attribute.String("shard.digest", shard.Digest().String()))
-	span.SetAttributes(attribute.String("shard.cid", shard.CID().String()))
-
-	err = a.spaceBlobReplicate(ctx, shard, spaceDID, addedBlob.Location)
-	if err != nil {
-		return fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err)
+		return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err))
 	}
 
 	var opts []client.FilecoinOfferOption
-	if addedBlob.PDPAccept != nil {
-		opts = append(opts, client.WithPDPAcceptInvocation(addedBlob.PDPAccept))
+	if pdpAccept != nil {
+		opts = append(opts, client.WithPDPAcceptInvocation(pdpAccept))
 	}
-	err = a.filecoinOffer(ctx, shard, spaceDID, commpCalc, opts...)
+	err = a.filecoinOffer(ctx, shard, spaceDID, opts...)
 	if err != nil {
-		return err
+		return gtypes.NewShardUploadError(shard.ID(), err)
 	}
 
+	err = shard.Added()
+	if err != nil {
+		return fmt.Errorf("failed to mark shard %s as added: %w", shard.ID(), err)
+	}
 	if err := a.Repo.UpdateShard(ctx, shard); err != nil {
 		return fmt.Errorf("failed to update shard %s after adding to space: %w", shard.CID(), err)
 	}
@@ -144,11 +205,11 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 	return nil
 }
 
-func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID) (client.AddedBlob, error) {
+func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.DID, opts ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
 	ctx, span := tracer.Start(ctx, "space-blob-add")
 	defer span.End()
 
-	return a.Client.SpaceBlobAdd(ctx, content, spaceDID)
+	return a.Client.SpaceBlobAdd(ctx, content, spaceDID, opts...)
 }
 
 func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, locationCommitment delegation.Delegation) error {
@@ -168,31 +229,25 @@ func (a API) spaceBlobReplicate(ctx context.Context, shard *shardsmodel.Shard, s
 	return err
 }
 
-func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, commpCalc *commp.Calc, opts ...client.FilecoinOfferOption) error {
+func (a API) filecoinOffer(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID, opts ...client.FilecoinOfferOption) error {
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
 
 	// On shards too small to compute a CommP, just skip the `filecoin/offer`.
 	switch {
-	case shard.Size() < commp.MinPiecePayload:
-		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), commp.MinPiecePayload)
+	case shard.Size() < gtypes.MinPiecePayload:
+		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is below minimum %d", shard.ID(), shard.Size(), gtypes.MinPiecePayload)
 		return nil
 	case shard.Size() > commp.MaxPiecePayload:
 		log.Warnf("skipping `filecoin/offer` for shard %s: size %d is above maximum %d", shard.ID(), shard.Size(), commp.MaxPiecePayload)
 		return nil
 	}
 
-	pieceDigest, _, err := commpCalc.Digest()
-	if err != nil {
-		return fmt.Errorf("failed to get piece digest for shard %s: %w", shard.ID(), err)
+	if shard.PieceCID() == cid.Undef {
+		return fmt.Errorf("shard %s missing piece CID for filecoin offer", shard.ID())
 	}
 
-	shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, shard.Size())
-	if err != nil {
-		return fmt.Errorf("failed to get piece CID for shard %s: %w", shard.ID(), err)
-	}
-
-	_, err = a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shardPieceCID}, opts...)
+	_, err := a.Client.FilecoinOffer(ctx, spaceDID, cidlink.Link{Cid: shard.CID()}, cidlink.Link{Cid: shard.PieceCID()}, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to offer shard %s: %w", shard.CID(), err)
 	}

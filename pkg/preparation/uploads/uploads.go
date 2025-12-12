@@ -26,7 +26,7 @@ var (
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error)
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -140,6 +140,29 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
 	workersErr := eg.Wait()
 
+	var badFSEntriesErr types.BadFSEntriesError
+	var badNodesErr types.BadNodesError
+	var shardUploadErrors types.ShardUploadErrors
+	// Clean up after errors that need it
+	switch {
+
+	case errors.As(workersErr, &badFSEntriesErr):
+		err := a.handleBadFSEntries(ctx, uploadID, spaceDID, badFSEntriesErr)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
+		}
+	case errors.As(workersErr, &shardUploadErrors):
+		err := a.handleBadShardUploads(ctx, uploadID, spaceDID, shardUploadErrors)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
+		}
+	case errors.As(workersErr, &badNodesErr):
+		err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("handling bad nodes worker error [%w]: %w", workersErr, err)
+		}
+	}
+
 	// Reload the upload to get the latest state from the DB.
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
@@ -147,6 +170,91 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	}
 
 	return upload.RootCID(), workersErr
+}
+
+func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, badFSEntriesErr types.BadFSEntriesError) error {
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
+	}
+
+	for _, badFSEntryErr := range badFSEntriesErr.Errs() {
+		log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
+		err = a.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID())
+		if err != nil {
+			return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
+		}
+	}
+	log.Debug("Invalidating upload ", uploadID, " after removing bad FS entries")
+
+	err = upload.Invalidate()
+	if err != nil {
+		return fmt.Errorf("invalidating upload %s after removing bad FS entry: %w", uploadID, err)
+	}
+
+	err = a.Repo.UpdateUpload(ctx, upload)
+	if err != nil {
+		return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
+	}
+	return nil
+}
+
+func (a API) handleBadShardUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadErrors types.ShardUploadErrors) error {
+	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
+	for _, e := range shardUploadErrors.Errs() {
+		// bad nodes error can happen from reading car during upload
+		var badNodesErr types.BadNodesError
+		if errors.As(e.Unwrap(), &badNodesErr) {
+			err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, badNodesErr types.BadNodesError) error {
+	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, err)
+	}
+
+	var cids []cid.Cid
+	for _, e := range badNodesErr.Errs() {
+		cids = append(cids, e.CID())
+	}
+	log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
+	err = a.RemoveBadNodes(ctx, upload.SpaceDID(), cids)
+	if err != nil {
+		return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
+	}
+
+	log.Debug("Removing bad shard for upload ", uploadID, ": ", badNodesErr.ShardID())
+	err = a.RemoveShard(ctx, badNodesErr.ShardID())
+	if err != nil {
+		return fmt.Errorf("removing bad shard %s for upload %s: %w", badNodesErr.ShardID(), uploadID, err)
+	}
+
+	log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
+	for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
+		_, err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil)
+		if err != nil {
+			return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
+		}
+	}
+	err = upload.Invalidate()
+	if err != nil {
+		return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
+	}
+
+	err = a.Repo.UpdateUpload(ctx, upload)
+	if err != nil {
+		return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
+	}
+
+	return nil
 }
 
 func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
@@ -206,7 +314,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID())
+				shardClosed, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data)
 				if err != nil {
 					return fmt.Errorf("adding node to upload shard: %w", err)
 				}
@@ -217,33 +325,6 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 				return nil
 			})
-
-			var badFSEntriesErr types.ErrBadFSEntries
-			if errors.As(err, &badFSEntriesErr) {
-				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
-				if err != nil {
-					return fmt.Errorf("getting upload %s after finding bad FS entry: %w", uploadID, err)
-				}
-
-				for _, badFSEntryErr := range badFSEntriesErr.Errs() {
-					log.Debug("Removing bad FS entry from upload ", uploadID, ": ", badFSEntryErr.FsEntryID())
-					err = api.RemoveBadFSEntry(ctx, upload.SpaceDID(), badFSEntryErr.FsEntryID())
-					if err != nil {
-						return fmt.Errorf("removing bad FS entry for upload %s: %w", uploadID, err)
-					}
-				}
-				log.Debug("Invalidating upload ", uploadID, " after removing bad FS entries")
-
-				err = upload.Invalidate()
-				if err != nil {
-					return fmt.Errorf("invalidating upload %s after removing bad FS entry: %w", uploadID, err)
-				}
-
-				err = api.Repo.UpdateUpload(ctx, upload)
-				if err != nil {
-					return fmt.Errorf("updating upload %s after removing bad FS entry: %w", uploadID, err)
-				}
-			}
 
 			if err != nil {
 				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
@@ -304,47 +385,6 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 		func() error {
 			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
-				log.Debug("Error adding shards for upload ", uploadID, ": ", err)
-				var badNodesErr types.ErrBadNodes
-				if errors.As(err, &badNodesErr) {
-					upload, err := api.Repo.GetUploadByID(ctx, uploadID)
-					if err != nil {
-						return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, err)
-					}
-
-					var cids []cid.Cid
-					for _, e := range badNodesErr.Errs() {
-						cids = append(cids, e.CID())
-					}
-					log.Debug("Removing bad nodes from upload ", uploadID, ": ", cids)
-					err = api.RemoveBadNodes(ctx, upload.SpaceDID(), cids)
-					if err != nil {
-						return fmt.Errorf("removing bad nodes for upload %s: %w", uploadID, err)
-					}
-
-					log.Debug("Removing bad shard for upload ", uploadID, ": ", badNodesErr.ShardID())
-					err = api.RemoveShard(ctx, badNodesErr.ShardID())
-					if err != nil {
-						return fmt.Errorf("removing bad shard %s for upload %s: %w", badNodesErr.ShardID(), uploadID, err)
-					}
-
-					log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
-					for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
-						_, err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID)
-						if err != nil {
-							return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
-						}
-					}
-					err = upload.Invalidate()
-					if err != nil {
-						return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
-					}
-
-					err = api.Repo.UpdateUpload(ctx, upload)
-					if err != nil {
-						return fmt.Errorf("updating upload %s after removing bad nodes: %w", uploadID, err)
-					}
-				}
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
 

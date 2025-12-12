@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld/block"
@@ -76,11 +77,12 @@ func TestLocator(t *testing.T) {
 		// sent to the indexer, whatever they are.
 		requiredDelegations := []delegation.Delegation{
 			testutil.RandomLocationDelegation(t),
-			testutil.RandomEqualsDelegation(t),
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index})
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		locations, err := locator.Locate(t.Context(), space.DID(), blockHash)
 		require.NoError(t, err)
@@ -157,7 +159,9 @@ func TestLocator(t *testing.T) {
 		}
 
 		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim}, []blobindex.ShardedDagIndexView{index})
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// First, locate block1
 		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
@@ -233,7 +237,9 @@ func TestLocator(t *testing.T) {
 
 		// Create a mock indexer that responds differently based on query type
 		mockIndexer := newLocationQueryMockIndexer(claim1, index)
-		locator := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		locator := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// First, locate block1 - should return index and claim for shard1
 		locations1, err := locator.Locate(t.Context(), space.DID(), block1Hash)
@@ -255,11 +261,14 @@ func TestLocator(t *testing.T) {
 		// But the mock won't return a location claim for shard2, so we should get an error
 		_, err = locator.Locate(t.Context(), space.DID(), block2Hash)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), block2Hash.String())
+		require.Contains(t, err.Error(), digestutil.Format(block2Hash))
 		require.Contains(t, err.Error(), "no locations found")
 
-		// Verify that we made a second query, but it was location-only
+		// Verify that we made a second query, but it was location-only, and was
+		// targeted at shard2
 		require.Len(t, mockIndexer.Queries, 2, "Should have made two queries")
+		require.Equal(t, shard2Hash, mockIndexer.Queries[1].Hashes[0],
+			"Second query should be for shard2 hash")
 		require.Equal(t, types.QueryTypeLocation, mockIndexer.Queries[1].Type,
 			"Second query should be location-only since index is cached")
 	})
@@ -322,7 +331,9 @@ func TestLocator(t *testing.T) {
 			space2Claim: claim2,
 			index:       index,
 		}
-		session := locator.NewIndexLocator(mockIndexer, requiredDelegations)
+		session := locator.NewIndexLocator(mockIndexer, func(space did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
 
 		// Locate the block for space1
 		locations1, err := session.Locate(t.Context(), space1.DID(), blockHash)

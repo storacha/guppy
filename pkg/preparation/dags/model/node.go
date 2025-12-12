@@ -58,13 +58,13 @@ func (l *Link) Order() uint64 {
 
 func validateLink(link *Link) error {
 	if link.hash == cid.Undef {
-		return types.ErrEmpty{Field: "link hash"}
+		return types.EmptyError{Field: "link hash"}
 	}
 	if link.parent == cid.Undef {
-		return types.ErrEmpty{Field: "link parent"}
+		return types.EmptyError{Field: "link parent"}
 	}
 	if !link.spaceDID.Defined() {
-		return types.ErrEmpty{Field: "link spaceDID"}
+		return types.EmptyError{Field: "link spaceDID"}
 	}
 	if link.parent.Type() != cid.DagProtobuf {
 		return fmt.Errorf("invalid CID type: expected DagProtobuf, got %x", link.parent.Type())
@@ -133,10 +133,10 @@ func (n *node) SpaceDID() did.DID {
 
 func validateNode(node *node) error {
 	if node.cid == cid.Undef {
-		return types.ErrEmpty{Field: "node CID"}
+		return types.EmptyError{Field: "node CID"}
 	}
 	if !node.spaceDID.Defined() {
-		return types.ErrEmpty{Field: "spaceDID"}
+		return types.EmptyError{Field: "spaceDID"}
 	}
 	return nil
 }
@@ -165,7 +165,7 @@ func validateUnixFSNode(node *UnixFSNode) error {
 		return fmt.Errorf("invalid CID type: expected DagProtobuf, got %x", node.cid.Type())
 	}
 	if len(node.ufsdata) == 0 {
-		return types.ErrEmpty{Field: "ufsdata"}
+		return types.EmptyError{Field: "ufsdata"}
 	}
 	return nil
 }
@@ -220,7 +220,7 @@ func validateRawNode(node *RawNode) error {
 		return fmt.Errorf("invalid CID type: expected Raw, got %x", node.cid.Type())
 	}
 	if node.sourceID == id.Nil {
-		return types.ErrEmpty{Field: "sourceID"}
+		return types.EmptyError{Field: "sourceID"}
 	}
 	return nil
 }

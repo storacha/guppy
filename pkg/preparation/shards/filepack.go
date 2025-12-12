@@ -9,26 +9,24 @@ import (
 )
 
 type FilepackEncoder struct {
-	nodeReader NodeDataGetter
 }
 
 var _ ShardEncoder = (*FilepackEncoder)(nil)
 
 // NewFilepackEncoder creates a new shard encoder that outputs filepack encoded shards.
-func NewFilepackEncoder(nodeReader NodeDataGetter) *FilepackEncoder {
-	return &FilepackEncoder{nodeReader}
+func NewFilepackEncoder() *FilepackEncoder {
+	return &FilepackEncoder{}
 }
 
-func (f *FilepackEncoder) Encode(ctx context.Context, nodes []model.Node, w io.Writer) error {
-	for _, n := range nodes {
-		data, err := f.nodeReader.GetData(ctx, n)
-		if err != nil {
-			return fmt.Errorf("getting data for %s: %w", n.CID(), err)
-		}
-		_, err = w.Write(data)
-		if err != nil {
-			return fmt.Errorf("writing data for %s: %w", n.CID(), err)
-		}
+func (f *FilepackEncoder) WriteHeader(ctx context.Context, w io.Writer) error {
+	// Filepack has no header to write.
+	return nil
+}
+
+func (f *FilepackEncoder) WriteNode(ctx context.Context, node model.Node, data []byte, w io.Writer) error {
+	_, err := w.Write(data)
+	if err != nil {
+		return fmt.Errorf("writing filepack node data: %w", err)
 	}
 	return nil
 }
@@ -39,4 +37,14 @@ func (FilepackEncoder) HeaderEncodingLength() uint64 {
 
 func (FilepackEncoder) NodeEncodingLength(node model.Node) uint64 {
 	return node.Size()
+}
+
+func (f *FilepackEncoder) HeaderDigestState() []byte {
+	// Filepack has no header to hash.
+	return nil
+}
+
+func (f *FilepackEncoder) HeaderPieceCIDState() []byte {
+	return nil
+	// Filepack has no header to hash.
 }

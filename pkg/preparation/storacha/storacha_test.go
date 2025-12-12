@@ -28,9 +28,9 @@ import (
 	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
-// commP is not defined for inputs shorter than 65 bytes, so add 65 bytes of
+// commP is not defined for inputs shorter than 127 bytes, so add 127 bytes of
 // padding to every "CAR" to make sure it's definitely long enough.
-var padding = bytes.Repeat([]byte{0}, 65)
+var padding = bytes.Repeat([]byte{0}, 127)
 
 func TestAddShardsForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
@@ -40,19 +40,24 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			return bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding)), nil
+		shardReadersClosed := map[id.ShardID]struct{}{}
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+			return &shardCloser{
+				shardReadersClosed: shardReadersClosed,
+				shardID:            shardID,
+				Reader:             bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding))}, nil
 		}
 
 		api := storacha.API{
-			Repo:        repo,
-			Client:      &client,
-			CarForShard: carForShard,
+			Repo:                   repo,
+			Client:                 &client,
+			ReaderForShard:         carForShard,
+			ShardUploadParallelism: 1,
 		}
 
 		shardsApi := shards.API{
 			Repo:         repo,
-			ShardEncoder: shards.NewCAREncoder(nil),
+			ShardEncoder: shards.NewCAREncoder(),
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -69,17 +74,20 @@ func TestAddShardsForUpload(t *testing.T) {
 		nodeCID3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
 		// Add enough nodes to close one shard and create a second one.
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
+		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
+		data := testutil.RandomBytes(t, int(n.Size()))
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
+		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 1<<14, spaceDID, "some/other/path", source.ID(), 0)
+		data = testutil.RandomBytes(t, int(n.Size()))
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID2, data)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
+		n, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 1<<15, spaceDID, "yet/other/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3)
+		data = testutil.RandomBytes(t, int(n.Size()))
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID3, data)
 		require.NoError(t, err)
 
 		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
@@ -122,18 +130,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, client.FilecoinOfferInvocations, 1)
 		require.Equal(t, spaceDID, client.FilecoinOfferInvocations[0].Space)
 		require.Equal(t, cidlink.Link{Cid: firstShard.CID()}, client.FilecoinOfferInvocations[0].Content)
-
-		cp := &commp.Calc{}
-		_, err = cp.Write(expectedData)
-		require.NoError(t, err)
-		digest, _, err := cp.Digest()
-		require.NoError(t, err)
-		shardPieceCID, err := commcid.DataCommitmentToPieceCidv2(digest, firstShard.Size())
-		require.NoError(t, err)
-		shardPieceLink := cidlink.Link{Cid: shardPieceCID}
-
-		require.Equal(t, shardPieceLink, client.FilecoinOfferInvocations[0].Piece)
 		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
+
+		// It should have closed the first shard's reader.
+		require.Contains(t, shardReadersClosed, firstShard.ID(), "expected first shard reader to be closed now")
 
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
@@ -158,33 +158,37 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[1].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
 		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
+
+		// It should have closed the second shard's reader.
+		require.Contains(t, shardReadersClosed, secondShard.ID(), "expected second shard reader to be closed now")
+
 	})
 
-	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
+	t.Run("does not `space/blob/add` again on retry once it succeeds", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
 
-		carForShard := func(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-			// Note that the decision to skip `filecoin/offer` is based on the size
-			// listed on the shard, which is based on the size of the nodes added to
-			// it, not the actual CAR bytes (which are written lazily). So the
-			// behavior is triggered by the node below being 1, while the short CAR
-			// is here to cause an error if we *do* try to `filecoin/offer` it.
-			return bytes.NewReader([]byte("VERY SHORT CAR")), nil
+		shardReadersClosed := map[id.ShardID]struct{}{}
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+			return &shardCloser{
+				shardReadersClosed: shardReadersClosed,
+				shardID:            shardID,
+				Reader:             bytes.NewReader(fmt.Append(nil, "CAR OF SHARD: ", shardID, padding))}, nil
 		}
 
 		api := storacha.API{
-			Repo:        repo,
-			Client:      &client,
-			CarForShard: carForShard,
+			Repo:                   repo,
+			Client:                 &client,
+			ReaderForShard:         carForShard,
+			ShardUploadParallelism: 1,
 		}
 
 		shardsApi := shards.API{
 			Repo:         repo,
-			ShardEncoder: shards.NewCAREncoder(nil),
+			ShardEncoder: shards.NewCAREncoder(),
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -198,9 +202,117 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1, spaceDID, "some/path", source.ID(), 0)
+		// Add enough nodes to close one shard and create a second one.
+		n, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID1, 1<<14, spaceDID, "some/path", source.ID(), 0)
 		require.NoError(t, err)
-		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1)
+		data := testutil.RandomBytes(t, int(n.Size()))
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
+		require.NoError(t, err)
+		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
+
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated SpaceBlobAdd error")
+
+		// It should have `space/blob/add`ed (and failed)...
+		require.Len(t, client.SpaceBlobAddInvocations, 1)
+
+		// ...but not have proceeded to `space/blob/replicate` or `filecoin/offer`.
+		require.Len(t, client.SpaceBlobReplicateInvocations, 0)
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard readerto be closed, even though it failed")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
+
+		// Now retry: `space/blob/add` succeeds but `space/blob/replicate` fails.
+		client.SpaceBlobAddError = nil
+		client.SpaceBlobReplicateError = fmt.Errorf("simulated SpaceBlobReplicate error")
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated SpaceBlobReplicate error")
+
+		// It should have `space/blob/add`ed again...
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		// ...and then attempted `space/blob/replicate` and failed...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
+		// ...but not have proceeded to `filecoin/offer`.
+		require.Len(t, client.FilecoinOfferInvocations, 0)
+
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
+
+		// Now retry: `space/blob/replicate` succeeds but `filecoin/offer` fails.
+		client.SpaceBlobReplicateError = nil
+		client.FilecoinOfferError = fmt.Errorf("simulated FilecoinOffer error")
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		require.ErrorContains(t, err, "simulated FilecoinOffer error")
+
+		// It should NOT `space/blob/add` again...
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		// ...but should have `space/blob/replicate`ed again...
+		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
+		// ...and then attempted `filecoin/offer` and failed.
+		require.Len(t, client.FilecoinOfferInvocations, 1)
+		// It should have closed the first shard's reader.
+		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
+		// reset the shard readers closed map
+		for shardID := range shardReadersClosed {
+			delete(shardReadersClosed, shardID)
+		}
+	})
+
+	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
+		db := testdb.CreateTestDB(t)
+		repo := sqlrepo.New(db)
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+		client := mockclient.MockClient{T: t}
+
+		data := []byte("VERY SHORT CAR")
+		carForShard := func(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+			// Note that the decision to skip `filecoin/offer` is based on the size
+			// listed on the shard, which is based on the size of the nodes added to
+			// it, not the actual CAR bytes (which are written lazily). So the
+			// behavior is triggered by the node below being 1, while the short CAR
+			// is here to cause an error if we *do* try to `filecoin/offer` it.
+			return io.NopCloser(bytes.NewReader(data)), nil
+		}
+
+		api := storacha.API{
+			Repo:                   repo,
+			Client:                 &client,
+			ReaderForShard:         carForShard,
+			ShardUploadParallelism: 1,
+		}
+
+		shardsApi := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
+		require.NoError(t, err)
+		source, err := repo.CreateSource(t.Context(), "Test Source", ".")
+		require.NoError(t, err)
+		uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
+		require.NoError(t, err)
+		require.Len(t, uploads, 1)
+		upload := uploads[0]
+
+		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, uint64(len(data)), spaceDID, "some/path", source.ID(), 0)
+		require.NoError(t, err)
+		_, err = shardsApi.AddNodeToUploadShards(t.Context(), upload.ID(), spaceDID, nodeCID1, data)
 		require.NoError(t, err)
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
@@ -235,9 +347,10 @@ func TestAddIndexesForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:             repo,
-			Client:           &client,
-			IndexesForUpload: IndexesForUpload,
+			Repo:                   repo,
+			Client:                 &client,
+			IndexesForUpload:       IndexesForUpload,
+			ShardUploadParallelism: 1,
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -297,9 +410,10 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:             repo,
-			Client:           &client,
-			IndexesForUpload: indexesForUpload,
+			Repo:                   repo,
+			Client:                 &client,
+			IndexesForUpload:       indexesForUpload,
+			ShardUploadParallelism: 1,
 		}
 
 		_, err = repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", spacesmodel.WithShardSize(1<<16))
@@ -313,24 +427,33 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 
 		rootLink := testutil.RandomCID(t)
 
-		shard1Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 1"), padding...), multihash.SHA2_256, -1)
+		data1 := append([]byte("CAR OF SHARD 1"), padding...)
+		shard1Digest, err := multihash.Sum(data1, multihash.SHA2_256, -1)
 		require.NoError(t, err)
-		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10)
+		commp := &commp.Calc{}
+		commp.Write(data1)
+		piece1CID, err := commcid.DataCommitmentToPieceCidv2(commp.Sum(nil), uint64(len(data1)))
 		require.NoError(t, err)
-		err = shard1.Close()
+		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10, nil, nil)
 		require.NoError(t, err)
-		err = shard1.Added(shard1Digest)
+		err = shard1.Close(shard1Digest, piece1CID)
+		require.NoError(t, err)
+		err = shard1.Added()
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
 
-		shard2Digest, err := multihash.Sum(append([]byte("CAR OF SHARD 2"), padding...), multihash.SHA2_256, -1)
+		data2 := append([]byte("CAR OF SHARD 2"), padding...)
+		shard2Digest, err := multihash.Sum(data2, multihash.SHA2_256, -1)
 		require.NoError(t, err)
-		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20)
+		commp.Write(data2)
+		piece2CID, err := commcid.DataCommitmentToPieceCidv2(commp.Sum(nil), uint64(len(data2)))
 		require.NoError(t, err)
-		err = shard2.Close()
+		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20, nil, nil)
 		require.NoError(t, err)
-		err = shard2.Added(shard2Digest)
+		err = shard2.Close(shard2Digest, piece2CID)
+		require.NoError(t, err)
+		err = shard2.Added()
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
@@ -350,4 +473,15 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 			{Cid: cid.NewCidV1(uint64(multicodec.Car), shard2Digest)},
 		}, client.UploadAddInvocations[0].Shards)
 	})
+}
+
+type shardCloser struct {
+	io.Reader
+	shardReadersClosed map[id.ShardID]struct{}
+	shardID            id.ShardID
+}
+
+func (sc *shardCloser) Close() error {
+	sc.shardReadersClosed[sc.shardID] = struct{}{}
+	return nil
 }

@@ -12,7 +12,9 @@ import (
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/dagfs"
@@ -63,24 +65,6 @@ var retrieveCmd = &cobra.Command{
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
 
-		pfs := make([]delegation.Proof, 0, len(c.Proofs()))
-		for _, del := range c.Proofs() {
-			pfs = append(pfs, delegation.FromDelegation(del))
-		}
-
-		// Allow the indexing service to retrieve indexes
-		retrievalAuth, err := contentcap.Retrieve.Delegate(
-			c.Issuer(),
-			indexerPrincipal,
-			space.DID().String(),
-			contentcap.RetrieveCaveats{},
-			delegation.WithProof(pfs...),
-			delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
-		)
-		if err != nil {
-			return fmt.Errorf("delegating %s: %w", contentcap.RetrieveAbility, err)
-		}
-
 		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
 			attribute.String("retrieval.space", space.DID().String()),
 			attribute.String("retrieval.cid", pathCID.String()),
@@ -95,7 +79,26 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
-		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
+		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
+			var pfs []delegation.Proof
+			for _, del := range c.Proofs(client.CapabilityQuery{
+				Can:  contentcap.Retrieve.Can(),
+				With: space.String(),
+			}) {
+				pfs = append(pfs, delegation.FromDelegation(del))
+			}
+
+			// Allow the indexing service to retrieve indexes
+			return delegation.Delegate(
+				c.Issuer(),
+				indexerPrincipal,
+				[]ucan.Capability[ucan.NoCaveats]{
+					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
+				},
+				delegation.WithProof(pfs...),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
+		})
 		ds := dagservice.NewDAGService(locator, c, space)
 		retrievedFs := dagfs.New(ctx, ds, pathCID)
 

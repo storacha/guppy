@@ -67,10 +67,10 @@ func WithShardSize(shardSize uint64) SpaceOption {
 // validateSpace checks if the space is valid.
 func validateSpace(u *Space) (*Space, error) {
 	if !u.did.Defined() {
-		return nil, types.ErrEmpty{Field: "did"}
+		return nil, types.EmptyError{Field: "did"}
 	}
 	if u.name == "" {
-		return nil, types.ErrEmpty{Field: "name"}
+		return nil, types.EmptyError{Field: "name"}
 	}
 	if u.shardSize > MaxShardSize {
 		return nil, ErrShardSizeTooLarge

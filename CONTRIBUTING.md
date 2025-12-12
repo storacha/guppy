@@ -69,3 +69,8 @@ This section provides detailed instructions for setting up the Guppy client loca
     make test
     ```
 
+## Database Migrations
+
+The preparation database uses [Goose](https://pressly.github.io/goose/) migrations. The base schema is in [`pkg/preparation/sqlrepo/schema.sql`](pkg/preparation/sqlrepo/schema.sql), and migrations are in [`pkg/preparation/sqlrepo/migrations/`](pkg/preparation/sqlrepo/migrations/). Migrations are automatically applied when the DB is used.
+
+To create a new migration, use `make migration NAME=<new-migration-name>`. To manually migrate up or down, reset, or check the status, use `migrate-up`, `migrate-down`, `migrate-reset`, or `migrate-status`, respectively. These are simply shortcuts for using `go tool goose` with the correct migrations directory and DB connection.

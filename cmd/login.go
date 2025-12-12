@@ -1,16 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/briandowns/spinner"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
@@ -33,6 +34,7 @@ var loginCmd = &cobra.Command{
 	Args:    cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		email := cmd.Flags().Arg(0)
 
 		accountDid, err := didmailto.FromEmail(email)
@@ -43,45 +45,32 @@ var loginCmd = &cobra.Command{
 
 		c := cmdutil.MustGetClient(storePath)
 
-		authOk, err := c.RequestAccess(cmd.Context(), accountDid.String())
+		authOk, err := c.RequestAccess(ctx, accountDid.String())
 		if err != nil {
 			return fmt.Errorf("requesting access: %w", err)
 		}
 
-		resultChan := c.PollClaim(cmd.Context(), authOk)
-
 		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
 		s.Suffix = fmt.Sprintf(" 🔗 please click the link sent to %s to authorize this agent", email)
 		s.Start()
+		defer s.Stop()
 
-		// Set up signal handling to ensure spinner stops on interrupt
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigChan)
-
-		go func() {
-			sig := <-sigChan
-			s.Stop()
-			// Exit with 128 + signal number (conventional for signal termination)
-			if s, ok := sig.(syscall.Signal); ok {
-				os.Exit(128 + int(s))
-			}
-			os.Exit(1)
-		}()
-
-		claimedDels, err := result.Unwrap(<-resultChan)
-		s.Stop()
-
-		if cmd.Context().Err() != nil {
-			return fmt.Errorf("login canceled: %w", cmd.Context().Err())
+		var claimedDels []delegation.Delegation
+		resultChan := c.PollClaim(ctx, authOk)
+		res := <-resultChan
+		claimedDels, err = result.Unwrap(res)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			cmd.Println("\nlogin canceled")
+			return nil
 		}
-
 		if err != nil {
 			return fmt.Errorf("claiming access: %w", err)
 		}
 
-		fmt.Printf("Successfully logged in as %s!\n", email)
-		c.AddProofs(claimedDels...)
+		fmt.Printf("\nSuccessfully logged in as %s!\n", email)
+		if err := c.AddProofs(claimedDels...); err != nil {
+			return fmt.Errorf("adding proofs: %w", err)
+		}
 
 		return nil
 	},

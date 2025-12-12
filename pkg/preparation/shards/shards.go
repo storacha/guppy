@@ -6,13 +6,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
+
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
@@ -24,24 +28,22 @@ import (
 
 var log = logging.Logger("preparation/shards")
 
-type NodeDataGetter interface {
-	GetData(ctx context.Context, node dagsmodel.Node) ([]byte, error)
-}
+type OpenNodeReaderFunc func() (nodereader.NodeReader, error)
 
 // API provides methods to interact with the Shards in the repository.
 type API struct {
 	Repo             Repo
-	NodeReader       NodeDataGetter
+	OpenNodeReader   OpenNodeReaderFunc
 	MaxNodesPerIndex int
 	ShardEncoder     ShardEncoder
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
-var _ storacha.CarForShardFunc = API{}.CarForShard
+var _ storacha.ReaderForShardFunc = API{}.ReaderForShard
 var _ storacha.IndexesForUploadFunc = API{}.IndexesForUpload
 
-func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid) (bool, error) {
+func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error) {
 	space, err := a.Repo.GetSpaceByDID(ctx, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get space %s: %w", spaceDID, err)
@@ -69,38 +71,51 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 	for _, s := range openShards {
 		hasRoom, err := roomInShard(a.ShardEncoder, s, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), nodeCID, err)
+			return false, fmt.Errorf("failed to check room in shard %s for node %s: %w", s.ID(), node.CID(), err)
 		}
 		if hasRoom {
 			shard = s
 			break
 		}
-		s.Close()
-		if err := a.Repo.UpdateShard(ctx, s); err != nil {
-			return false, fmt.Errorf("updating shard: %w", err)
+		if err := a.finalizeShardDigests(ctx, s); err != nil {
+			return false, fmt.Errorf("finalizing shard %s: %w", s.ID(), err)
 		}
 		closed = true
 	}
 
 	// If no such shard exists, create a new one
 	if shard == nil {
-		shard, err = a.Repo.CreateShard(ctx, uploadID, a.ShardEncoder.HeaderEncodingLength())
+		shard, err = a.Repo.CreateShard(ctx,
+			uploadID,
+			a.ShardEncoder.HeaderEncodingLength(),
+			a.ShardEncoder.HeaderDigestState(),
+			a.ShardEncoder.HeaderPieceCIDState())
+
 		if err != nil {
 			return false, fmt.Errorf("failed to create new shard for upload %s: %w", uploadID, err)
 		}
 		hasRoom, err := roomInShard(a.ShardEncoder, shard, node, space)
 		if err != nil {
-			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", nodeCID, err)
+			return false, fmt.Errorf("failed to check room in new shard for node %s: %w", node.CID(), err)
 		}
 		if !hasRoom {
-			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", nodeCID, node.Size(), uploadID, space.ShardSize())
+			return false, fmt.Errorf("node %s (%d bytes) too large to fit in new shard for upload %s (shard size %d bytes)", node.CID(), node.Size(), uploadID, space.ShardSize())
 		}
 	}
 
-	err = a.Repo.AddNodeToShard(ctx, shard.ID(), nodeCID, spaceDID, a.ShardEncoder.NodeEncodingLength(node)-node.Size())
-	if err != nil {
-		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", nodeCID, shard.ID(), uploadID, err)
+	var addNodeOptions []AddNodeToShardOption
+	if data != nil {
+		digestStateUpdate, err := a.addNodeToDigestState(ctx, shard, node, data)
+		if err != nil {
+			return false, fmt.Errorf("failed to add node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
+		}
+		addNodeOptions = append(addNodeOptions, WithDigestStateUpdate(digestStateUpdate.digestStateUpTo, digestStateUpdate.digestState, digestStateUpdate.pieceCIDState))
 	}
+
+	if err := a.Repo.AddNodeToShard(ctx, shard.ID(), node.CID(), spaceDID, a.ShardEncoder.NodeEncodingLength(node)-node.Size(), addNodeOptions...); err != nil {
+		return false, fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", node.CID(), shard.ID(), uploadID, err)
+	}
+
 	return closed, nil
 }
 
@@ -114,17 +129,82 @@ func roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, 
 	return true, nil
 }
 
+type digestStateUpdate struct {
+	digestStateUpTo uint64
+	digestState     []byte
+	pieceCIDState   []byte
+}
+
+func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node dagsmodel.Node, data []byte) (digestStateUpdate, error) {
+
+	if uint64(len(data)) != node.Size() {
+		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
+	}
+
+	hasher, err := a.updatedShardHashState(ctx, shard)
+	if err != nil {
+		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
+	}
+
+	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
+	if err != nil {
+		return digestStateUpdate{}, fmt.Errorf("writing node %s to shard %s digest state: %w", node.CID(), shard.ID(), err)
+	}
+
+	digestState, pieceCIDState, err := hasher.marshal()
+	if err != nil {
+		return digestStateUpdate{}, fmt.Errorf("marshaling shard %s digest state: %w", shard.ID(), err)
+	}
+
+	return digestStateUpdate{
+		digestStateUpTo: shard.Size() + a.ShardEncoder.NodeEncodingLength(node),
+		digestState:     digestState,
+		pieceCIDState:   pieceCIDState,
+	}, nil
+}
+
+func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*shardHashState, error) {
+	h, err := fromShard(shard)
+	if err != nil {
+		return nil, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
+	}
+
+	if shard.DigestStateUpTo() < shard.Size() {
+		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
+		if err != nil {
+			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
+		}
+	}
+
+	return h, nil
+}
+
+func (a API) finalizeShardDigests(ctx context.Context, shard *model.Shard) error {
+	h, err := a.updatedShardHashState(ctx, shard)
+	if err != nil {
+		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
+	}
+	shardDigest, pieceCID, err := h.finalize(shard.Size())
+	if err != nil {
+		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)
+	}
+	if err := shard.Close(shardDigest, pieceCID); err != nil {
+		return err
+	}
+	return a.Repo.UpdateShard(ctx, shard)
+}
+
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool, error) {
 	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
 	if err != nil {
+
 		return false, fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
 
 	var closed bool
 
 	for _, s := range openShards {
-		s.Close()
-		if err := a.Repo.UpdateShard(ctx, s); err != nil {
+		if err := a.finalizeShardDigests(ctx, s); err != nil {
 			return false, fmt.Errorf("updating shard %s for upload %s: %w", s.ID(), uploadID, err)
 		}
 		closed = true
@@ -133,25 +213,190 @@ func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID) (bool,
 	return closed, nil
 }
 
-// TODO: probably rename this
-func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, error) {
-	r, w := io.Pipe()
+// ReaderForShard uses fastWriteShard connected to a pipe to provide an io.Reader
+// for shard data.
+func (a API) ReaderForShard(ctx context.Context, shardID id.ShardID) (io.ReadCloser, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	// cancel when we're done writing or when we hit an error so that worker
+	// goroutines exit promptly.
+	// NOTE: cancel is invoked in the writer goroutine.
+	pr, pw := io.Pipe()
+
 	go func() {
-		nodes, err := a.Repo.NodesByShard(ctx, shardID)
+		defer cancel()
+		defer pw.Close()
+		err := a.fastWriteShard(ctx, shardID, 0, pw)
 		if err != nil {
-			log.Debug("Error getting nodes for shard:", err)
-			w.CloseWithError(err)
-			return
+			_ = pw.CloseWithError(err)
 		}
-		err = a.ShardEncoder.Encode(ctx, nodes, w)
-		if err != nil {
-			log.Debug("Error encoding shard:", err)
-			w.CloseWithError(a.makeErrBadNodes(ctx, shardID))
-			return
-		}
-		w.Close()
 	}()
-	return r, nil
+
+	return pr, nil
+}
+
+// Fast write streams data from a shard to the given io.Writer
+// using multiple workers to fetch block data in parallel.
+//  1. Spawning workers to fetch block data and enqueue ordered results.
+//  2. Writing the shard header is starting at offset 0, then draining results in index order while
+//     preserving ordering via a small pending map.
+//  3. Propagating errors/cancellations through the pipe while draining to let
+//     workers exit cleanly and bound memory via buffered channels.
+func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint64, pw io.Writer) error {
+	type (
+		job struct {
+			idx  int
+			node dagsmodel.Node
+		}
+		result struct {
+			idx  int
+			node dagsmodel.Node
+			data []byte
+			err  error
+		}
+	)
+	var (
+		workerCount = runtime.NumCPU()
+
+		jobs    chan job
+		results chan result
+	)
+
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	// must have a NodeReader to fetch block data
+	if a.OpenNodeReader == nil {
+		return fmt.Errorf("no NodeReader configured")
+	}
+
+	jobWindow := workerCount * 4
+	// Each result carries a whole block (~1MiB), so give results extra headroom
+	// to keep workers busy if the writer is momentarily slow.
+	resultWindow := jobWindow * 4
+	jobs = make(chan job, jobWindow)
+	results = make(chan result, resultWindow)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+
+	writeBlock := func(res result) error {
+		if res.err != nil {
+			return res.err
+		}
+		if res.data == nil {
+			return fmt.Errorf("missing data for node %s", res.node.CID())
+		}
+
+		if err := a.ShardEncoder.WriteNode(ctx, res.node, res.data, pw); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	nodes, err := a.Repo.NodesByShard(ctx, shardID, offset)
+	if err != nil {
+		log.Debug("Error getting nodes for shard:", err)
+
+		return err
+	}
+
+	nodeReader, err := a.OpenNodeReader()
+	if err != nil {
+		return fmt.Errorf("failed to open node reader for shard %s: %w", shardID, err)
+	}
+	defer nodeReader.Close()
+
+	if offset == 0 {
+		if err := a.ShardEncoder.WriteHeader(ctx, pw); err != nil {
+			return fmt.Errorf("failed to write shard header: %w", err)
+		}
+	}
+
+	for w := 0; w < workerCount; w++ {
+		go func() {
+			defer workers.Done()
+			for j := range jobs {
+				data, err := nodeReader.GetData(ctx, j.node)
+				if err != nil {
+					// Expand to all bad nodes in the shard to match previous behavior.
+					err = a.makeErrBadNodes(ctx, shardID, nodeReader)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case results <- result{idx: j.idx, node: j.node, data: data, err: err}:
+				}
+			}
+		}()
+	}
+
+	go func() {
+		defer close(jobs)
+		for idx, node := range nodes {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- job{idx: idx, node: node}:
+			}
+		}
+	}()
+
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+
+	pending := make(map[int]result)
+	next := 0
+	resultsClosed := false
+	drainOnly := false
+
+	var closeErr error
+	for {
+		if resultsClosed && len(pending) == 0 {
+			return closeErr
+		}
+
+		var (
+			res result
+			ok  bool
+		)
+
+		select {
+		case <-ctx.Done():
+			// Stop writing, but continue draining results so workers can exit.
+			drainOnly = true
+			closeErr = ctx.Err()
+			continue
+		case res, ok = <-results:
+			if !ok {
+				resultsClosed = true
+				continue
+			}
+		}
+
+		if drainOnly {
+			continue
+		}
+
+		if res.err != nil {
+			return fmt.Errorf("failed to write node %s: %w", res.node.CID(), res.err)
+		}
+
+		pending[res.idx] = res
+		for {
+			pendingRes, ok := pending[next]
+			if !ok {
+				break
+			}
+
+			if err := writeBlock(pendingRes); err != nil {
+				return fmt.Errorf("failed to write node %s: %w", pendingRes.node.CID(), err)
+			}
+			delete(pending, next)
+			next++
+		}
+	}
 }
 
 // makeErrBadNodes attempts to read data from all nodes in the given shard, and
@@ -160,7 +405,7 @@ func (a API) CarForShard(ctx context.Context, shardID id.ShardID) (io.Reader, er
 // By communicating upstream all failing nodes from the shard, we can handle
 // them all at once, and avoid having to restart the upload again for each bad
 // node.
-func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
+func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader nodereader.NodeReader) error {
 	// Collect the nodes first, because we can't read data for each node while
 	// holding the lock on the database that ForEachNode has. This means holding a
 	// bunch of nodes in memory, but it's limited to the size of a shard.
@@ -173,18 +418,18 @@ func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID) error {
 		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
 
-	var errs []types.ErrBadNode
+	var errs []types.BadNodeError
 	goodCIDs := cid.NewSet()
 	for _, node := range nodes {
-		_, err := a.NodeReader.GetData(ctx, node)
+		_, err := nodeReader.GetData(ctx, node)
 		if err != nil {
-			errs = append(errs, types.NewErrBadNode(node.CID(), err))
+			errs = append(errs, types.NewBadNodeError(node.CID(), err))
 		} else {
 			goodCIDs.Add(node.CID())
 		}
 	}
 
-	return types.NewErrBadNodes(errs, shardID, goodCIDs)
+	return types.NewBadNodesError(errs, shardID, goodCIDs)
 }
 
 func lengthVarint(size uint64) []byte {

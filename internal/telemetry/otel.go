@@ -3,7 +3,11 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
+	otelpyroscope "github.com/grafana/otel-profiling-go"
+	"github.com/grafana/pyroscope-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -15,30 +19,34 @@ import (
 const (
 	// DefaultTracesEndpoint is the default OTLP HTTP endpoint for Storacha telemetry.
 	DefaultTracesEndpoint = "telemetry.storacha.network:443"
+
+	// DefaultProfilesEndpoint is the default OTLP HTTP endpoint for sending profiles.
+	DefaultProfilesEndpoint = DefaultTracesEndpoint
 )
 
 // Config configures OTLP tracing.
 type Config struct {
-	Enabled  bool
-	Endpoint string
-	Insecure bool
+	Enabled   bool
+	Endpoint  string
+	Insecure  bool
+	Profiling ProfilingConfig
+}
+
+// ProfilingConfig configures OTLP profiling.
+type ProfilingConfig struct {
+	Enabled       bool
+	Endpoint      string
+	Insecure      bool
+	Application   string
+	BasicAuthUser string
+	BasicAuthPass string
 }
 
 // Setup bootstraps the OpenTelemetry pipeline.
 // If it does not return an error, make sure to call shutdown for proper cleanup.
 func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error) {
-	if !cfg.Enabled {
+	if !cfg.Enabled && !cfg.Profiling.Enabled {
 		return func(context.Context) error { return nil }, nil
-	}
-
-	endpoint := cfg.Endpoint
-	if endpoint == "" {
-		endpoint = DefaultTracesEndpoint
-	}
-
-	traceExporter, err := otlptracehttp.New(ctx, traceExporterOptions(endpoint, cfg.Insecure)...)
-	if err != nil {
-		return nil, err
 	}
 
 	// Set up resource.
@@ -52,16 +60,58 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 		return nil, err
 	}
 
-	tracerProvider := trace.NewTracerProvider(
-		trace.WithBatcher(traceExporter),
-		trace.WithResource(res),
-	)
+	var shutdowns []func(context.Context) error
+
+	var tracerProvider *trace.TracerProvider
+	if cfg.Enabled {
+		traceEndpoint := cfg.Endpoint
+		if traceEndpoint == "" {
+			traceEndpoint = DefaultTracesEndpoint
+		}
+
+		traceExporter, err := otlptracehttp.New(ctx, traceExporterOptions(traceEndpoint, cfg.Insecure)...)
+		if err != nil {
+			return nil, err
+		}
+
+		tracerProvider = trace.NewTracerProvider(
+			trace.WithBatcher(traceExporter),
+			trace.WithResource(res),
+		)
+		shutdowns = append(shutdowns, shutdownFunc(tracerProvider))
+	} else {
+		tracerProvider = trace.NewTracerProvider(trace.WithResource(res))
+	}
 
 	prop := newPropagator()
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetTextMapPropagator(prop)
 
-	return shutdownFunc(tracerProvider), nil
+	if cfg.Profiling.Enabled {
+		otel.SetTracerProvider(otelpyroscope.NewTracerProvider(otel.GetTracerProvider()))
+
+		profileEndpoint := profileEndpointWithScheme(cfg.Profiling.Endpoint, cfg.Profiling.Insecure)
+		profiler, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName:   profileApp(cfg.Profiling.Application),
+			ServerAddress:     profileEndpoint,
+			BasicAuthUser:     cfg.Profiling.BasicAuthUser,
+			BasicAuthPassword: cfg.Profiling.BasicAuthPass,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("start profiling: %w", err)
+		}
+		shutdowns = append(shutdowns, func(context.Context) error {
+			return profiler.Stop()
+		})
+	}
+
+	return func(ctx context.Context) error {
+		var err error
+		for i := len(shutdowns) - 1; i >= 0; i-- {
+			err = errors.Join(err, shutdowns[i](ctx))
+		}
+		return err
+	}, nil
 }
 
 func newPropagator() propagation.TextMapPropagator {
@@ -79,6 +129,27 @@ func traceExporterOptions(endpoint string, insecure bool) []otlptracehttp.Option
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 	return opts
+}
+
+func profileEndpointWithScheme(endpoint string, insecure bool) string {
+	if endpoint == "" {
+		endpoint = DefaultProfilesEndpoint
+	}
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return endpoint
+	}
+	scheme := "https://"
+	if insecure {
+		scheme = "http://"
+	}
+	return fmt.Sprintf("%s%s", scheme, endpoint)
+}
+
+func profileApp(app string) string {
+	if app == "" {
+		return "guppy"
+	}
+	return app
 }
 
 func shutdownFunc(tp *trace.TracerProvider) func(context.Context) error {

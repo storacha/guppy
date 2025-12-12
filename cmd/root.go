@@ -38,6 +38,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	cobra.EnableTraverseRunHooks = true
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 
 	// default storacha dir: ~/.storacha/guppy
 	homedir, err := os.UserHomeDir()
@@ -51,6 +53,8 @@ func init() {
 		filepath.Join(homedir, ".storacha/guppy"),
 		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
+
+	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.
