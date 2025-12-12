@@ -27,18 +27,15 @@ type IndexWriter func(
 type IndexState string
 
 const (
-	// IndexStateOpen indicates that a index is still accepting new nodes.
+	// IndexStateOpen indicates that a index is still accepting new shards.
 	IndexStateOpen IndexState = "open"
-	// IndexStateClosed indicates that a index is no longer accepting nodes, but
-	// is not yet added to the space.
-	IndexStateClosed IndexState = "closed"
 	// IndexStateAdded indicates that a index has been added to the space.
 	IndexStateAdded IndexState = "added"
 )
 
 func validIndexState(state IndexState) bool {
 	switch state {
-	case IndexStateOpen, IndexStateClosed, IndexStateAdded:
+	case IndexStateOpen, IndexStateAdded:
 		return true
 	default:
 		return false
@@ -108,14 +105,13 @@ func (i *Index) String() string {
 	return fmt.Sprintf("Index[id=%s]", i.id)
 }
 
-func (i *Index) Close(indexDigest multihash.Multihash, pieceCID cid.Cid, size uint64) error {
+func (i *Index) SetDigestAndSize(indexDigest multihash.Multihash, pieceCID cid.Cid, size uint64) error {
 	if i.state != IndexStateOpen {
-		return fmt.Errorf("cannot close index %s in state %s", i.id, i.state)
+		return fmt.Errorf("cannot set digest for index %s in state %s", i.id, i.state)
 	}
 	i.digest = indexDigest
 	i.pieceCID = pieceCID
 	i.size = size
-	i.state = IndexStateClosed
 	return nil
 }
 
@@ -125,7 +121,7 @@ func (i *Index) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocat
 }
 
 func (i *Index) Added() error {
-	if i.state != IndexStateClosed {
+	if i.state != IndexStateOpen {
 		return fmt.Errorf("cannot mark index %s as added in state %s", i.id, i.state)
 	}
 	i.state = IndexStateAdded

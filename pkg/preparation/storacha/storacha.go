@@ -1,18 +1,22 @@
 package storacha
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	commcid "github.com/filecoin-project/go-fil-commcid"
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/minio/sha256-simd"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	filecoincap "github.com/storacha/go-libstoracha/capabilities/filecoin"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
 	"github.com/storacha/go-libstoracha/capabilities/types"
@@ -38,6 +42,37 @@ var (
 	log    = logging.Logger("preparation/storacha")
 	tracer = otel.Tracer("preparation/storacha")
 )
+
+// computeIndexHash computes the SHA-256 digest and Piece CID for index data
+func computeIndexHash(data []byte) (multihash.Multihash, cid.Cid, error) {
+	// Compute SHA-256 digest
+	sha256Hash := sha256.Sum256(data)
+	digest, err := multihash.Encode(sha256Hash[:], multihash.SHA2_256)
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("encoding digest: %w", err)
+	}
+
+	// Compute piece CID if size is large enough
+	size := uint64(len(data))
+	if size < gtypes.MinPiecePayload {
+		return digest, cid.Undef, nil
+	}
+
+	// Compute commp
+	commpCalc := &commp.Calc{}
+	_, err = commpCalc.Write(data)
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("computing commp: %w", err)
+	}
+	pieceDigest := commpCalc.Sum(nil)
+
+	pieceCID, err := commcid.DataCommitmentToPieceCidv2(pieceDigest, size)
+	if err != nil {
+		return nil, cid.Undef, fmt.Errorf("computing piece CID: %w", err)
+	}
+
+	return digest, pieceCID, nil
+}
 
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
@@ -332,22 +367,53 @@ func (a API) addIndexBlobs(ctx context.Context, indexes []*indexesmodel.Index, u
 
 func (a API) addIndexBlob(ctx context.Context, index *indexesmodel.Index, uploadID id.UploadID, spaceDID did.DID) error {
 	start := time.Now()
-	log.Infow("adding index blob", "cid", index.CID().String(), "id", index.ID())
+	log.Infow("adding index blob", "id", index.ID())
 	ctx, span := tracer.Start(ctx, "add-index-blob", trace.WithAttributes(
 		attribute.String("index.id", index.ID().String()),
-		attribute.Int64("index.size", int64(index.Size())),
-		attribute.String("index.digest", index.Digest().String()),
-		attribute.String("index.cid", index.CID().String()),
 	))
 	defer func() {
-		log.Infow("added index blob", "cid", index.CID().String(), "id", index.ID(), "duration", time.Since(start))
+		if index.CID() != cid.Undef {
+			log.Infow("added index blob", "cid", index.CID().String(), "id", index.ID(), "duration", time.Since(start))
+		} else {
+			log.Infow("added index blob", "id", index.ID(), "duration", time.Since(start))
+		}
 		span.End()
 	}()
 
+	// Generate the index data and compute its digest
 	indexReader, err := a.ReaderForIndex(ctx, index.ID())
 	if err != nil {
 		return fmt.Errorf("failed to get reader for index %s: %w", index.ID(), err)
 	}
+
+	// Read all the index data and compute digest/pieceCID
+	indexData, err := io.ReadAll(indexReader)
+	if err != nil {
+		return fmt.Errorf("failed to read index %s data: %w", index.ID(), err)
+	}
+
+	indexDigest, pieceCID, err := computeIndexHash(indexData)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for index %s: %w", index.ID(), err)
+	}
+
+	// Set the digest, pieceCID, and size on the index
+	if err := index.SetDigestAndSize(indexDigest, pieceCID, uint64(len(indexData))); err != nil {
+		return fmt.Errorf("failed to set digest for index %s: %w", index.ID(), err)
+	}
+	if err := a.Repo.UpdateIndex(ctx, index); err != nil {
+		return fmt.Errorf("failed to update index %s after computing digest: %w", index.ID(), err)
+	}
+
+	// Update span attributes now that we have the digest
+	span.SetAttributes(
+		attribute.Int64("index.size", int64(index.Size())),
+		attribute.String("index.digest", index.Digest().String()),
+		attribute.String("index.cid", index.CID().String()),
+	)
+
+	// Create a new reader from the data we already read
+	indexReader = io.NopCloser(bytes.NewReader(indexData))
 
 	addReader, addWriter := io.Pipe()
 
@@ -417,13 +483,13 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 	ctx, span := tracer.Start(ctx, "add-indexes-for-upload")
 	defer span.End()
 
-	closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateClosed)
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateOpen)
 	if err != nil {
-		return fmt.Errorf("failed to get closed indexes for upload %s: %w", uploadID, err)
+		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
 	}
-	span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
+	span.AddEvent("found open indexes", trace.WithAttributes(attribute.Int("indexes", len(openIndexes))))
 
-	return a.addIndexBlobs(ctx, closedIndexes, uploadID, spaceDID)
+	return a.addIndexBlobs(ctx, openIndexes, uploadID, spaceDID)
 }
 
 func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
