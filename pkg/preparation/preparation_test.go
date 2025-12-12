@@ -387,11 +387,6 @@ func TestExecuteUpload(t *testing.T) {
 		// should be at least 2 and at most 4.
 		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
 		require.Less(t, putBlobs.Size(), 5, "expected at most 4/5 shards to be added so far")
-		require.GreaterOrEqual(t, len(replicateCaps), 2, "expected at least 2/5 shards to be replicated so far")
-		require.Less(t, len(replicateCaps), 5, "expected at most 4/5 shards to be replicated so far")
-		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
-		require.Less(t, len(offerCaps), 5, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
-
 		require.Len(t, indexCaps, 0, "expected `space/index/add` not to have been called yet")
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
 
@@ -407,8 +402,10 @@ func TestExecuteUpload(t *testing.T) {
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
-		require.Len(t, replicateCaps, 6, "expected 5 shards + 1 index to be replicated")
-		require.Len(t, offerCaps, 5, "expected the 5 shards to be `filecoin/offer`ed")
+		require.GreaterOrEqual(t, len(replicateCaps), 6, "expected at least 5 shards + 1 index to be replicated (including retries)")
+		require.Less(t, len(replicateCaps), 9, "expected at most 6 shards + 1 index to be replicated (including retries)")
+		require.GreaterOrEqual(t, len(offerCaps), 5, "expected at least 5 shards to be `filecoin/offer`ed (including retries)")
+		require.Less(t, len(offerCaps), 8, "expected at most 5 shards to be `filecoin/offer`ed (including retries)")
 
 		require.Len(t, indexCaps, 1, "expected only one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")

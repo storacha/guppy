@@ -11,6 +11,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -28,7 +29,8 @@ type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
 type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte) (bool, error)
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID) (bool, error)
-type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadedCB func(shard *shardsmodel.Shard) error) error
+type PostProcessUploadedShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
@@ -40,6 +42,7 @@ type API struct {
 	ExecuteScan                ExecuteScanFunc
 	ExecuteDagScansForUpload   ExecuteDagScansForUploadFunc
 	AddShardsForUpload         AddShardsForUploadFunc
+	PostProcessUploadedShards  PostProcessUploadedShardsFunc
 	AddIndexesForUpload        AddIndexesForUploadFunc
 	AddStorachaUploadForUpload AddStorachaUploadForUploadFunc
 	RemoveBadFSEntry           RemoveBadFSEntryFunc
@@ -101,9 +104,10 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	defer span.End()
 
 	var (
-		scansAvailable        = make(chan struct{}, 1)
-		dagScansAvailable     = make(chan struct{}, 1)
-		closedShardsAvailable = make(chan struct{}, 1)
+		scansAvailable          = make(chan struct{}, 1)
+		dagScansAvailable       = make(chan struct{}, 1)
+		closedShardsAvailable   = make(chan struct{}, 1)
+		uploadedShardsAvailable = make(chan struct{}, 1)
 	)
 
 	// Start the workers
@@ -123,13 +127,19 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+		err := runStorachaWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable, uploadedShardsAvailable)
 		if err != nil {
 			return fmt.Errorf("storacha worker: %w", err)
 		}
 		return nil
 	})
-
+	eg.Go(func() error {
+		err := runPostProcessUploadWorker(wCtx, a, uploadID, spaceDID, uploadedShardsAvailable)
+		if err != nil {
+			return fmt.Errorf("post-process worker: %w", err)
+		}
+		return nil
+	})
 	// Kick them all off. There may be work available in the DB from a previous
 	// attempt.
 	signal(scansAvailable)
@@ -369,7 +379,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 }
 
 // runStorachaWorker runs the worker that adds shards and indexes to Storacha.
-func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}) error {
+func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, blobWork <-chan struct{}, uploadedShardsAvailable chan<- struct{}) error {
 	ctx, span := tracer.Start(ctx, "storacha-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -383,7 +393,10 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// doWork
 		func() error {
-			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
+			err := api.AddShardsForUpload(ctx, uploadID, spaceDID, func(shard *shardsmodel.Shard) error {
+				signal(uploadedShardsAvailable)
+				return nil
+			})
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
@@ -393,16 +406,43 @@ func runStorachaWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 		// finalize
 		func() error {
+			close(uploadedShardsAvailable)
+			return nil
+		},
+	)
+}
+
+func runPostProcessUploadWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, uploadedShardsAvailable <-chan struct{}) error {
+	ctx, span := tracer.Start(ctx, "post-process-upload-worker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer log.Debugf("Post-process upload worker for upload %s exiting", uploadID)
+	defer span.End()
+
+	return Worker(
+		ctx,
+		uploadedShardsAvailable,
+
+		// doWork
+		func() error {
+			err := api.PostProcessUploadedShards(ctx, uploadID, spaceDID)
+			if err != nil {
+				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
+			}
+			return nil
+		},
+
+		// finalize
+		func() error {
 			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`space/blob/add`ing index for upload %s: %w", uploadID, err)
 			}
-
 			err = api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
 			}
-
 			return nil
 		},
 	)
