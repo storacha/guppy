@@ -9,10 +9,10 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/storacha/guppy/cmd/unixfs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"github.com/storacha/guppy/cmd/unixfs"
 )
 
 var (
@@ -49,7 +49,7 @@ func init() {
 	}
 
 	unixfs.StorePathP = &storePath
-    rootCmd.AddCommand(unixfs.Cmd)
+	rootCmd.AddCommand(unixfs.Cmd)
 	rootCmd.PersistentFlags().StringVar(
 		&guppyDirPath,
 		"guppy-dir",
