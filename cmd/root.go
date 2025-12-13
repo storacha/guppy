@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"github.com/storacha/guppy/cmd/unixfs"
 )
 
 var (
@@ -47,6 +48,8 @@ func init() {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
 
+	unixfs.StorePathP = &storePath
+    rootCmd.AddCommand(unixfs.Cmd)
 	rootCmd.PersistentFlags().StringVar(
 		&guppyDirPath,
 		"guppy-dir",
