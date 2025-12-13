@@ -353,7 +353,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 
 	var closeErr error
 	for {
-		if resultsClosed && len(pending) == 0 {
+		if resultsClosed && (len(pending) == 0 || drainOnly) {
 			return closeErr
 		}
 
