@@ -20,13 +20,15 @@ const (
 	// ShardStateClosed indicates that a shard is no longer accepting nodes, but
 	// is not yet added to the space.
 	ShardStateClosed ShardState = "closed"
+	// ShardStateUploaded indicates that a shard has been uploaded but not replicated or offered to filecoin
+	ShardStateUploaded ShardState = "uploaded"
 	// ShardStateAdded indicates that a shard has been added to the space.
 	ShardStateAdded ShardState = "added"
 )
 
 func validShardState(state ShardState) bool {
 	switch state {
-	case ShardStateOpen, ShardStateClosed, ShardStateAdded:
+	case ShardStateOpen, ShardStateClosed, ShardStateUploaded, ShardStateAdded:
 		return true
 	default:
 		return false
@@ -94,10 +96,28 @@ func (s *Shard) Close(digest multihash.Multihash, pieceCID cid.Cid) error {
 }
 
 func (s *Shard) Added() error {
-	if s.state != ShardStateClosed {
+	if s.state != ShardStateUploaded {
 		return fmt.Errorf("cannot add shard in state %s", s.state)
 	}
 	s.state = ShardStateAdded
+	return nil
+}
+
+// SpaceBlobAdded records the location and PDP accept invocations for the shard
+// after a successful `space/blob/add`. The shard must be in `ShardStateClosed`,
+// or it should not have been `space/blob/add`ed to begin with. `location` must
+// be non-nil, because it represents the fact that the shard has truly been
+// added. The `pdpAccept` may be nil.
+func (s *Shard) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocation.Invocation) error {
+	if s.state != ShardStateClosed {
+		return fmt.Errorf("cannot add shard in state %s", s.state)
+	}
+	if location == nil {
+		return fmt.Errorf("location invocation cannot be nil")
+	}
+	s.state = ShardStateUploaded
+	s.location = location
+	s.pdpAccept = pdpAccept
 	return nil
 }
 
@@ -213,21 +233,4 @@ func (s *Shard) Location() invocation.Invocation {
 
 func (s *Shard) PDPAccept() invocation.Invocation {
 	return s.pdpAccept
-}
-
-// SpaceBlobAdded records the location and PDP accept invocations for the shard
-// after a successful `space/blob/add`. The shard must be in `ShardStateClosed`,
-// or it should not have been `space/blob/add`ed to begin with. `location` must
-// be non-nil, because it represents the fact that the shard has truly been
-// added. The `pdpAccept` may be nil.
-func (s *Shard) SpaceBlobAdded(location invocation.Invocation, pdpAccept invocation.Invocation) error {
-	if s.state != ShardStateClosed {
-		return fmt.Errorf("cannot add shard in state %s", s.state)
-	}
-	if location == nil {
-		return fmt.Errorf("location invocation cannot be nil")
-	}
-	s.location = location
-	s.pdpAccept = pdpAccept
-	return nil
 }

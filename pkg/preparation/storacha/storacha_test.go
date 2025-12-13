@@ -101,7 +101,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		secondShard := shards[0]
 
 		// Upload shards that are ready to go.
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
 		require.NoError(t, err)
 
 		// Reload shards
@@ -109,7 +109,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
 		require.NoError(t, err)
-		require.Equal(t, model.ShardStateAdded, firstShard.State(), "expected first shard to be marked as added now")
+		require.Equal(t, model.ShardStateUploaded, firstShard.State(), "expected first shard to be marked as uploaded now")
 		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
 
 		// This run should `space/blob/add` the first, closed shard.
@@ -118,19 +118,30 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Equal(t, expectedData, client.SpaceBlobAddInvocations[0].BlobAdded)
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
 
+		// Now run post processing.
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+		// Reload shards
+		firstShard, err = repo.GetShardByID(t.Context(), firstShard.ID())
+		require.NoError(t, err)
+		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
+		require.NoError(t, err)
+		require.Equal(t, model.ShardStateAdded, firstShard.State(), "expected first shard to be marked as added now")
+		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
+
 		// Then it should `space/blob/replicate` it.
 		require.Len(t, client.SpaceBlobReplicateInvocations, 1)
 		require.Equal(t, firstShard.Digest(), client.SpaceBlobReplicateInvocations[0].Blob.Digest)
 		require.Equal(t, firstShard.Size(), client.SpaceBlobReplicateInvocations[0].Blob.Size)
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[0].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[0].ReplicaCount)
-		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
+		testutil.RequireEqualDelegation(t, client.SpaceBlobAddInvocations[0].ReturnedLocation, client.SpaceBlobReplicateInvocations[0].LocationCommitment)
 
 		// Then it should `filecoin/offer` it.
 		require.Len(t, client.FilecoinOfferInvocations, 1)
 		require.Equal(t, spaceDID, client.FilecoinOfferInvocations[0].Space)
 		require.Equal(t, cidlink.Link{Cid: firstShard.CID()}, client.FilecoinOfferInvocations[0].Content)
-		require.Equal(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
+		testutil.RequireEqualDelegation(t, client.SpaceBlobAddInvocations[0].ReturnedPDPAccept, client.FilecoinOfferInvocations[0].Options.PDPAcceptInvocation())
 
 		// It should have closed the first shard's reader.
 		require.Contains(t, shardReadersClosed, firstShard.ID(), "expected first shard reader to be closed now")
@@ -138,7 +149,21 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Now close the upload shards and run it again.
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		require.NoError(t, err)
+
+		// Reload second shard
+		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
+		require.NoError(t, err)
+		require.Equal(t, model.ShardStateUploaded, secondShard.State(), "expected second shard to be marked as uploaded now")
+
+		// This run should `space/blob/add` the second, newly closed shard.
+		require.Len(t, client.SpaceBlobAddInvocations, 2)
+		require.Equal(t, fmt.Append(nil, "CAR OF SHARD: ", secondShard.ID(), padding), client.SpaceBlobAddInvocations[1].BlobAdded)
+		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
+
+		// Now run post processing.
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// Reload second shard
@@ -146,18 +171,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, model.ShardStateAdded, secondShard.State(), "expected second shard to be marked as added now")
 
-		// This run should `space/blob/add` the second, newly closed shard.
-		require.Len(t, client.SpaceBlobAddInvocations, 2)
-		require.Equal(t, fmt.Append(nil, "CAR OF SHARD: ", secondShard.ID(), padding), client.SpaceBlobAddInvocations[1].BlobAdded)
-		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
-
 		// Then it should `space/blob/replicate` it.
 		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
 		require.Equal(t, secondShard.Digest(), client.SpaceBlobReplicateInvocations[1].Blob.Digest)
 		require.Equal(t, secondShard.Size(), client.SpaceBlobReplicateInvocations[1].Blob.Size)
 		require.Equal(t, spaceDID, client.SpaceBlobReplicateInvocations[1].Space)
 		require.Equal(t, uint(3), client.SpaceBlobReplicateInvocations[1].ReplicaCount)
-		require.Equal(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
+		testutil.RequireEqualDelegation(t, client.SpaceBlobAddInvocations[1].ReturnedLocation, client.SpaceBlobReplicateInvocations[1].LocationCommitment)
 
 		// It should have closed the second shard's reader.
 		require.Contains(t, shardReadersClosed, secondShard.ID(), "expected second shard reader to be closed now")
@@ -213,8 +233,10 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
 
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
 		require.ErrorContains(t, err, "simulated SpaceBlobAdd error")
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
 
 		// It should have `space/blob/add`ed (and failed)...
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
@@ -233,7 +255,9 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Now retry: `space/blob/add` succeeds but `space/blob/replicate` fails.
 		client.SpaceBlobAddError = nil
 		client.SpaceBlobReplicateError = fmt.Errorf("simulated SpaceBlobReplicate error")
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		require.NoError(t, err)
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.ErrorContains(t, err, "simulated SpaceBlobReplicate error")
 
 		// It should have `space/blob/add`ed again...
@@ -245,15 +269,13 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		// It should have closed the first shard's reader.
 		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
-		// reset the shard readers closed map
-		for shardID := range shardReadersClosed {
-			delete(shardReadersClosed, shardID)
-		}
 
 		// Now retry: `space/blob/replicate` succeeds but `filecoin/offer` fails.
 		client.SpaceBlobReplicateError = nil
 		client.FilecoinOfferError = fmt.Errorf("simulated FilecoinOffer error")
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		require.NoError(t, err)
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.ErrorContains(t, err, "simulated FilecoinOffer error")
 
 		// It should NOT `space/blob/add` again...
@@ -262,12 +284,6 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, client.SpaceBlobReplicateInvocations, 2)
 		// ...and then attempted `filecoin/offer` and failed.
 		require.Len(t, client.FilecoinOfferInvocations, 1)
-		// It should have closed the first shard's reader.
-		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though blob was not uploaded")
-		// reset the shard readers closed map
-		for shardID := range shardReadersClosed {
-			delete(shardReadersClosed, shardID)
-		}
 	})
 
 	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
@@ -317,7 +333,9 @@ func TestAddShardsForUpload(t *testing.T) {
 		_, err = shardsApi.CloseUploadShards(t.Context(), upload.ID())
 		require.NoError(t, err)
 
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
+		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		require.NoError(t, err)
+		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
 		// It should `space/blob/add`...
@@ -438,6 +456,8 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		require.NoError(t, err)
 		err = shard1.Close(shard1Digest, piece1CID)
 		require.NoError(t, err)
+		err = shard1.SpaceBlobAdded(testutil.RandomLocationDelegation(t), nil)
+		require.NoError(t, err)
 		err = shard1.Added()
 		require.NoError(t, err)
 		err = repo.UpdateShard(t.Context(), shard1)
@@ -452,6 +472,8 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20, nil, nil)
 		require.NoError(t, err)
 		err = shard2.Close(shard2Digest, piece2CID)
+		require.NoError(t, err)
+		err = shard2.SpaceBlobAdded(testutil.RandomLocationDelegation(t), nil)
 		require.NoError(t, err)
 		err = shard2.Added()
 		require.NoError(t, err)

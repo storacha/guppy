@@ -68,7 +68,7 @@ var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
 var _ uploads.AddIndexesForUploadFunc = API{}.AddIndexesForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
-func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadedCb func(shard *shardsmodel.Shard) error) error {
 	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
 	defer span.End()
 	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
@@ -91,6 +91,64 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 			defer func() { <-sem }()
 			if err := a.addShard(gctx, shard, spaceDID); err != nil {
 				err = fmt.Errorf("failed to add shard %s for upload %s: %w", shard.ID(), uploadID, err)
+				var errShardUpload gtypes.ShardUploadError
+				if errors.As(err, &errShardUpload) {
+					shardUploadErrorCh <- errShardUpload
+					return nil
+				}
+				log.Errorf("%v", err)
+				return err
+			}
+			log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
+			if shardUploadedCb != nil {
+				if err := shardUploadedCb(shard); err != nil {
+					return fmt.Errorf("failed to call shard uploaded callback for shard %s: %w", shard.ID(), err)
+				}
+			}
+			return nil
+		})
+	}
+
+	terminalErr := eg.Wait()
+	close(shardUploadErrorCh)
+
+	if terminalErr != nil {
+		return terminalErr
+	}
+
+	var shardUploadErrors []gtypes.ShardUploadError
+	for err := range shardUploadErrorCh {
+		shardUploadErrors = append(shardUploadErrors, err)
+	}
+	if len(shardUploadErrors) > 0 {
+		return gtypes.NewShardUploadErrors(shardUploadErrors)
+	}
+	return nil
+}
+
+func (a API) PostProcessUploadedShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
+	ctx, span := tracer.Start(ctx, "post-process-uploaded-shards")
+	defer span.End()
+	uploadedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateUploaded)
+	if err != nil {
+		return fmt.Errorf("failed to get uploaded shards for post processing %s: %w", uploadID, err)
+	}
+	span.AddEvent("found uploaded shards", trace.WithAttributes(attribute.Int("shards", len(uploadedShards))))
+
+	// Ensure at least 1 parallelism
+	if a.ShardUploadParallelism < 1 {
+		a.ShardUploadParallelism = 1
+	}
+
+	sem := make(chan struct{}, a.ShardUploadParallelism)
+	shardUploadErrorCh := make(chan gtypes.ShardUploadError, len(uploadedShards))
+	eg, gctx := errgroup.WithContext(ctx)
+	for _, shard := range uploadedShards {
+		sem <- struct{}{}
+		eg.Go(func() error {
+			defer func() { <-sem }()
+			if err := a.postProcessShard(gctx, shard, spaceDID); err != nil {
+				err = fmt.Errorf("failed to post-process shard %s for upload %s: %w", shard.ID(), uploadID, err)
 				var errShardUpload gtypes.ShardUploadError
 				if errors.As(err, &errShardUpload) {
 					shardUploadErrorCh <- errShardUpload
@@ -151,14 +209,10 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 			addWriter.CloseWithError(fmt.Errorf("failed to copy CAR to pipe: %w", err))
 		}
 	}()
-
-	location := shard.Location()
-	pdpAccept := shard.PDPAccept()
-
 	// If we don't have a location commitment yet, we have yet to successfully
 	// `space/blob/add`. (Note that `shard.PDPAccept()` is optional and may be
 	// legitimately nil even if the `space/blob/add` succeeded.)
-	if location == nil {
+	if shard.Location() == nil {
 		log.Infof("adding shard %s to space %s via `space/blob/add`", shard.ID(), spaceDID)
 		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, client.WithPrecomputedDigest(shard.Digest(), shard.Size()))
 		if err != nil {
@@ -174,13 +228,18 @@ func (a API) addShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID di
 			return fmt.Errorf("failed to update shard %s after `space/blob/add`: %w", shard.ID(), err)
 		}
 
-		location = addedBlob.Location
-		pdpAccept = addedBlob.PDPAccept
 	} else {
+		// this is a just a legacy case where the shard was added to the space but didn't record the state change
 		log.Infof("shard %s already has location and PDP accept, skipping `space/blob/add`", shard.ID())
+		shard.SpaceBlobAdded(shard.Location(), shard.PDPAccept())
 	}
+	return nil
+}
 
-	err = a.spaceBlobReplicate(ctx, shard, spaceDID, location)
+func (a API) postProcessShard(ctx context.Context, shard *shardsmodel.Shard, spaceDID did.DID) error {
+	location := shard.Location()
+	pdpAccept := shard.PDPAccept()
+	err := a.spaceBlobReplicate(ctx, shard, spaceDID, location)
 	if err != nil {
 		return gtypes.NewShardUploadError(shard.ID(), fmt.Errorf("failed to replicate shard %s: %w", shard.ID(), err))
 	}
