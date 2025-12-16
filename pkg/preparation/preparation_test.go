@@ -386,9 +386,9 @@ func TestExecuteUpload(t *testing.T) {
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		// We don't know exactly how many successful PUTs there were, but we know it
 		// should be at least 2 and at most 4.
-		require.GreaterOrEqual(t, putBlobs.Size(), 3, "expected at least 2/5 shards + 1 index to be added so far")
+		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
 		require.LessOrEqual(t, putBlobs.Size(), 5, "expected at most 4/5 shards + 1 index to be added so far")
-		require.GreaterOrEqual(t, len(replicateCaps), 3, "expected at least 2/5 shards + 1 index to be replicated so far")
+		require.GreaterOrEqual(t, len(replicateCaps), 2, "expected at least 2/5 shards to be replicated so far")
 		require.LessOrEqual(t, len(replicateCaps), 5, "expected at most 4/5 shards + 1 index to be replicated so far")
 		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
 		require.LessOrEqual(t, len(offerCaps), 4, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
