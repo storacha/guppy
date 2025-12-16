@@ -345,9 +345,20 @@ func TestExecuteUpload(t *testing.T) {
 		putClient.Transport = &errorableTransport{
 			wrapped: putClient.Transport,
 			errFn: func(req *http.Request) error {
+				data, err := bodyData(req)
+				if err != nil {
+					return err
+				}
+
+				// If it parses as an index, skip it.
+				_, err = blobindex.Extract(bytes.NewReader(data))
+				if err == nil {
+					return nil
+				}
+
 				putCount++
 				if putCount == 3 {
-					// Simulate an error on the third PUT request.
+					// Simulate an error on the third shard PUT request.
 					return assert.AnError
 				}
 				return nil
@@ -384,14 +395,9 @@ func TestExecuteUpload(t *testing.T) {
 		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		// We don't know exactly how many successful PUTs there were, but we know it
-		// should be at least 2 and at most 4.
-		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
-		require.LessOrEqual(t, putBlobs.Size(), 5, "expected at most 4/5 shards + 1 index to be added so far")
-		require.GreaterOrEqual(t, len(replicateCaps), 2, "expected at least 2/5 shards to be replicated so far")
-		require.LessOrEqual(t, len(replicateCaps), 5, "expected at most 4/5 shards + 1 index to be replicated so far")
-		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
-		require.LessOrEqual(t, len(offerCaps), 4, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
+		require.Equal(t, 5, putBlobs.Size(), "expected 4/5 shards + 1 index to be added so far")
+		require.Equal(t, 5, len(replicateCaps), "expected 4/5 shards + 1 index to be replicated so far")
+		require.Equal(t, 4, len(offerCaps), "expected at most 4/5 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 1, "expected one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
@@ -633,4 +639,18 @@ func (e *errorableTransport) ReceivedBlobs() ctestutil.BlobMap {
 		return receiver.ReceivedBlobs()
 	}
 	return nil
+}
+
+// bodyData reads and returns the body data from the given HTTP request, then
+// replaces the body so it can be read again.
+func bodyData(req *http.Request) ([]byte, error) {
+	d, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Body.Close()
+	// Replace the body so downstream can read it
+	req.Body = io.NopCloser(bytes.NewReader(d))
+
+	return d, nil
 }
