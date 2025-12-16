@@ -353,11 +353,14 @@ func TestExecuteUpload(t *testing.T) {
 				// If it parses as an index, skip it.
 				_, err = blobindex.Extract(bytes.NewReader(data))
 				if err == nil {
+					fmt.Printf("errFn: skipping an index\n")
 					return nil
 				}
 
 				putCount++
+				fmt.Printf("errFn: putCount incremented to %d\n", putCount)
 				if putCount == 3 {
+					fmt.Printf("errFn: Simulating an error!\n")
 					// Simulate an error on the third shard PUT request.
 					return assert.AnError
 				}
