@@ -136,14 +136,14 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	eg.Go(func() error {
 		err := runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
 		if err != nil {
-			return fmt.Errorf("storacha worker: %w", err)
+			return fmt.Errorf("shard worker: %w", err)
 		}
 		return nil
 	})
 	eg.Go(func() error {
 		err := runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable)
 		if err != nil {
-			return fmt.Errorf("storacha worker: %w", err)
+			return fmt.Errorf("index worker: %w", err)
 		}
 		return nil
 	})
