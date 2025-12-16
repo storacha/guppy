@@ -765,3 +765,266 @@ func TestComputedShardCIDs(t *testing.T) {
 	require.Equal(t, expectedDigest, shard.Digest())
 	require.Equal(t, expectedPieceCID, shard.PieceCID())
 }
+
+func TestReaderForIndex(t *testing.T) {
+	t.Run("returns a reader for a single-shard index", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		spaceDID := stestutil.RandomDID(t)
+		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<20))
+
+		// Set a root CID on the upload
+		rootLink := stestutil.RandomCID(t)
+		err := upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		// Create nodes and add them to shards
+		node1, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 100, spaceDID, "dir/file1", source.ID(), 0)
+		require.NoError(t, err)
+		node2, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 200, spaceDID, "dir/file2", source.ID(), 0)
+		require.NoError(t, err)
+
+		// Create a shard, call the header length 10
+		shard, err := repo.CreateShard(t.Context(), upload.ID(), 10, nil, nil)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), node1.CID(), spaceDID, 1)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), node2.CID(), spaceDID, 2)
+		require.NoError(t, err)
+
+		// Close the shard
+		digest, err := multihash.Encode([]byte("shard1 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard.Close(digest, stestutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard)
+		require.NoError(t, err)
+
+		// Create an index and add the shard to it
+		index, err := repo.CreateIndex(t.Context(), upload.ID())
+		require.NoError(t, err)
+		err = repo.AddShardToIndex(t.Context(), index.ID(), shard.ID())
+		require.NoError(t, err)
+
+		// Get the reader for the index
+		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
+		require.NoError(t, err)
+		require.NotNil(t, indexReader)
+
+		// Read and parse the index
+		indexView, err := blobindex.Extract(indexReader)
+		require.NoError(t, err)
+
+		// Verify the index content
+		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, 1, indexView.Shards().Size(), "index should have one shard")
+
+		shardSlices := indexView.Shards().Get(digest)
+		require.NotNil(t, shardSlices)
+		require.Equal(t, 2, shardSlices.Size(), "shard should have two slices")
+		require.Equal(t, blobindex.Position{Offset: 10 + 1, Length: 100}, shardSlices.Get(node1.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 10 + 1 + 100 + 2, Length: 200}, shardSlices.Get(node2.CID().Hash()))
+	})
+
+	t.Run("returns a reader for a multi-shard index", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		spaceDID := stestutil.RandomDID(t)
+		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<20))
+
+		// Set a root CID on the upload
+		rootLink := stestutil.RandomCID(t)
+		err := upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		// Create nodes
+		node1, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 100, spaceDID, "dir/file1", source.ID(), 0)
+		require.NoError(t, err)
+		node2, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 200, spaceDID, "dir/file2", source.ID(), 0)
+		require.NoError(t, err)
+		node3, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 300, spaceDID, "dir/file3", source.ID(), 0)
+		require.NoError(t, err)
+
+		// Create first shard with two nodes
+		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 10, nil, nil)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node1.CID(), spaceDID, 1)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), node2.CID(), spaceDID, 2)
+		require.NoError(t, err)
+		digest1, err := multihash.Encode([]byte("shard1 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard1.Close(digest1, stestutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard1)
+		require.NoError(t, err)
+
+		// Create second shard with one node
+		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 20, nil, nil)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard2.ID(), node3.CID(), spaceDID, 3)
+		require.NoError(t, err)
+		digest2, err := multihash.Encode([]byte("shard2 digest"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard2.Close(digest2, stestutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard2)
+		require.NoError(t, err)
+
+		// Create an index and add both shards to it
+		index, err := repo.CreateIndex(t.Context(), upload.ID())
+		require.NoError(t, err)
+		err = repo.AddShardToIndex(t.Context(), index.ID(), shard1.ID())
+		require.NoError(t, err)
+		err = repo.AddShardToIndex(t.Context(), index.ID(), shard2.ID())
+		require.NoError(t, err)
+
+		// Get the reader for the index
+		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
+		require.NoError(t, err)
+		require.NotNil(t, indexReader)
+
+		// Read and parse the index
+		indexView, err := blobindex.Extract(indexReader)
+		require.NoError(t, err)
+
+		// Verify the index content
+		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, 2, indexView.Shards().Size(), "index should have two shards")
+
+		// Verify first shard
+		shard1Slices := indexView.Shards().Get(digest1)
+		require.NotNil(t, shard1Slices)
+		require.Equal(t, 2, shard1Slices.Size(), "first shard should have two slices")
+		require.Equal(t, blobindex.Position{Offset: 10 + 1, Length: 100}, shard1Slices.Get(node1.CID().Hash()))
+		require.Equal(t, blobindex.Position{Offset: 10 + 1 + 100 + 2, Length: 200}, shard1Slices.Get(node2.CID().Hash()))
+
+		// Verify second shard
+		shard2Slices := indexView.Shards().Get(digest2)
+		require.NotNil(t, shard2Slices)
+		require.Equal(t, 1, shard2Slices.Size(), "second shard should have one slice")
+		require.Equal(t, blobindex.Position{Offset: 20 + 3, Length: 300}, shard2Slices.Get(node3.CID().Hash()))
+	})
+
+	t.Run("returns an error when index does not exist", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		nonExistentIndexID := id.New()
+		indexReader, err := api.ReaderForIndex(t.Context(), nonExistentIndexID)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "getting index")
+		require.Nil(t, indexReader)
+	})
+
+	t.Run("returns an error when upload has no root CID", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		spaceDID := stestutil.RandomDID(t)
+		upload, _ := testutil.CreateUpload(t, repo, spaceDID)
+
+		// Create an index for this upload (without setting a root CID)
+		index, err := repo.CreateIndex(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		// Try to get a reader for the index
+		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
+		require.Error(t, err)
+		require.ErrorContains(t, err, "no root CID set yet for upload")
+		require.Nil(t, indexReader)
+	})
+
+	t.Run("returns an error when shard has no digest", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		spaceDID := stestutil.RandomDID(t)
+		upload, source := testutil.CreateUpload(t, repo, spaceDID)
+
+		// Set a root CID on the upload
+		rootLink := stestutil.RandomCID(t)
+		err := upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		// Create a shard without closing it (no digest)
+		shard, err := repo.CreateShard(t.Context(), upload.ID(), 10, nil, nil)
+		require.NoError(t, err)
+
+		// Add a node to the shard
+		node, _, err := repo.FindOrCreateRawNode(t.Context(), stestutil.RandomCID(t).(cidlink.Link).Cid, 100, spaceDID, "dir/file1", source.ID(), 0)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard.ID(), node.CID(), spaceDID, 1)
+		require.NoError(t, err)
+
+		// Create an index and add the shard to it
+		index, err := repo.CreateIndex(t.Context(), upload.ID())
+		require.NoError(t, err)
+		err = repo.AddShardToIndex(t.Context(), index.ID(), shard.ID())
+		require.NoError(t, err)
+
+		// Try to get a reader for the index
+		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
+		require.Error(t, err)
+		require.ErrorContains(t, err, "has no digest set")
+		require.Nil(t, indexReader)
+	})
+
+	t.Run("returns an empty index when index has no shards", func(t *testing.T) {
+		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		api := shards.API{
+			Repo:         repo,
+			ShardEncoder: shards.NewCAREncoder(),
+		}
+
+		spaceDID := stestutil.RandomDID(t)
+		upload, _ := testutil.CreateUpload(t, repo, spaceDID)
+
+		// Set a root CID on the upload
+		rootLink := stestutil.RandomCID(t)
+		err := upload.SetRootCID(rootLink.(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateUpload(t.Context(), upload)
+		require.NoError(t, err)
+
+		// Create an index without adding any shards
+		index, err := repo.CreateIndex(t.Context(), upload.ID())
+		require.NoError(t, err)
+
+		// Get the reader for the index
+		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
+		require.NoError(t, err)
+		require.NotNil(t, indexReader)
+
+		// Read and parse the index
+		indexView, err := blobindex.Extract(indexReader)
+		require.NoError(t, err)
+
+		// Verify the index is empty but has the correct root
+		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, 0, indexView.Shards().Size(), "index should have no shards")
+	})
+}
