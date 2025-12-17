@@ -105,7 +105,7 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 		a.BlobUploadParallelism = 1
 	}
 
-	log.Debugf("adding %d blobs to space %s with parallelism %d", len(blobs), spaceDID, a.BlobUploadParallelism)
+	log.Warnf("adding %d blobs to space %s with parallelism %d", len(blobs), spaceDID, a.BlobUploadParallelism)
 
 	sem := make(chan struct{}, a.BlobUploadParallelism)
 	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(blobs))
