@@ -120,6 +120,9 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 					return nil
 				}
 				log.Errorf("%v", err)
+				if context.Cause(gctx) != nil {
+					log.Errorf("Context canceled because: %v", context.Cause(gctx))
+				}
 				return err
 			}
 			log.Infof("Successfully added blob %s", blob)
