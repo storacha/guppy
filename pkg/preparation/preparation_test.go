@@ -50,6 +50,7 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
+	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
@@ -396,6 +397,16 @@ func TestExecuteUpload(t *testing.T) {
 		underlying := shardUploadErrors.Unwrap()
 		require.Len(t, underlying, 1, "expected exactly one underlying error")
 		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
+
+		openShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
+		require.NoError(t, err)
+		fmt.Printf("len(openShards): %v\n", len(openShards))
+		closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
+		require.NoError(t, err)
+		fmt.Printf("len(closedShards): %v\n", len(closedShards))
+		addedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateAdded)
+		require.NoError(t, err)
+		fmt.Printf("len(addedShards): %v\n", len(addedShards))
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
 		require.Equal(t, 4, putBlobs.Size(), "expected 3/5 shards + 1 index to be added so far")
