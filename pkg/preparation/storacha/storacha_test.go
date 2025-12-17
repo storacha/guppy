@@ -289,7 +289,7 @@ func TestAddShardsForUpload(t *testing.T) {
 
 func TestAddIndexesForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s and `space/blob/replicate`s index CARs", func(t *testing.T) {
-		logging.SetLogLevel("preparation/storacha", "warn")
+		logging.SetLogLevel("preparation/storacha", "debug")
 		db := testdb.CreateTestDB(t)
 		repo := sqlrepo.New(db)
 		spaceDID, err := did.Parse("did:storacha:space:example")
