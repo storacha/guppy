@@ -50,6 +50,7 @@ import (
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
+	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
@@ -331,11 +332,11 @@ func TestExecuteUpload(t *testing.T) {
 		repo := sqlrepo.New(db)
 
 		fsData := map[string][]byte{
-			// These numbers are tuned to create 5 shards at a shard size of 1<<16.
-			"dir1/b":      randomBytes((1 << 16) - 128),
-			"a":           randomBytes((1 << 16) - 128),
-			"dir1/c":      randomBytes((1 << 16) - 128),
-			"dir1/dir2/d": randomBytes((1 << 16) - 128),
+			// These numbers are tuned to create 4 shards at a shard size of 1<<16.
+			"dir1/b":      randomBytes((1 << 16) - (1 << 9)),
+			"a":           randomBytes((1 << 16) - (1 << 9)),
+			"dir1/c":      randomBytes((1 << 16) - (1 << 9)),
+			"dir1/dir2/d": randomBytes((1 << 16) - (1 << 9)),
 		}
 
 		testFs := prepareFs(t, fsData)
@@ -353,11 +354,14 @@ func TestExecuteUpload(t *testing.T) {
 				// If it parses as an index, skip it.
 				_, err = blobindex.Extract(bytes.NewReader(data))
 				if err == nil {
+					fmt.Printf("errFn: skipping an index\n")
 					return nil
 				}
 
 				putCount++
-				if putCount == 3 {
+				fmt.Printf("errFn: putCount incremented to %d\n", putCount)
+				if putCount == 2 {
+					fmt.Printf("errFn: Simulating an error!\n")
 					// Simulate an error on the third shard PUT request.
 					return assert.AnError
 				}
@@ -394,10 +398,20 @@ func TestExecuteUpload(t *testing.T) {
 		require.Len(t, underlying, 1, "expected exactly one underlying error")
 		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
 
+		openShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
+		require.NoError(t, err)
+		fmt.Printf("len(openShards): %v\n", len(openShards))
+		closedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
+		require.NoError(t, err)
+		fmt.Printf("len(closedShards): %v\n", len(closedShards))
+		addedShards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateAdded)
+		require.NoError(t, err)
+		fmt.Printf("len(addedShards): %v\n", len(addedShards))
+
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, 5, putBlobs.Size(), "expected 4/5 shards + 1 index to be added so far")
-		require.Equal(t, 5, len(replicateCaps), "expected 4/5 shards + 1 index to be replicated so far")
-		require.Equal(t, 4, len(offerCaps), "expected at most 4/5 shards to be `filecoin/offer`ed so far")
+		require.Equal(t, 4, putBlobs.Size(), "expected 3/5 shards + 1 index to be added so far")
+		require.Equal(t, 4, len(replicateCaps), "expected 3/5 shards + 1 index to be replicated so far")
+		require.Equal(t, 3, len(offerCaps), "expected 3/5 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 1, "expected one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
@@ -418,9 +432,9 @@ func TestExecuteUpload(t *testing.T) {
 		require.NotEmpty(t, returnedRootCID, "expected non-empty root CID")
 
 		putBlobs = ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, 6, putBlobs.Size(), "expected 5 shards + 1 index to be added in the end")
-		require.Len(t, replicateCaps, 6, "expected 5 shards + 1 index to be replicated")
-		require.Len(t, offerCaps, 5, "expected the 5 shards to be `filecoin/offer`ed")
+		require.Equal(t, 5, putBlobs.Size(), "expected 4 shards + 1 index to be added in the end")
+		require.Len(t, replicateCaps, 5, "expected 4 shards + 1 index to be replicated")
+		require.Len(t, offerCaps, 4, "expected the 4 shards to be `filecoin/offer`ed")
 
 		require.Len(t, indexCaps, 1, "expected `space/index/add` not to have been invoked again")
 		require.Len(t, uploadAddCaps, 1, "expected  one `upload/add` invocation")

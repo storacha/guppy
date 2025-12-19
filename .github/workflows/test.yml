@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v3
 
@@ -20,4 +23,10 @@ jobs:
         run: go build -v ./...
 
       - name: Test
-        run: go test -v -cover ./...
+        run: go tool gotestsum --junitfile report.xml --format testname
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: (!cancelled())
+        with:
+          files: report.xml

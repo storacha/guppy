@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -134,18 +135,39 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
-		if err != nil {
-			return fmt.Errorf("shard worker: %w", err)
+		// Run both the shard worker and index worker such that one failing does not
+		// cancel the other. Then return any errors from either. This means that
+		// [types.BlobUploadErrors] can be handled without the workers interfering
+		// with one another.
+		var wg sync.WaitGroup
+		wg.Add(2)
+		errCh := make(chan error, 2)
+
+		go func() {
+			defer wg.Done()
+			err := runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable)
+			if err != nil {
+				errCh <- fmt.Errorf("shard worker: %w", err)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			err := runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable)
+			if err != nil {
+				errCh <- fmt.Errorf("index worker: %w", err)
+			}
+		}()
+
+		wg.Wait()
+		close(errCh)
+
+		var errs []error
+		for err := range errCh {
+			errs = append(errs, err)
 		}
-		return nil
-	})
-	eg.Go(func() error {
-		err := runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable)
-		if err != nil {
-			return fmt.Errorf("index worker: %w", err)
-		}
-		return nil
+
+		return errors.Join(errs...)
 	})
 
 	// Kick them all off. There may be work available in the DB from a previous
@@ -160,7 +182,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	var badFSEntriesErr types.BadFSEntriesError
 	var badNodesErr types.BadNodesError
-	var shardUploadErrors types.BlobUploadErrors
+	var blobUploadErrors types.BlobUploadErrors
 	// Clean up after errors that need it
 	switch {
 
@@ -169,8 +191,8 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
 		}
-	case errors.As(workersErr, &shardUploadErrors):
-		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, shardUploadErrors)
+	case errors.As(workersErr, &blobUploadErrors):
+		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, blobUploadErrors)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
 		}
@@ -411,6 +433,8 @@ func runShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 	defer log.Debugf("Shard worker for upload %s exiting", uploadID)
 	defer span.End()
 
+	var blobUploadErrors []types.BlobUploadError
+
 	return Worker(
 		ctx,
 		closedShardsAvailable,
@@ -419,6 +443,12 @@ func runShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 		func() error {
 			err := api.AddShardsForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
+				var moreBlobUploadErrors types.BlobUploadErrors
+				if errors.As(err, &moreBlobUploadErrors) {
+					blobUploadErrors = append(blobUploadErrors, moreBlobUploadErrors.Errs()...)
+					return nil
+				}
+
 				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
 
@@ -427,6 +457,10 @@ func runShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 
 		// finalize
 		func() error {
+			if len(blobUploadErrors) > 0 {
+				return types.NewBlobUploadErrors(blobUploadErrors)
+			}
+
 			err := api.AddStorachaUploadForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
@@ -446,6 +480,8 @@ func runIndexWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 	defer log.Debugf("Index worker for upload %s exiting", uploadID)
 	defer span.End()
 
+	var blobUploadErrors []types.BlobUploadError
+
 	return Worker(
 		ctx,
 		closedIndexesAvailable,
@@ -454,6 +490,12 @@ func runIndexWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 		func() error {
 			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
+				var moreBlobUploadErrors types.BlobUploadErrors
+				if errors.As(err, &moreBlobUploadErrors) {
+					blobUploadErrors = append(blobUploadErrors, moreBlobUploadErrors.Errs()...)
+					return nil
+				}
+
 				return fmt.Errorf("`space/blob/add`ing indexes for upload %s: %w", uploadID, err)
 			}
 

@@ -105,6 +105,8 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 		a.BlobUploadParallelism = 1
 	}
 
+	log.Errorf("adding %d blobs to space %s with parallelism %d", len(blobs), spaceDID, a.BlobUploadParallelism)
+
 	sem := make(chan struct{}, a.BlobUploadParallelism)
 	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(blobs))
 	eg, gctx := errgroup.WithContext(ctx)
@@ -120,6 +122,9 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 					return nil
 				}
 				log.Errorf("%v", err)
+				if context.Cause(gctx) != nil {
+					log.Errorf("Context canceled because: %v", context.Cause(gctx))
+				}
 				return err
 			}
 			log.Infof("Successfully added blob %s", blob)
@@ -131,6 +136,7 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 	close(blobUploadErrorCh)
 
 	if terminalErr != nil {
+		log.Errorf("Returning with terminal error: %v", terminalErr)
 		return terminalErr
 	}
 
@@ -139,6 +145,7 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 		blobUploadErrors = append(blobUploadErrors, err)
 	}
 	if len(blobUploadErrors) > 0 {
+		log.Errorf("Returning with blob upload errors: %v", blobUploadErrors)
 		return gtypes.NewBlobUploadErrors(blobUploadErrors)
 	}
 	return nil
