@@ -22,6 +22,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
@@ -33,10 +34,38 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 )
 
+const name = "preparation/storacha"
+
 var (
-	log    = logging.Logger("preparation/storacha")
-	tracer = otel.Tracer("preparation/storacha")
+	log    = logging.Logger(name)
+	tracer = otel.Tracer(name)
+	meter  = otel.Meter(name)
+
+	shardPostProcessedCtr metric.Int64Counter
+	indexPostProcessedCtr metric.Int64Counter
 )
+
+func init() {
+	var err error
+
+	shardPostProcessedCtr, err = meter.Int64Counter(
+		"upload.shards.post_processed",
+		metric.WithDescription("The number of shards post-processed"),
+		metric.WithUnit("{shard}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create shard post-processed counter: %v", err)
+	}
+
+	indexPostProcessedCtr, err = meter.Int64Counter(
+		"upload.indexes.post_processed",
+		metric.WithDescription("The number of indexes post-processed"),
+		metric.WithUnit("{index}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create index post-processed counter: %v", err)
+	}
+}
 
 // Client is an interface for working with a Storacha space. It's typically
 // implemented by [client.Client].
@@ -108,6 +137,7 @@ func (a API) PostProcessUploadedShards(ctx context.Context, uploadID id.UploadID
 			return gtypes.NewBlobUploadError(blob.ID(), err)
 		}
 
+		shardPostProcessedCtr.Add(ctx, 1)
 		return nil
 	})
 }
@@ -426,7 +456,13 @@ func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadI
 		blobs[i] = shard
 	}
 	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
+		err := a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
+		if err != nil {
+			return err
+		}
+
+		indexPostProcessedCtr.Add(ctx, 1)
+		return err
 	})
 }
 
