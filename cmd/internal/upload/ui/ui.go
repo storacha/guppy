@@ -21,7 +21,7 @@ import (
 	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
-	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
+	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -44,8 +44,8 @@ type uploadModel struct {
 	rng     *rand.Rand
 
 	// State (Maps for multi-upload support)
-	recentAddedShards  map[id.UploadID][]*shardsmodel.Shard
-	recentClosedShards map[id.UploadID][]*shardsmodel.Shard
+	recentAddedShards  map[id.UploadID][]*blobsmodel.Shard
+	recentClosedShards map[id.UploadID][]*blobsmodel.Shard
 	filesToDAGScan     map[id.UploadID][]sqlrepo.FileInfo
 	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
 
@@ -315,9 +315,9 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 
 type statsMsg struct {
 	uploadID       id.UploadID
-	addedShards    []*shardsmodel.Shard
-	closedShards   []*shardsmodel.Shard
-	openShards     []*shardsmodel.Shard
+	addedShards    []*blobsmodel.Shard
+	closedShards   []*blobsmodel.Shard
+	openShards     []*blobsmodel.Shard
 	bytesToDAGScan uint64
 	filesToDAGScan []sqlrepo.FileInfo
 	shardedFiles   []sqlrepo.FileInfo
@@ -325,17 +325,17 @@ type statsMsg struct {
 
 func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
 	return tea.Tick(10*time.Millisecond, func(t time.Time) tea.Msg {
-		addedShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateAdded)
+		addedShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateAdded)
 		if err != nil {
 			return fmt.Errorf("getting added shards for upload %s: %w", uploadID, err)
 		}
 
-		closedShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
+		closedShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateClosed)
 		if err != nil {
 			return fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err)
 		}
 
-		openShards, err := repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateOpen)
+		openShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateOpen)
 		if err != nil {
 			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
 		}
@@ -384,8 +384,8 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
 
 		// Initialize Maps
-		recentAddedShards:   make(map[id.UploadID][]*shardsmodel.Shard),
-		recentClosedShards:  make(map[id.UploadID][]*shardsmodel.Shard),
+		recentAddedShards:   make(map[id.UploadID][]*blobsmodel.Shard),
+		recentClosedShards:  make(map[id.UploadID][]*blobsmodel.Shard),
 		filesToDAGScan:      make(map[id.UploadID][]sqlrepo.FileInfo),
 		shardedFiles:        make(map[id.UploadID][]sqlrepo.FileInfo),
 		openShardsStats:     make(map[id.UploadID]uint64),

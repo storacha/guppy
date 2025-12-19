@@ -1,4 +1,4 @@
-package shards
+package blobs
 
 import (
 	"encoding"
@@ -11,7 +11,7 @@ import (
 	"github.com/minio/sha256-simd"
 	"github.com/multiformats/go-multihash"
 	commp "github.com/storacha/go-fil-commp-hashhash"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 )
 

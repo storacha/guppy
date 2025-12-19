@@ -18,12 +18,11 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/stretchr/testify/require"
 
-	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/mockclient"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/internal/testutil"
-	"github.com/storacha/guppy/pkg/preparation/shards"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
@@ -58,24 +57,24 @@ func TestAddShardsForUpload(t *testing.T) {
 			BlobUploadParallelism: 1,
 		}
 
-		shardsApi := shards.API{
+		blobsApi := blobs.API{
 			Repo:         repo,
-			ShardEncoder: shards.NewCAREncoder(),
+			ShardEncoder: blobs.NewCAREncoder(),
 		}
 
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
 
 		// Add enough nodes to close one shard and create a second one.
-		testutil.AddNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
-		testutil.AddNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
-		testutil.AddNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<15)
+		testutil.AddNodeToUploadShards(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
+		testutil.AddNodeToUploadShards(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
+		testutil.AddNodeToUploadShards(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<15)
 
-		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateClosed)
+		shards, err := repo.ShardsForUploadByState(t.Context(), upload.ID(), model.BlobStateClosed)
 		require.NoError(t, err)
 		require.Len(t, shards, 1)
 		firstShard := shards[0]
 
-		shards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.ShardStateOpen)
+		shards, err = repo.ShardsForUploadByState(t.Context(), upload.ID(), model.BlobStateOpen)
 		require.NoError(t, err)
 		require.Len(t, shards, 1)
 		secondShard := shards[0]
@@ -89,8 +88,8 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.NoError(t, err)
 		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
 		require.NoError(t, err)
-		require.Equal(t, model.ShardStateAdded, firstShard.State(), "expected first shard to be marked as added now")
-		require.Equal(t, model.ShardStateOpen, secondShard.State(), "expected second shard to remain open")
+		require.Equal(t, model.BlobStateAdded, firstShard.State(), "expected first shard to be marked as added now")
+		require.Equal(t, model.BlobStateOpen, secondShard.State(), "expected second shard to remain open")
 
 		// This run should `space/blob/add` the first, closed shard.
 		expectedData := fmt.Append(nil, "CAR OF SHARD: ", firstShard.ID(), padding)
@@ -116,7 +115,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Contains(t, shardReadersClosed, firstShard.ID(), "expected first shard reader to be closed now")
 
 		// Now close the upload shards and run it again.
-		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
+		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
@@ -124,7 +123,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Reload second shard
 		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
 		require.NoError(t, err)
-		require.Equal(t, model.ShardStateAdded, secondShard.State(), "expected second shard to be marked as added now")
+		require.Equal(t, model.BlobStateAdded, secondShard.State(), "expected second shard to be marked as added now")
 
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
@@ -166,16 +165,16 @@ func TestAddShardsForUpload(t *testing.T) {
 			BlobUploadParallelism: 1,
 		}
 
-		shardsApi := shards.API{
+		blobsApi := blobs.API{
 			Repo:         repo,
-			ShardEncoder: shards.NewCAREncoder(),
+			ShardEncoder: blobs.NewCAREncoder(),
 		}
 
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
 
-		testutil.AddNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
+		testutil.AddNodeToUploadShards(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, nil, 1<<14)
 
-		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
+		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 
 		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
@@ -261,16 +260,16 @@ func TestAddShardsForUpload(t *testing.T) {
 			BlobUploadParallelism: 1,
 		}
 
-		shardsApi := shards.API{
+		blobsApi := blobs.API{
 			Repo:         repo,
-			ShardEncoder: shards.NewCAREncoder(),
+			ShardEncoder: blobs.NewCAREncoder(),
 		}
 
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
 
-		testutil.AddNodeToUploadShardsWithData(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, nil, data)
+		testutil.AddNodeToUploadShardsWithData(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, nil, data)
 
-		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
+		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 
 		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID)
@@ -311,9 +310,9 @@ func TestAddIndexesForUpload(t *testing.T) {
 			BlobUploadParallelism: 1,
 		}
 
-		shardsApi := shards.API{
+		blobsApi := blobs.API{
 			Repo:             repo,
-			ShardEncoder:     shards.NewCAREncoder(),
+			ShardEncoder:     blobs.NewCAREncoder(),
 			MaxNodesPerIndex: 3,
 		}
 
@@ -323,24 +322,24 @@ func TestAddIndexesForUpload(t *testing.T) {
 		err = repo.UpdateUpload(t.Context(), upload)
 		require.NoError(t, err)
 
-		var indexes []*indexesmodel.Index
-		recordClosedIndex := func(index *indexesmodel.Index) error {
+		var indexes []*model.Index
+		recordClosedIndex := func(index *model.Index) error {
 			indexes = append(indexes, index)
 			return nil
 		}
 
 		var shards []*model.Shard
 		recordClosedShard := func(shard *model.Shard) error {
-			shardsApi.AddShardToUploadIndexes(t.Context(), upload.ID(), shard.ID(), recordClosedIndex)
+			blobsApi.AddShardToUploadIndexes(t.Context(), upload.ID(), shard.ID(), recordClosedIndex)
 			shards = append(shards, shard)
 			return nil
 		}
 
 		// Add enough nodes to create three shards and two indexes.
 		for range 5 {
-			testutil.AddNodeToUploadShards(t, repo, shardsApi, upload.ID(), source.ID(), spaceDID, recordClosedShard, 1<<3)
+			testutil.AddNodeToUploadShards(t, repo, blobsApi, upload.ID(), source.ID(), spaceDID, recordClosedShard, 1<<3)
 		}
-		err = shardsApi.CloseUploadShards(t.Context(), upload.ID(), recordClosedShard)
+		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), recordClosedShard)
 		require.NoError(t, err)
 		require.Len(t, shards, 3)
 		require.Len(t, indexes, 1)
@@ -351,7 +350,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		// Reload first shard
 		firstIndex, err := repo.GetIndexByID(t.Context(), indexes[0].ID())
 		require.NoError(t, err)
-		require.Equal(t, indexesmodel.IndexStateAdded, firstIndex.State(), "expected first index to be marked as added now")
+		require.Equal(t, model.BlobStateAdded, firstIndex.State(), "expected first index to be marked as added now")
 
 		// This run should `space/blob/add` the first, closed index.
 		expectedData := fmt.Append(nil, "CAR OF INDEX: ", firstIndex.ID(), padding)
@@ -381,7 +380,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.Contains(t, indexReadersClosed, firstIndex.ID(), "expected first index reader to be closed now")
 
 		// Now close the upload indexes and run it again.
-		err = shardsApi.CloseUploadIndexes(t.Context(), upload.ID(), recordClosedIndex)
+		err = blobsApi.CloseUploadIndexes(t.Context(), upload.ID(), recordClosedIndex)
 		require.NoError(t, err)
 		require.Len(t, indexes, 2)
 		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID)
@@ -390,7 +389,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		// Reload second shard
 		secondIndex, err := repo.GetIndexByID(t.Context(), indexes[1].ID())
 		require.NoError(t, err)
-		require.Equal(t, indexesmodel.IndexStateAdded, secondIndex.State(), "expected second index to be marked as added now")
+		require.Equal(t, model.BlobStateAdded, secondIndex.State(), "expected second index to be marked as added now")
 
 		// This run should `space/blob/add` the second, newly closed shard.
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
@@ -418,14 +417,9 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		require.NoError(t, err)
 		client := mockclient.MockClient{}
 
-		// indexesForUpload := func(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
-		// 	return []io.Reader{}, nil
-		// }
-
 		api := storacha.API{
-			Repo:   repo,
-			Client: &client,
-			// IndexesForUpload:      indexesForUpload,
+			Repo:                  repo,
+			Client:                &client,
 			BlobUploadParallelism: 1,
 		}
 

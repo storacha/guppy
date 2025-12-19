@@ -10,14 +10,14 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
-	"github.com/storacha/guppy/pkg/preparation/shards"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
-var _ shards.Repo = (*Repo)(nil)
+var _ blobs.Repo = (*Repo)(nil)
 
 func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint64, digestState, pieceCidState []byte) (*model.Shard, error) {
 	shard, err := model.NewShard(uploadID, size, digestState, pieceCidState)
@@ -35,7 +35,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		digestStateUpTo uint64,
 		digestState []byte,
 		pieceCIDState []byte,
-		state model.ShardState,
+		state model.BlobState,
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
@@ -76,7 +76,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 	return shard, nil
 }
 
-func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.ShardState) ([]*model.Shard, error) {
+func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			id,
@@ -114,7 +114,7 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 			digestStateUpTo *uint64,
 			digestState *[]byte,
 			pieceCIDState *[]byte,
-			state *model.ShardState,
+			state *model.BlobState,
 			location *invocation.Invocation,
 			pdpAccept *invocation.Invocation,
 		) error {
@@ -161,7 +161,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 		digestStateUpTo *uint64,
 		digestState *[]byte,
 		pieceCIDState *[]byte,
-		state *model.ShardState,
+		state *model.BlobState,
 		location *invocation.Invocation,
 		pdpAccept *invocation.Invocation,
 	) error {
@@ -180,14 +180,14 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 // of the length varint + the length of the CID bytes. The node's block will be
 // indexed as appearing at `shard.size + offset`, running for `node.size` bytes,
 // and then the shard size will be increased by `offset + node.size`.
-func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...shards.AddNodeToShardOption) error {
+func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...blobs.AddNodeToShardOption) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	config := shards.NewAddNodeConfig(options...)
+	config := blobs.NewAddNodeConfig(options...)
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO nodes_in_shards (
@@ -353,7 +353,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		digestStateUpTo uint64,
 		digestState []byte,
 		pieceCIDState []byte,
-		state model.ShardState,
+		state model.BlobState,
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {

@@ -1,4 +1,4 @@
-package shards
+package blobs
 
 import (
 	"context"
@@ -14,16 +14,14 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
-	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/storacha"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
-	uploadsmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
 
 var log = logging.Logger("preparation/shards")
@@ -50,7 +48,7 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		return fmt.Errorf("failed to get space %s: %w", spaceDID, err)
 	}
 
-	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateOpen)
 	if err != nil {
 		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
 	}
@@ -204,7 +202,7 @@ func (a API) closeShard(ctx context.Context, shard *model.Shard) error {
 }
 
 func (a API) CloseUploadShards(ctx context.Context, uploadID id.UploadID, shardCB func(shard *model.Shard) error) error {
-	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.ShardStateOpen)
+	openShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateOpen)
 	if err != nil {
 
 		return fmt.Errorf("failed to get open shards for upload %s: %w", uploadID, err)
@@ -504,7 +502,7 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	return io.NopCloser(archReader), nil
 }
 
-func (a API) roomInIndex(index *indexesmodel.Index, shard *model.Shard) (bool, error) {
+func (a API) roomInIndex(index *model.Index, shard *model.Shard) (bool, error) {
 	if a.MaxNodesPerIndex > 0 && index.SliceCount()+shard.SliceCount() > a.MaxNodesPerIndex {
 		return false, nil // Index would exceed maximum slice count
 	}
@@ -512,7 +510,7 @@ func (a API) roomInIndex(index *indexesmodel.Index, shard *model.Shard) (bool, e
 	return true, nil
 }
 
-func (a API) closeIndex(ctx context.Context, index *indexesmodel.Index) error {
+func (a API) closeIndex(ctx context.Context, index *model.Index) error {
 	if err := index.Close(); err != nil {
 		return err
 	}
@@ -520,8 +518,8 @@ func (a API) closeIndex(ctx context.Context, index *indexesmodel.Index) error {
 	return a.Repo.UpdateIndex(ctx, index)
 }
 
-func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *indexesmodel.Index) error) error {
-	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateOpen)
+func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *model.Index) error) error {
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateOpen)
 	if err != nil {
 		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
 	}
@@ -534,7 +532,7 @@ func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, 
 		return fmt.Errorf("shard %s not found", shardID)
 	}
 
-	var index *indexesmodel.Index
+	var index *model.Index
 
 	// Look for an open index that has room for the shard.
 	// (There should only be at most one open index, but there's no harm handling multiple if they exist.)
@@ -580,8 +578,8 @@ func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, 
 	return nil
 }
 
-func (a API) CloseUploadIndexes(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexesmodel.Index) error) error {
-	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateOpen)
+func (a API) CloseUploadIndexes(ctx context.Context, uploadID id.UploadID, indexCB func(index *model.Index) error) error {
+	openIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateOpen)
 	if err != nil {
 
 		return fmt.Errorf("failed to get open indexes for upload %s: %w", uploadID, err)
@@ -600,77 +598,6 @@ func (a API) CloseUploadIndexes(ctx context.Context, uploadID id.UploadID, index
 	}
 
 	return nil
-}
-
-func (a API) IndexesForUpload(ctx context.Context, upload *uploadsmodel.Upload) ([]io.Reader, error) {
-	if upload.RootCID() == cid.Undef {
-		return nil, fmt.Errorf("no root CID set yet on upload %s", upload.ID())
-	}
-
-	shards, err := a.Repo.ShardsForUploadByState(ctx, upload.ID(), model.ShardStateAdded)
-	if err != nil {
-		return nil, fmt.Errorf("getting added shards for upload %s: %w", upload.ID(), err)
-	}
-
-	var indexes []blobindex.ShardedDagIndexView
-	// Keep track of how many slices are in the current index, rather than sum
-	// them constantly.
-	currentIndexeSliceCount := 0
-
-	currentIndex := func() blobindex.ShardedDagIndexView {
-		return indexes[len(indexes)-1]
-	}
-
-	startNewIndex := func() {
-		nextIndex := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
-		indexes = append(indexes, nextIndex)
-		currentIndexeSliceCount = 0
-	}
-
-	startNewIndex()
-
-	for _, s := range shards {
-		shardSlices := blobindex.NewMultihashMap[blobindex.Position](-1)
-
-		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
-			position := blobindex.Position{
-				Offset: shardOffset,
-				Length: node.Size(),
-			}
-			shardSlices.Set(node.CID().Hash(), position)
-
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to iterate over nodes in shard %s: %w", s.ID(), err)
-		}
-
-		if shardSlices.Size() > a.MaxNodesPerIndex {
-			return nil, fmt.Errorf("shard %s has %d nodes, exceeding max of %d", s.ID(), shardSlices.Size(), a.MaxNodesPerIndex)
-		}
-
-		if currentIndexeSliceCount+shardSlices.Size() > a.MaxNodesPerIndex {
-			startNewIndex()
-		}
-
-		if s.Digest() == nil || len(s.Digest()) == 0 {
-			return nil, fmt.Errorf("added shard %s has no digest set", s.ID())
-		}
-
-		currentIndex().Shards().Set(s.Digest(), shardSlices)
-		currentIndexeSliceCount += shardSlices.Size()
-	}
-
-	indexReaders := make([]io.Reader, 0, len(indexes))
-	for _, index := range indexes {
-		indexReader, err := blobindex.Archive(index)
-		if err != nil {
-			return nil, fmt.Errorf("archiving index for upload %s: %w", upload.ID(), err)
-		}
-		indexReaders = append(indexReaders, indexReader)
-	}
-
-	return indexReaders, nil
 }
 
 func (a API) RemoveShard(ctx context.Context, shardID id.ShardID) error {

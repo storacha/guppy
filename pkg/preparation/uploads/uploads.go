@@ -9,10 +9,9 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
+	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
-	indexmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
-	shardmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -28,10 +27,10 @@ var (
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
-type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *shardmodel.Shard) error) error
-type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *indexmodel.Index) error) error
-type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *shardmodel.Shard) error) error
-type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *indexmodel.Index) error) error
+type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, nodeCID cid.Cid, data []byte, shardCB func(shard *blobsmodel.Shard) error) error
+type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *blobsmodel.Index) error) error
+type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *blobsmodel.Shard) error) error
+type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -160,7 +159,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	var badFSEntriesErr types.BadFSEntriesError
 	var badNodesErr types.BadNodesError
-	var shardUploadErrors types.BlobUploadErrors
+	var blobUploadErrors types.BlobUploadErrors
 	// Clean up after errors that need it
 	switch {
 
@@ -169,8 +168,8 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
 		}
-	case errors.As(workersErr, &shardUploadErrors):
-		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, shardUploadErrors)
+	case errors.As(workersErr, &blobUploadErrors):
+		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, blobUploadErrors)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
 		}
@@ -217,9 +216,9 @@ func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, badFS
 	return nil
 }
 
-func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadErrors types.BlobUploadErrors) error {
+func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, blobUploadErrors types.BlobUploadErrors) error {
 	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
-	for _, e := range shardUploadErrors.Errs() {
+	for _, e := range blobUploadErrors.Errs() {
 		// bad nodes error can happen from reading car during upload
 		var badNodesErr types.BadNodesError
 		if errors.As(e.Unwrap(), &badNodesErr) {
@@ -324,7 +323,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
 	defer span.End()
 
-	handleClosedShard := func(shard *shardmodel.Shard) error {
+	handleClosedShard := func(shard *blobsmodel.Shard) error {
 		signal(closedShardsAvailable)
 
 		err := api.AddShardToUploadIndexes(ctx, uploadID, shard.ID(), nil)

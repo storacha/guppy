@@ -10,11 +10,11 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
-	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/spaces"
@@ -34,7 +34,7 @@ type Repo interface {
 	sources.Repo
 	scans.Repo
 	dags.Repo
-	shards.Repo
+	blobs.Repo
 }
 
 type StorachaClient = storacha.Client
@@ -52,16 +52,16 @@ type API struct {
 type Option func(cfg *config) error
 
 type config struct {
-	getLocalFSForPathFn    func(path string) (fs.FS, error)
-	maxNodesPerIndex       int
-	shardUploadParallelism int
+	getLocalFSForPathFn   func(path string) (fs.FS, error)
+	maxNodesPerIndex      int
+	blobUploadParallelism int
 }
 
-const defaultShardUploadParallelism = 6
+const defaultBlobUploadParallelism = 6
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
-		shardUploadParallelism: defaultShardUploadParallelism,
+		blobUploadParallelism: defaultBlobUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
 			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
 			// a single file, where opening `"."` gives you the file. `os.DirFS()`
@@ -131,35 +131,35 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		panic(fmt.Sprintf("failed to create node reader: %v", err))
 	}
 
-	shardsAPI := &shards.API{
+	blobsAPI := &blobs.API{
 		Repo:             repo,
 		OpenNodeReader:   nr.OpenNodeReader,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,
-		ShardEncoder:     shards.NewCAREncoder(),
+		ShardEncoder:     blobs.NewCAREncoder(),
 	}
 
 	storachaAPI := storacha.API{
 		Repo:                  repo,
 		Client:                client,
-		ReaderForShard:        shardsAPI.ReaderForShard,
-		ReaderForIndex:        shardsAPI.ReaderForIndex,
-		BlobUploadParallelism: cfg.shardUploadParallelism,
+		ReaderForShard:        blobsAPI.ReaderForShard,
+		ReaderForIndex:        blobsAPI.ReaderForIndex,
+		BlobUploadParallelism: cfg.blobUploadParallelism,
 	}
 
 	uploadsAPI = uploads.API{
 		Repo:                       repo,
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
-		AddNodeToUploadShards:      shardsAPI.AddNodeToUploadShards,
-		AddShardToUploadIndexes:    shardsAPI.AddShardToUploadIndexes,
-		CloseUploadShards:          shardsAPI.CloseUploadShards,
-		CloseUploadIndexes:         shardsAPI.CloseUploadIndexes,
+		AddNodeToUploadShards:      blobsAPI.AddNodeToUploadShards,
+		AddShardToUploadIndexes:    blobsAPI.AddShardToUploadIndexes,
+		CloseUploadShards:          blobsAPI.CloseUploadShards,
+		CloseUploadIndexes:         blobsAPI.CloseUploadIndexes,
 		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
 		AddIndexesForUpload:        storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
-		RemoveShard:                shardsAPI.RemoveShard,
+		RemoveShard:                blobsAPI.RemoveShard,
 	}
 
 	return API{
@@ -186,12 +186,12 @@ func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
 	}
 }
 
-func WithShardUploadParallelism(shardUploadParallelism int) Option {
+func WithBlobUploadParallelism(blobUploadParallelism int) Option {
 	return func(cfg *config) error {
-		if shardUploadParallelism <= 0 {
+		if blobUploadParallelism <= 0 {
 			return fmt.Errorf("parallelism must be greater than 0")
 		}
-		cfg.shardUploadParallelism = shardUploadParallelism
+		cfg.blobUploadParallelism = blobUploadParallelism
 		return nil
 	}
 }

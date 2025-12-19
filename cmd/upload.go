@@ -80,7 +80,7 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath), preparation.WithShardUploadParallelism(int(uploadFlags.parallelism)))
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath), preparation.WithBlobUploadParallelism(int(uploadFlags.parallelism)))
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
