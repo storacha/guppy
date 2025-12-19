@@ -27,7 +27,72 @@ var (
 	log    = logging.Logger(name)
 	tracer = otel.Tracer(name)
 	meter  = otel.Meter(name)
+
+	fsEntryCtr      metric.Int64Counter
+	nodeCtr         metric.Int64Counter
+	shardClosedCtr  metric.Int64Counter
+	shardAddedCtr   metric.Int64Counter
+	indexClosedCtr  metric.Int64Counter
+	indexAddedCtr   metric.Int64Counter
 )
+
+func init() {
+	var err error
+
+	fsEntryCtr, err = meter.Int64Counter(
+		"upload.fs_entries",
+		metric.WithDescription("The number of fs_entries processed"),
+		metric.WithUnit("{fs_entry}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create fs_entry counter: %v", err)
+	}
+
+	nodeCtr, err = meter.Int64Counter(
+		"upload.nodes",
+		metric.WithDescription("The number of nodes processed"),
+		metric.WithUnit("{node}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create node counter: %v", err)
+	}
+
+	shardClosedCtr, err = meter.Int64Counter(
+		"upload.shards.closed",
+		metric.WithDescription("The number of shards closed"),
+		metric.WithUnit("{shard}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create shard closed counter: %v", err)
+	}
+
+	shardAddedCtr, err = meter.Int64Counter(
+		"upload.shards.added",
+		metric.WithDescription("The number of shards added"),
+		metric.WithUnit("{shard}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create shard added counter: %v", err)
+	}
+
+	indexClosedCtr, err = meter.Int64Counter(
+		"upload.indexes.closed",
+		metric.WithDescription("The number of indexes closed"),
+		metric.WithUnit("{index}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create index closed counter: %v", err)
+	}
+
+	indexAddedCtr, err = meter.Int64Counter(
+		"upload.indexes.added",
+		metric.WithDescription("The number of indexes added"),
+		metric.WithUnit("{index}"),
+	)
+	if err != nil {
+		log.Errorf("failed to create index added counter: %v", err)
+	}
+}
 
 type ExecuteScanFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node scanmodel.FSEntry) error) error
 type ExecuteDagScansForUploadFunc func(ctx context.Context, uploadID id.UploadID, nodeCB func(node dagmodel.Node, data []byte) error) error
@@ -311,15 +376,7 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 
 		// doWork
 		func() error {
-			fsEntryCtr, err := meter.Int64Counter("upload.fs_entries",
-				metric.WithDescription("The number of fs_entries processed"),
-				metric.WithUnit("{fs_entry}"),
-			)
-			if err != nil {
-				return fmt.Errorf("creating fs_entry counter: %w", err)
-			}
-
-			err = api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
+			err := api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
 				fsEntryCtr.Add(ctx, 1)
 				log.Debugf("Creating DAG scan for fs entry %s in upload %s", entry.ID(), uploadID)
 
@@ -357,22 +414,6 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
 	defer span.End()
 
-	shardClosedCtr, err := meter.Int64Counter("upload.shards.closed",
-		metric.WithDescription("The number of shards closed"),
-		metric.WithUnit("{shard}"),
-	)
-	if err != nil {
-		return fmt.Errorf("creating shard counter: %w", err)
-	}
-
-	indexClosedCtr, err := meter.Int64Counter("upload.indexes.closed",
-		metric.WithDescription("The number of indexes closed"),
-		metric.WithUnit("{index}"),
-	)
-	if err != nil {
-		return fmt.Errorf("creating index counter: %w", err)
-	}
-
 	handleClosedShard := func(shard *blobsmodel.Shard) error {
 		shardClosedCtr.Add(ctx, 1)
 		log.Debugf("Shard %s closed for upload %s", shard.ID(), uploadID)
@@ -396,15 +437,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 		// doWork
 		func() error {
-			nodeCtr, err := meter.Int64Counter("upload.nodes",
-				metric.WithDescription("The number of nodes processed"),
-				metric.WithUnit("{node}"),
-			)
-			if err != nil {
-				return fmt.Errorf("creating node counter: %w", err)
-			}
-
-			err = api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
+			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 				nodeCtr.Add(ctx, 1)
 				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
 
@@ -481,15 +514,7 @@ func runShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 
 		// doWork
 		func() error {
-			shardAddedCtr, err := meter.Int64Counter("upload.shards.added",
-				metric.WithDescription("The number of shards added"),
-				metric.WithUnit("{shard}"),
-			)
-			if err != nil {
-				return fmt.Errorf("creating shard counter: %w", err)
-			}
-
-			err = api.AddShardsForUpload(ctx, uploadID, spaceDID, func(shard *blobsmodel.Shard) error {
+			err := api.AddShardsForUpload(ctx, uploadID, spaceDID, func(shard *blobsmodel.Shard) error {
 				shardAddedCtr.Add(ctx, 1)
 				signal(uploadedShardsAvailable)
 				return nil
@@ -557,15 +582,7 @@ func runIndexWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID
 
 		// doWork
 		func() error {
-			indexAddedCtr, err := meter.Int64Counter("upload.indexes.added",
-				metric.WithDescription("The number of indexes added"),
-				metric.WithUnit("{index}"),
-			)
-			if err != nil {
-				return fmt.Errorf("creating index counter: %w", err)
-			}
-
-			err = api.AddIndexesForUpload(ctx, uploadID, spaceDID, func(index *blobsmodel.Index) error {
+			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID, func(index *blobsmodel.Index) error {
 				indexAddedCtr.Add(ctx, 1)
 				signal(uploadedIndexesAvailable)
 				return nil
