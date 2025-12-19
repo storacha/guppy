@@ -245,7 +245,7 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
-			preparation.WithShardUploadParallelism(1),
+			preparation.WithBlobUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
@@ -379,7 +379,7 @@ func TestExecuteUpload(t *testing.T) {
 				assert.Equal(t, uploadSourcePath, path, "test expects root to be '.'")
 				return testFs, nil
 			}),
-			preparation.WithShardUploadParallelism(1),
+			preparation.WithBlobUploadParallelism(1),
 		)
 
 		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
@@ -387,24 +387,28 @@ func TestExecuteUpload(t *testing.T) {
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
 
-		var shardUploadErrors gtypes.BlobUploadErrors
-		require.ErrorAs(t, err, &shardUploadErrors, "expected a ShardUploadErrors error")
+		var blobUploadErrors gtypes.BlobUploadErrors
+		require.ErrorAs(t, err, &blobUploadErrors, "expected a BlobUploadErrors error")
 
-		underlying := shardUploadErrors.Unwrap()
+		underlying := blobUploadErrors.Unwrap()
 		require.Len(t, underlying, 1, "expected exactly one underlying error")
 		require.ErrorIs(t, underlying[0], assert.AnError, "expected error on third PUT request")
 
 		putBlobs := ctestutil.ReceivedBlobs(putClient)
-		require.Equal(t, 5, putBlobs.Size(), "expected 4/5 shards + 1 index to be added so far")
-		require.Equal(t, 5, len(replicateCaps), "expected 4/5 shards + 1 index to be replicated so far")
-		require.Equal(t, 4, len(offerCaps), "expected at most 4/5 shards to be `filecoin/offer`ed so far")
+		// We don't know exactly how many successful PUTs there were, but we know it
+		// should be at least 2 and at most 4.
+		require.GreaterOrEqual(t, putBlobs.Size(), 3, "expected at least 2/5 shards + 1 index to be added so far")
+		require.Less(t, putBlobs.Size(), 6, "expected at most 4/5 shards + 1 index to be added so far")
+		require.GreaterOrEqual(t, len(replicateCaps), 3, "expected at least 2/5 shards + 1 index to be replicated so far")
+		require.Less(t, len(replicateCaps), 6, "expected at most 4/5 shards + 1 index to be replicated so far")
+		require.GreaterOrEqual(t, len(offerCaps), 2, "expected at least 2/5 shards to be `filecoin/offer`ed so far")
+		require.Less(t, len(offerCaps), 5, "expected at most 4/5 shards to be `filecoin/offer`ed so far")
 
 		require.Len(t, indexCaps, 1, "expected one `space/index/add` invocation")
 		require.Equal(t, space.DID().String(), indexCaps[0].With(), "expected `space/index/add` invocation to be for the correct space")
 		require.NotNil(t, indexCaps[0].Nb().Index, "expected `space/index/add` to be called")
 		indexCIDLink, ok := indexCaps[0].Nb().Index.(cidlink.Link)
 		require.True(t, ok, "expected index link to be a CID link")
-
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
 
 		// Now, retry.

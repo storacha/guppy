@@ -1,4 +1,4 @@
-package shards
+package blobs
 
 import (
 	"context"

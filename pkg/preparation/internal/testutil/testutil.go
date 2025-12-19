@@ -9,8 +9,8 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/stretchr/testify/require"
 
-	"github.com/storacha/guppy/pkg/preparation/shards"
-	"github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -31,20 +31,20 @@ func CreateUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, options ..
 	return uploads[0], source
 }
 
-func AddNodeToUploadShards(t *testing.T, repo *sqlrepo.Repo, shardsApi shards.API, uploadID id.UploadID, sourceID id.SourceID, spaceDID did.DID, shardCB func(shard *model.Shard) error, size uint64) {
+func AddNodeToUploadShards(t *testing.T, repo *sqlrepo.Repo, blobsApi blobs.API, uploadID id.UploadID, sourceID id.SourceID, spaceDID did.DID, shardCB func(shard *model.Shard) error, size uint64) {
 	t.Helper()
 
 	data := stestutil.RandomBytes(t, int(size))
-	AddNodeToUploadShardsWithData(t, repo, shardsApi, uploadID, sourceID, spaceDID, shardCB, data)
+	AddNodeToUploadShardsWithData(t, repo, blobsApi, uploadID, sourceID, spaceDID, shardCB, data)
 }
 
-func AddNodeToUploadShardsWithData(t *testing.T, repo *sqlrepo.Repo, shardsApi shards.API, uploadID id.UploadID, sourceID id.SourceID, spaceDID did.DID, shardCB func(shard *model.Shard) error, data []byte) {
+func AddNodeToUploadShardsWithData(t *testing.T, repo *sqlrepo.Repo, blobsApi blobs.API, uploadID id.UploadID, sourceID id.SourceID, spaceDID did.DID, shardCB func(shard *model.Shard) error, data []byte) {
 	t.Helper()
 
 	nodeCID := stestutil.RandomCID(t).(cidlink.Link).Cid
 	path := fmt.Sprintf("some/path/%s", nodeCID.String())
 	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, path, sourceID, 0)
 	require.NoError(t, err)
-	err = shardsApi.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, shardCB)
+	err = blobsApi.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, shardCB)
 	require.NoError(t, err)
 }

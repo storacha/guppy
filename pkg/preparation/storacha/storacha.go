@@ -26,9 +26,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/storacha/guppy/pkg/client"
-	indexesmodel "github.com/storacha/guppy/pkg/preparation/indexes/model"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
-	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
@@ -70,23 +69,23 @@ var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
 	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
 	defer span.End()
-	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateClosed)
+	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 	}
 	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
-	blobs := make([]gtypes.Blob, len(closedShards))
+	blobs := make([]model.Blob, len(closedShards))
 	for i, shard := range closedShards {
 		blobs[i] = shard
 	}
-	return a.addBlobs(ctx, blobs, spaceDID, func(blob gtypes.Blob) error {
+	return a.addBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
 		var opts []client.FilecoinOfferOption
 		if blob.PDPAccept() != nil {
 			opts = append(opts, client.WithPDPAcceptInvocation(blob.PDPAccept()))
 		}
 		if err := a.filecoinOffer(ctx, blob, spaceDID, opts...); err != nil {
-			return gtypes.NewBlobUploadError(blob, err)
+			return gtypes.NewBlobUploadError(blob.ID(), err)
 		}
 
 		return nil
@@ -99,7 +98,7 @@ func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, space
 // `SpaceBlobAdded()` will be called after `space/blob/add`. `Added()` will be
 // called at the very end. If any of these steps fail, an error will be
 // returned.
-func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID, afterAdded func(blob gtypes.Blob) error) error {
+func (a API) addBlobs(ctx context.Context, blobs []model.Blob, spaceDID did.DID, afterAdded func(blob model.Blob) error) error {
 	// Ensure at least 1 parallelism
 	if a.BlobUploadParallelism < 1 {
 		a.BlobUploadParallelism = 1
@@ -144,29 +143,29 @@ func (a API) addBlobs(ctx context.Context, blobs []gtypes.Blob, spaceDID did.DID
 	return nil
 }
 
-func (a API) readerForBlob(ctx context.Context, blob gtypes.Blob) (io.ReadCloser, error) {
+func (a API) readerForBlob(ctx context.Context, blob model.Blob) (io.ReadCloser, error) {
 	switch blob := blob.(type) {
-	case *shardsmodel.Shard:
+	case *model.Shard:
 		return a.ReaderForShard(ctx, blob.ID())
-	case *indexesmodel.Index:
+	case *model.Index:
 		return a.ReaderForIndex(ctx, blob.ID())
 	default:
 		return nil, fmt.Errorf("unexpected blob type %T", blob)
 	}
 }
 
-func (a API) updateBlob(ctx context.Context, blob gtypes.Blob) error {
+func (a API) updateBlob(ctx context.Context, blob model.Blob) error {
 	switch blob := blob.(type) {
-	case *shardsmodel.Shard:
+	case *model.Shard:
 		return a.Repo.UpdateShard(ctx, blob)
-	case *indexesmodel.Index:
+	case *model.Index:
 		return a.Repo.UpdateIndex(ctx, blob)
 	default:
 		return fmt.Errorf("unexpected blob type %T", blob)
 	}
 }
 
-func (a API) addBlob(ctx context.Context, blob gtypes.Blob, spaceDID did.DID, afterAdded func(blob gtypes.Blob) error) error {
+func (a API) addBlob(ctx context.Context, blob model.Blob, spaceDID did.DID, afterAdded func(blob model.Blob) error) error {
 	start := time.Now()
 	log.Infow("adding blob", "cid", blob.CID().String(), "blob", blob)
 	ctx, span := tracer.Start(ctx, "add-blob", trace.WithAttributes(
@@ -209,7 +208,7 @@ func (a API) addBlob(ctx context.Context, blob gtypes.Blob, spaceDID did.DID, af
 		}
 		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, opts...)
 		if err != nil {
-			return gtypes.NewBlobUploadError(blob, fmt.Errorf("failed to add blob %s to space %s: %w", blob, spaceDID, err))
+			return gtypes.NewBlobUploadError(blob.ID(), fmt.Errorf("failed to add blob %s to space %s: %w", blob, spaceDID, err))
 		}
 
 		if err := blob.SpaceBlobAdded(addedBlob); err != nil {
@@ -224,7 +223,7 @@ func (a API) addBlob(ctx context.Context, blob gtypes.Blob, spaceDID did.DID, af
 	}
 
 	if err := a.spaceBlobReplicate(ctx, blob, spaceDID, blob.Location()); err != nil {
-		return gtypes.NewBlobUploadError(blob, fmt.Errorf("failed to replicate blob %s: %w", blob, err))
+		return gtypes.NewBlobUploadError(blob.ID(), fmt.Errorf("failed to replicate blob %s: %w", blob, err))
 	}
 
 	if afterAdded != nil {
@@ -250,7 +249,7 @@ func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.D
 	return a.Client.SpaceBlobAdd(ctx, content, spaceDID, opts...)
 }
 
-func (a API) spaceBlobReplicate(ctx context.Context, blob gtypes.Blob, spaceDID did.DID, locationCommitment delegation.Delegation) error {
+func (a API) spaceBlobReplicate(ctx context.Context, blob model.Blob, spaceDID did.DID, locationCommitment delegation.Delegation) error {
 	ctx, span := tracer.Start(ctx, "space-blob-replicate")
 	defer span.End()
 
@@ -267,7 +266,7 @@ func (a API) spaceBlobReplicate(ctx context.Context, blob gtypes.Blob, spaceDID 
 	return err
 }
 
-func (a API) filecoinOffer(ctx context.Context, blob gtypes.Blob, spaceDID did.DID, opts ...client.FilecoinOfferOption) error {
+func (a API) filecoinOffer(ctx context.Context, blob model.Blob, spaceDID did.DID, opts ...client.FilecoinOfferOption) error {
 	ctx, span := tracer.Start(ctx, "filecoin-offer")
 	defer span.End()
 
@@ -301,7 +300,7 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 	ctx, span := tracer.Start(ctx, "add-indexes-for-upload")
 	defer span.End()
 
-	closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, indexesmodel.IndexStateClosed)
+	closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateClosed)
 	if err != nil {
 		return fmt.Errorf("failed to get closed indexes for upload %s: %w", uploadID, err)
 	}
@@ -316,11 +315,11 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 		return fmt.Errorf("tried to add index, but upload %s has no root CID yet", uploadID)
 	}
 
-	blobs := make([]gtypes.Blob, len(closedIndexes))
+	blobs := make([]model.Blob, len(closedIndexes))
 	for i, shard := range closedIndexes {
 		blobs[i] = shard
 	}
-	return a.addBlobs(ctx, blobs, spaceDID, func(blob gtypes.Blob) error {
+	return a.addBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
 		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
 	})
 }
@@ -331,7 +330,7 @@ func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadI
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
 	}
 
-	shards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, shardsmodel.ShardStateAdded)
+	shards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateAdded)
 	if err != nil {
 		return fmt.Errorf("failed to get shards for upload %s: %w", uploadID, err)
 	}

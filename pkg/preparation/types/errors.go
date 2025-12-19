@@ -146,18 +146,22 @@ func (e BadFSEntriesError) Unwrap() []error {
 }
 
 type BlobUploadError struct {
-	blob Blob
-	err  error
+	id  id.ID
+	err error
 }
 
-func NewBlobUploadError(blob Blob, err error) BlobUploadError {
-	return BlobUploadError{blob: blob, err: err}
+func NewBlobUploadError(id id.ID, err error) BlobUploadError {
+	return BlobUploadError{id: id, err: err}
 }
 func (e BlobUploadError) Error() string {
-	return fmt.Sprintf("blob upload %s failed: %s", e.blob, e.err)
+	return fmt.Sprintf("blob upload %s failed: %s", e.id, e.err)
 }
 func (e BlobUploadError) Unwrap() error {
 	return e.err
+}
+
+func (e BlobUploadError) ID() id.ID {
+	return e.id
 }
 
 type BlobUploadErrors struct {

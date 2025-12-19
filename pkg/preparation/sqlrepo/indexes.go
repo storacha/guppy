@@ -7,8 +7,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
-	"github.com/storacha/guppy/pkg/preparation/indexes/model"
-	shardsmodel "github.com/storacha/guppy/pkg/preparation/shards/model"
+	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -26,7 +25,7 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 		sliceCount int,
 		digest multihash.Multihash,
 		pieceCID cid.Cid,
-		state model.IndexState,
+		state model.BlobState,
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
@@ -61,7 +60,7 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 	return index, nil
 }
 
-func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state model.IndexState) ([]*model.Index, error) {
+func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Index, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			id,
@@ -93,7 +92,7 @@ func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID
 			sliceCount *int,
 			digest *multihash.Multihash,
 			pieceCID *cid.Cid,
-			state *model.IndexState,
+			state *model.BlobState,
 			location *invocation.Invocation,
 			pdpAccept *invocation.Invocation,
 		) error {
@@ -140,7 +139,7 @@ func (r *Repo) GetIndexByID(ctx context.Context, indexID id.IndexID) (*model.Ind
 		sliceCount *int,
 		digest *multihash.Multihash,
 		pieceCID *cid.Cid,
-		state *model.IndexState,
+		state *model.BlobState,
 		location *invocation.Invocation,
 		pdpAccept *invocation.Invocation,
 	) error {
@@ -161,7 +160,7 @@ func (r *Repo) UpdateIndex(ctx context.Context, index *model.Index) error {
 		sliceCount int,
 		digest multihash.Multihash,
 		pieceCID cid.Cid,
-		state model.IndexState,
+		state model.BlobState,
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
@@ -231,7 +230,7 @@ func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID 
 	return nil
 }
 
-func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*shardsmodel.Shard, error) {
+func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			s.id,
@@ -257,9 +256,9 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*shard
 	}
 	defer rows.Close()
 
-	var shards []*shardsmodel.Shard
+	var shards []*model.Shard
 	for rows.Next() {
-		shard, err := shardsmodel.ReadShardFromDatabase(func(
+		shard, err := model.ReadShardFromDatabase(func(
 			id *id.ShardID,
 			uploadID *id.UploadID,
 			size *uint64,
@@ -269,7 +268,7 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*shard
 			digestStateUpTo *uint64,
 			digestState *[]byte,
 			pieceCIDState *[]byte,
-			state *shardsmodel.ShardState,
+			state *model.BlobState,
 			location *invocation.Invocation,
 			pdpAccept *invocation.Invocation,
 		) error {
