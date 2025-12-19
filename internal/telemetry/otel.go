@@ -10,8 +10,10 @@ import (
 	"github.com/grafana/pyroscope-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 )
@@ -83,8 +85,30 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 		tracerProvider = trace.NewTracerProvider(trace.WithResource(res))
 	}
 
+	var meterProvider *metric.MeterProvider
+	if cfg.Enabled {
+		metricEndpoint := cfg.Endpoint
+		if metricEndpoint == "" {
+			metricEndpoint = DefaultTracesEndpoint
+		}
+
+		metricExporter, err := otlpmetrichttp.New(ctx, metricExporterOptions(metricEndpoint, cfg.Insecure)...)
+		if err != nil {
+			return nil, err
+		}
+
+		meterProvider = metric.NewMeterProvider(
+			metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+			metric.WithResource(res),
+		)
+		shutdowns = append(shutdowns, shutdownFunc(meterProvider))
+	} else {
+		meterProvider = metric.NewMeterProvider(metric.WithResource(res))
+	}
+
 	prop := newPropagator()
 	otel.SetTracerProvider(tracerProvider)
+	otel.SetMeterProvider(meterProvider)
 	otel.SetTextMapPropagator(prop)
 
 	if cfg.Profiling.Enabled {
@@ -131,6 +155,16 @@ func traceExporterOptions(endpoint string, insecure bool) []otlptracehttp.Option
 	return opts
 }
 
+func metricExporterOptions(endpoint string, insecure bool) []otlpmetrichttp.Option {
+	opts := []otlpmetrichttp.Option{
+		otlpmetrichttp.WithEndpoint(endpoint),
+	}
+	if insecure {
+		opts = append(opts, otlpmetrichttp.WithInsecure())
+	}
+	return opts
+}
+
 func profileEndpointWithScheme(endpoint string, insecure bool) string {
 	if endpoint == "" {
 		endpoint = DefaultProfilesEndpoint
@@ -152,8 +186,13 @@ func profileApp(app string) string {
 	return app
 }
 
-func shutdownFunc(tp *trace.TracerProvider) func(context.Context) error {
+type shutdowner interface {
+	Shutdown(context.Context) error
+	ForceFlush(context.Context) error
+}
+
+func shutdownFunc(s shutdowner) func(context.Context) error {
 	return func(ctx context.Context) error {
-		return errors.Join(tp.ForceFlush(ctx), tp.Shutdown(ctx))
+		return errors.Join(s.ForceFlush(ctx), s.Shutdown(ctx))
 	}
 }
