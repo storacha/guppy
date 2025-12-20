@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	commp "github.com/filecoin-project/go-fil-commp-hashhash"
@@ -69,147 +70,60 @@ var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 func (a API) AddShardsForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardUploadedCb func(shard *model.Shard) error) error {
 	ctx, span := tracer.Start(ctx, "add-shards-for-upload")
 	defer span.End()
-	closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateClosed)
-	if err != nil {
-		return fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
-	}
-	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
+	getClosedShards := func(ctx context.Context) ([]*model.Shard, error) {
+		closedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateClosed)
 
-	blobs := make([]model.Blob, len(closedShards))
-	for i, shard := range closedShards {
-		blobs[i] = shard
-	}
-	return a.addBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		if shardUploadedCb != nil {
-			return shardUploadedCb(blob.(*model.Shard))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get closed shards for upload %s: %w", uploadID, err)
 		}
+		span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
+
+		return closedShards, nil
+	}
+	addShard := func(ctx context.Context, shard *model.Shard) error {
+		if err := a.addBlob(ctx, shard, spaceDID); err != nil {
+			return fmt.Errorf("failed to add shard %s: %w", shard.ID(), err)
+		}
+		if shardUploadedCb != nil {
+			if err := shardUploadedCb(shard); err != nil {
+				return fmt.Errorf("failed to call after uploaded callback for shard %s: %w", shard.ID(), err)
+			}
+		}
+		log.Infof("Successfully added shard %s for upload %s", shard.ID(), uploadID)
 		return nil
-	})
+	}
+	return parallelProcess(ctx, getClosedShards, addShard, a.BlobUploadParallelism)
 }
 
 func (a API) PostProcessUploadedShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
 	ctx, span := tracer.Start(ctx, "post-process-uploaded-shards")
 	defer span.End()
-	uploadedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateUploaded)
-	if err != nil {
-		return fmt.Errorf("failed to get uploaded shards for post processing %s: %w", uploadID, err)
-	}
-	span.AddEvent("found uploaded shards", trace.WithAttributes(attribute.Int("shards", len(uploadedShards))))
-	blobs := make([]model.Blob, len(uploadedShards))
-	for i, shard := range uploadedShards {
-		blobs[i] = shard
-	}
-	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		var opts []client.FilecoinOfferOption
-		if blob.PDPAccept() != nil {
-			opts = append(opts, client.WithPDPAcceptInvocation(blob.PDPAccept()))
+	getUploadedShards := func(ctx context.Context) ([]*model.Shard, error) {
+		uploadedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateUploaded)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get uploaded shards for post processing %s: %w", uploadID, err)
 		}
-		if err := a.filecoinOffer(ctx, blob, spaceDID, opts...); err != nil {
-			return gtypes.NewBlobUploadError(blob.ID(), err)
+		span.AddEvent("found uploaded shards", trace.WithAttributes(attribute.Int("shards", len(uploadedShards))))
+		return uploadedShards, nil
+	}
+	postProcessShard := func(ctx context.Context, shard *model.Shard) error {
+		err := a.postProcessBlob(ctx, shard, spaceDID, func(blob model.Blob) error {
+			var opts []client.FilecoinOfferOption
+			if blob.PDPAccept() != nil {
+				opts = append(opts, client.WithPDPAcceptInvocation(blob.PDPAccept()))
+			}
+			if err := a.filecoinOffer(ctx, blob, spaceDID, opts...); err != nil {
+				return gtypes.NewBlobUploadError(blob.ID(), err)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to post process shard %s: %w", shard.ID(), err)
 		}
-
+		log.Infof("Successfully post-processed shard %s for upload %s", shard.ID(), uploadID)
 		return nil
-	})
-}
-
-// addBlobs adds the given blobs to the space, in parallel. For each blob, it
-// will `space/blob/add` if it hasn't been added yet, then call the `afterUploaded` callback if successful.
-// `SpaceBlobAdded()` will be called after `space/blob/add`. `Added()` will be
-// called at the very end. If any of these steps fail, an error will be
-// returned.
-func (a API) addBlobs(ctx context.Context, blobs []model.Blob, spaceDID did.DID, afterUploaded func(blob model.Blob) error) error {
-	// Ensure at least 1 parallelism
-	if a.BlobUploadParallelism < 1 {
-		a.BlobUploadParallelism = 1
 	}
-
-	sem := make(chan struct{}, a.BlobUploadParallelism)
-	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(blobs))
-	eg, gctx := errgroup.WithContext(ctx)
-	for _, blob := range blobs {
-		sem <- struct{}{}
-		eg.Go(func() error {
-			defer func() { <-sem }()
-			if err := a.addBlob(gctx, blob, spaceDID); err != nil {
-				err = fmt.Errorf("failed to add blob %s: %w", blob, err)
-				var errBlobUpload gtypes.BlobUploadError
-				if errors.As(err, &errBlobUpload) {
-					blobUploadErrorCh <- errBlobUpload
-					return nil
-				}
-				log.Errorf("%v", err)
-				return err
-			}
-			if afterUploaded != nil {
-				if err := afterUploaded(blob); err != nil {
-					return fmt.Errorf("failed to call after uploaded callback for blob %s: %w", blob.ID(), err)
-				}
-			}
-			log.Infof("Successfully added blob %s", blob.ID())
-			return nil
-		})
-	}
-
-	terminalErr := eg.Wait()
-	close(blobUploadErrorCh)
-
-	if terminalErr != nil {
-		return terminalErr
-	}
-
-	var blobUploadErrors []gtypes.BlobUploadError
-	for err := range blobUploadErrorCh {
-		blobUploadErrors = append(blobUploadErrors, err)
-	}
-	if len(blobUploadErrors) > 0 {
-		return gtypes.NewBlobUploadErrors(blobUploadErrors)
-	}
-	return nil
-}
-
-func (a API) postProcessBlobs(ctx context.Context, blobs []model.Blob, spaceDID did.DID, afterAdded func(blob model.Blob) error) error {
-	// Ensure at least 1 parallelism
-	if a.BlobUploadParallelism < 1 {
-		a.BlobUploadParallelism = 1
-	}
-
-	sem := make(chan struct{}, a.BlobUploadParallelism)
-	blobUploadErrorCh := make(chan gtypes.BlobUploadError, len(blobs))
-	eg, gctx := errgroup.WithContext(ctx)
-	for _, blob := range blobs {
-		sem <- struct{}{}
-		eg.Go(func() error {
-			defer func() { <-sem }()
-			if err := a.postProcessBlob(gctx, blob, spaceDID, afterAdded); err != nil {
-				err = fmt.Errorf("failed to add blob %s: %w", blob, err)
-				var errBlobUpload gtypes.BlobUploadError
-				if errors.As(err, &errBlobUpload) {
-					blobUploadErrorCh <- errBlobUpload
-					return nil
-				}
-				log.Errorf("%v", err)
-				return err
-			}
-			log.Infof("Successfully post-processed blob %s", blob.ID())
-			return nil
-		})
-	}
-
-	terminalErr := eg.Wait()
-	close(blobUploadErrorCh)
-
-	if terminalErr != nil {
-		return terminalErr
-	}
-
-	var blobUploadErrors []gtypes.BlobUploadError
-	for err := range blobUploadErrorCh {
-		blobUploadErrors = append(blobUploadErrors, err)
-	}
-	if len(blobUploadErrors) > 0 {
-		return gtypes.NewBlobUploadErrors(blobUploadErrors)
-	}
-	return nil
+	return parallelProcess(ctx, getUploadedShards, postProcessShard, a.BlobUploadParallelism)
 }
 
 func (a API) readerForBlob(ctx context.Context, blob model.Blob) (io.ReadCloser, error) {
@@ -373,12 +287,6 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 	ctx, span := tracer.Start(ctx, "add-indexes-for-upload")
 	defer span.End()
 
-	closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateClosed)
-	if err != nil {
-		return fmt.Errorf("failed to get closed indexes for upload %s: %w", uploadID, err)
-	}
-	span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
-
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
@@ -388,16 +296,27 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 		return fmt.Errorf("tried to add index, but upload %s has no root CID yet", uploadID)
 	}
 
-	blobs := make([]model.Blob, len(closedIndexes))
-	for i, shard := range closedIndexes {
-		blobs[i] = shard
-	}
-	return a.addBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		if indexCB != nil {
-			return indexCB(blob.(*model.Index))
+	getClosedIndexes := func(ctx context.Context) ([]*model.Index, error) {
+		closedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateClosed)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get closed indexes for upload %s: %w", uploadID, err)
 		}
+		span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
+		return closedIndexes, nil
+	}
+	uploadIndex := func(ctx context.Context, index *model.Index) error {
+		if err := a.addBlob(ctx, index, spaceDID); err != nil {
+			return fmt.Errorf("failed to add shard %s: %w", index.ID(), err)
+		}
+		if indexCB != nil {
+			if err := indexCB(index); err != nil {
+				return fmt.Errorf("failed to call after upload callback for index %s: %w", index.ID(), err)
+			}
+		}
+		log.Infof("Successfully added index %s for upload %s", index.ID(), uploadID)
 		return nil
-	})
+	}
+	return parallelProcess(ctx, getClosedIndexes, uploadIndex, a.BlobUploadParallelism)
 }
 
 // PostProcessUploadedIndexes runs post-processing for uploaded indexes, including
@@ -406,12 +325,6 @@ func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadI
 	ctx, span := tracer.Start(ctx, "post-process-uploaded-indexes")
 	defer span.End()
 
-	uploadedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateUploaded)
-	if err != nil {
-		return fmt.Errorf("failed to get uploaded indexes for upload %s: %w", uploadID, err)
-	}
-	span.AddEvent("found uploaded indexes", trace.WithAttributes(attribute.Int("indexes", len(uploadedIndexes))))
-
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
@@ -421,13 +334,25 @@ func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadI
 		return fmt.Errorf("tried to add index, but upload %s has no root CID yet", uploadID)
 	}
 
-	blobs := make([]model.Blob, len(uploadedIndexes))
-	for i, shard := range uploadedIndexes {
-		blobs[i] = shard
+	getUploadedIndexes := func(ctx context.Context) ([]*model.Index, error) {
+		uploadedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateUploaded)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get uploaded indexes for upload %s: %w", uploadID, err)
+		}
+		span.AddEvent("found uploaded indexes", trace.WithAttributes(attribute.Int("indexes", len(uploadedIndexes))))
+		return uploadedIndexes, nil
 	}
-	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
-	})
+	postProcessIndex := func(ctx context.Context, index *model.Index) error {
+		err := a.postProcessBlob(ctx, index, spaceDID, func(blob model.Blob) error {
+			return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to post process index %s: %w", index.ID(), err)
+		}
+		log.Infof("Successfully post-processed index %s for upload %s", index.ID(), uploadID)
+		return nil
+	}
+	return parallelProcess(ctx, getUploadedIndexes, postProcessIndex, a.BlobUploadParallelism)
 }
 
 func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
@@ -450,6 +375,137 @@ func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadI
 	_, err = a.Client.UploadAdd(ctx, spaceDID, cidlink.Link{Cid: upload.RootCID()}, shardLinks)
 	if err != nil {
 		return fmt.Errorf("failed to add upload %s to space %s: %w", uploadID, spaceDID, err)
+	}
+
+	return nil
+}
+
+func consumeChannelWithContext[T any](ctx context.Context, incoming <-chan T, handle func(T) error) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case item, ok := <-incoming:
+			if !ok {
+				return nil
+			}
+			if err := handle(item); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func signal(work chan<- struct{}) {
+	select {
+	case work <- struct{}{}:
+	default:
+		// channel is full, no need to signal
+	}
+}
+
+// parallelProcess processes items of type T in parallel, using the provided
+// getCurrentItems function to fetch items and processItem function to process
+// each item. The parallelism parameter controls the number of concurrent
+// processing goroutines.
+// getCurrentItems should return the current list of items to process. It will be
+// called initially and then again whenever an item is processed, to check for
+// new items that may have appeared since the last call.
+// the item type T must implement an ID() U method, where U is a comparable type,
+// to uniquely identify items and avoid processing the same item multiple times.
+func parallelProcess[U comparable, T interface{ ID() U }](ctx context.Context, getCurrentItems func(ctx context.Context) ([]T, error), processItem func(ctx context.Context, item T) error, parallelism int) error {
+	// Ensure at least 1 parallelism
+	if parallelism < 1 {
+		parallelism = 1
+	}
+
+	newItems := make(chan T, parallelism)
+	checkForNewItems := make(chan struct{}, 1)
+	var blobUploadErrLk sync.Mutex
+	var blobUploadErrs []gtypes.BlobUploadError
+	seen := make(map[U]struct{})
+
+	// Initial trigger to fetch items
+	checkForNewItems <- struct{}{}
+
+	eg, gctx := errgroup.WithContext(ctx)
+
+	// Item fetcher goroutine
+	eg.Go(func() error {
+		for {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			case <-checkForNewItems:
+				items, err := getCurrentItems(gctx)
+				if err != nil {
+					return fmt.Errorf("failed to get more items: %w", err)
+				}
+				// remove seen items no longer present - memory leak prevention
+				for id := range seen {
+					found := false
+					for _, item := range items {
+						if item.ID() == id {
+							found = true
+							break
+						}
+					}
+					if !found {
+						delete(seen, id)
+					}
+				}
+				// filter out seen items
+				itemsNotSeen := make([]T, 0, len(items))
+				for _, item := range items {
+					if _, ok := seen[item.ID()]; !ok {
+						seen[item.ID()] = struct{}{}
+						itemsNotSeen = append(itemsNotSeen, item)
+					}
+				}
+				if len(itemsNotSeen) == 0 {
+					close(newItems)
+					return nil
+				}
+				for _, item := range itemsNotSeen {
+					select {
+					case <-gctx.Done():
+						return gctx.Err()
+					case newItems <- item:
+					}
+				}
+			}
+		}
+	})
+
+	// Worker goroutines
+	for i := 0; i < parallelism; i++ {
+		eg.Go(func() error {
+			return consumeChannelWithContext(gctx, newItems, func(item T) error {
+				if err := processItem(gctx, item); err != nil {
+					var errBlobUpload gtypes.BlobUploadError
+					if errors.As(err, &errBlobUpload) {
+						blobUploadErrLk.Lock()
+						blobUploadErrs = append(blobUploadErrs, errBlobUpload)
+						blobUploadErrLk.Unlock()
+						signal(checkForNewItems)
+						return nil
+					}
+					return err
+				}
+				signal(checkForNewItems)
+				return nil
+			})
+		})
+	}
+
+	terminalErr := eg.Wait()
+
+	if terminalErr != nil {
+		return terminalErr
+	}
+
+	if len(blobUploadErrs) > 0 {
+		return gtypes.NewBlobUploadErrors(blobUploadErrs)
 	}
 
 	return nil
