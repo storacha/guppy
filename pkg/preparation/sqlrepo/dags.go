@@ -334,7 +334,7 @@ func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.
 			SELECT 1
 			FROM dag_scans
 			JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id
-			WHERE directory_children.directory_id = X'0874d43f68d443adbfc176020eab51cf'
+			WHERE directory_children.directory_id = ?
 			  AND dag_scans.cid IS NULL
 			LIMIT 1
 		`,
