@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"math/rand"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -71,7 +72,7 @@ func randomBytes(n int) []byte {
 // [shardLinks] pointers, respectively. The returned function returns the blobs
 // received by the PUT client, and the index link.
 func prepareTestClient(
-	t *testing.T,
+	t testing.TB,
 	space principal.Signer,
 	putClient *http.Client,
 	indexCaps *[]ucan.Capability[spaceindexcap.AddCaveats],
@@ -79,6 +80,7 @@ func prepareTestClient(
 	offerCaps *[]ucan.Capability[filecoincap.OfferCaveats],
 	uploadAddCaps *[]ucan.Capability[uploadcap.AddCaveats],
 ) *ctestutil.ClientWithCustomPut {
+	t.Helper()
 	client := &ctestutil.ClientWithCustomPut{
 		Client: helpers.Must(ctestutil.Client(
 			ctestutil.WithSpaceBlobAdd(),
@@ -187,19 +189,22 @@ func prepareTestClient(
 }
 
 func createUpload(
-	t *testing.T,
+	t testing.TB,
+	ctx context.Context,
 	sourcePath string,
 	repo *sqlrepo.Repo,
 	spaceDID did.DID,
 	api preparation.API,
+	shardSize uint64,
 ) *uploadsmodel.Upload {
-	_, err := api.FindOrCreateSpace(t.Context(), spaceDID, "Large Upload Space", spacesmodel.WithShardSize(1<<16))
+	t.Helper()
+	_, err := api.FindOrCreateSpace(ctx, spaceDID, "Large Upload Space", spacesmodel.WithShardSize(shardSize))
 	require.NoError(t, err)
-	source, err := api.CreateSource(t.Context(), "Large Upload Source", sourcePath)
+	source, err := api.CreateSource(ctx, "Large Upload Source", sourcePath)
 	require.NoError(t, err)
-	err = repo.AddSourceToSpace(t.Context(), spaceDID, source.ID())
+	err = repo.AddSourceToSpace(ctx, spaceDID, source.ID())
 	require.NoError(t, err)
-	uploads, err := api.FindOrCreateUploads(t.Context(), spaceDID)
+	uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 	require.NoError(t, err)
 	require.Len(t, uploads, 1, "expected exactly one upload to be created")
 	return uploads[0]
@@ -248,7 +253,7 @@ func TestExecuteUpload(t *testing.T) {
 			preparation.WithBlobUploadParallelism(1),
 		)
 
-		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
+		upload := createUpload(t, t.Context(), uploadSourcePath, repo, space.DID(), api, 1<<16)
 
 		returnedRootCID, err := api.ExecuteUpload(t.Context(), upload)
 		require.NoError(t, err)
@@ -382,7 +387,7 @@ func TestExecuteUpload(t *testing.T) {
 			preparation.WithBlobUploadParallelism(1),
 		)
 
-		upload := createUpload(t, uploadSourcePath, repo, space.DID(), api)
+		upload := createUpload(t, t.Context(), uploadSourcePath, repo, space.DID(), api, 1<<16)
 
 		// The first time, it should hit an error (on the third PUT)
 		_, err = api.ExecuteUpload(t.Context(), upload)
@@ -641,6 +646,39 @@ func (e *errorableTransport) ReceivedBlobs() ctestutil.BlobMap {
 	return nil
 }
 
+// delayedTransport wraps an [http.RoundTripper] to introduce a delay before each request.
+type delayedTransport struct {
+	wrapped  http.RoundTripper
+	avgDelay time.Duration
+}
+
+var _ http.RoundTripper = (*delayedTransport)(nil)
+var _ ctestutil.BlobReceiver = (*delayedTransport)(nil)
+
+func (e *delayedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Generate normally distributed delay with mean = avgDelay, stddev = avgDelay/3
+	// Truncate at [0, 2*avgDelay]
+	normalValue := rand.NormFloat64()
+	delay := float64(e.avgDelay) + normalValue*float64(e.avgDelay)/3.0
+
+	// Truncate to [0, 2*avgDelay]
+	if delay < 0 {
+		delay = 0
+	} else if delay > 2*float64(e.avgDelay) {
+		delay = 2 * float64(e.avgDelay)
+	}
+
+	time.Sleep(time.Duration(delay))
+	return e.wrapped.RoundTrip(req)
+}
+
+func (e *delayedTransport) ReceivedBlobs() ctestutil.BlobMap {
+	if receiver, ok := e.wrapped.(ctestutil.BlobReceiver); ok {
+		return receiver.ReceivedBlobs()
+	}
+	return nil
+}
+
 // bodyData reads and returns the body data from the given HTTP request, then
 // replaces the body so it can be read again.
 func bodyData(req *http.Request) ([]byte, error) {
@@ -653,4 +691,142 @@ func bodyData(req *http.Request) ([]byte, error) {
 	req.Body = io.NopCloser(bytes.NewReader(d))
 
 	return d, nil
+}
+
+// BenchmarkExecuteUpload2GB benchmarks uploading a 2GB random directory structure.
+// This benchmark measures the full upload pipeline performance including DAG scanning,
+// sharding, and storacha operations.
+func BenchmarkExecuteUpload2GB(b *testing.B) {
+	// Hide logs during benchmark
+	logging.SetLogLevel("preparation/uploads", "dpanic")
+	logging.SetLogLevel("preparation/blobs", "dpanic")
+	logging.SetLogLevel("preparation/dags", "dpanic")
+	logging.SetLogLevel("preparation/sqlrepo", "dpanic")
+	logging.SetLogLevel("preparation/storacha", "dpanic")
+
+	const targetSize = 2 * 1024 * 1024 * 1024 // 2GB
+
+	// Generate random directory structure once for all iterations
+	uploadSourcePath := b.TempDir()
+	b.Logf("Generating 2GB random directory structure in %s", uploadSourcePath)
+
+	totalSize := generateRandomDirectoryStructure(b, uploadSourcePath, targetSize)
+	b.Logf("Generated %d bytes in %s", totalSize, uploadSourcePath)
+
+	space, err := signer.Generate()
+	require.NoError(b, err)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+
+		// Create fresh database for each iteration
+		dbDir := b.TempDir()
+		dbPath := filepath.Join(dbDir, "guppy.db")
+		repo, err := preparation.OpenRepo(b.Context(), dbPath)
+		require.NoError(b, err)
+
+		putClient := ctestutil.NewPutClient()
+		// putClient.Transport = &delayedTransport{
+		// 	wrapped:  putClient.Transport,
+		// 	avgDelay: 10 * time.Millisecond, // Simulate network latency
+		// }
+		var indexCaps []ucan.Capability[spaceindexcap.AddCaveats]
+		var replicateCaps []ucan.Capability[spaceblobcap.ReplicateCaveats]
+		var offerCaps []ucan.Capability[filecoincap.OfferCaveats]
+		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
+		c := prepareTestClient(b, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
+
+		api := preparation.NewAPI(
+			repo,
+			c,
+			preparation.WithBlobUploadParallelism(4),
+		)
+
+		upload := createUpload(b, b.Context(), uploadSourcePath, repo, space.DID(), api, spacesmodel.DefaultShardSize)
+
+		b.StartTimer()
+
+		// Execute the upload
+		rootCID, err := api.ExecuteUpload(b.Context(), upload)
+		require.NoError(b, err)
+		require.NotEmpty(b, rootCID)
+
+		b.StopTimer()
+
+		// Clean up
+		repo.Close()
+	}
+}
+
+// generateRandomDirectoryStructure creates a random directory structure up to targetSize bytes.
+// It creates a mix of small, medium, and large files distributed across multiple directories
+// to simulate realistic upload scenarios.
+func generateRandomDirectoryStructure(b testing.TB, root string, targetSize uint64) uint64 {
+	b.Helper()
+
+	var totalSize uint64
+	dirCount := 0
+	fileCount := 0
+
+	// Create random directory structure with varying file sizes:
+	// - 60% small files (1KB - 100KB)
+	// - 30% medium files (100KB - 10MB)
+	// - 10% large files (10MB - 100MB)
+
+	for totalSize < targetSize {
+		// Randomly decide whether to create a new directory or use existing
+		var dir string
+		if dirCount == 0 || (dirCount < 100 && rand.Intn(3) == 0) {
+			dir = filepath.Join(root, fmt.Sprintf("dir%d", dirCount))
+			err := os.MkdirAll(dir, 0755)
+			require.NoError(b, err)
+			dirCount++
+		} else {
+			dir = filepath.Join(root, fmt.Sprintf("dir%d", rand.Intn(dirCount)))
+		}
+
+		// Determine file size based on probability distribution
+		var fileSize uint64
+		roll := rand.Intn(100)
+		switch {
+		case roll < 60: // 60% small files
+			fileSize = uint64(rand.Intn(100*1024-1024) + 1024) // 1KB - 100KB
+		case roll < 90: // 30% medium files
+			fileSize = uint64(rand.Intn(10*1024*1024-100*1024) + 100*1024) // 100KB - 10MB
+		default: // 10% large files
+			fileSize = uint64(rand.Intn(100*1024*1024-10*1024*1024) + 10*1024*1024) // 10MB - 100MB
+		}
+
+		// Don't exceed target size
+		if totalSize+fileSize > targetSize {
+			fileSize = targetSize - totalSize
+		}
+
+		// Create file with random data
+		filePath := filepath.Join(dir, fmt.Sprintf("file%d.bin", fileCount))
+		f, err := os.Create(filePath)
+		require.NoError(b, err)
+
+		// Write random data in chunks to avoid allocating huge buffers
+		const chunkSize = 1024 * 1024 // 1MB chunks
+		written := uint64(0)
+		for written < fileSize {
+			toWrite := fileSize - written
+			if toWrite > chunkSize {
+				toWrite = chunkSize
+			}
+			chunk := randomBytes(int(toWrite))
+			_, err = f.Write(chunk)
+			require.NoError(b, err)
+			written += toWrite
+		}
+		f.Close()
+
+		totalSize += fileSize
+		fileCount++
+	}
+
+	return totalSize
 }
