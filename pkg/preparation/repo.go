@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	defaultJournalMode = "WAL"
-	defaultSynchronous = "NORMAL"
-	defaultBusyTimeout = 3 * time.Second
-	defaultForeignKeys = true
+	defaultJournalMode      = "WAL"
+	defaultSynchronous      = "NORMAL"
+	defaultBusyTimeout      = 60 * time.Second
+	defaultForeignKeys      = true
+	defaultJournalSizeLimit = 256 * 1024 * 1024 // 256MB - limits WAL file growth
 )
 
 func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
@@ -28,6 +29,7 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=busy_timeout(%d)", defaultBusyTimeout.Milliseconds()))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=synchronous(%s)", defaultSynchronous))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=foreign_keys(%d)", bool2int(defaultForeignKeys)))
+	pragmas = append(pragmas, fmt.Sprintf("_pragma=journal_size_limit(%d)", defaultJournalSizeLimit))
 
 	connStr := fmt.Sprintf("file:%s?%s", dbPath, strings.Join(pragmas, "&"))
 	db, err := sql.Open("sqlite", connStr)
@@ -62,6 +64,11 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	log.Default().SetOutput(os.Stderr)
 
 	repo := sqlrepo.New(db)
+
+	// Start automatic WAL checkpointing to prevent unbounded WAL growth
+	// during long-running upload operations.
+	repo.StartAutoCheckpoint(ctx, sqlrepo.DefaultCheckpointInterval)
+
 	return repo, nil
 }
 

@@ -192,20 +192,8 @@ func (r *Repo) UpdateIndex(ctx context.Context, index *model.Index) error {
 }
 
 func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error {
-	// First, get the shard's slice count
-	var sliceCount uint64
-	err := r.db.QueryRowContext(ctx, `
-		SELECT slice_count
-		FROM shards
-		WHERE id = ?`,
-		shardID,
-	).Scan(&sliceCount)
-	if err != nil {
-		return fmt.Errorf("failed to get shard slice count: %w", err)
-	}
-
 	// Add the shard to the index
-	_, err = r.db.ExecContext(ctx, `
+	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO shards_in_indexes (shard_id, index_id)
 		VALUES (?, ?)`,
 		shardID,
@@ -215,12 +203,12 @@ func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID 
 		return fmt.Errorf("failed to add shard %s to index %s: %w", shardID, indexID, err)
 	}
 
-	// Update the index's slice count
+	// Update the index's slice count using a subquery to avoid a separate read
 	_, err = r.db.ExecContext(ctx, `
 		UPDATE indexes
-		SET slice_count = slice_count + ?
+		SET slice_count = slice_count + (SELECT slice_count FROM shards WHERE id = ?)
 		WHERE id = ?`,
-		sliceCount,
+		shardID,
 		indexID,
 	)
 	if err != nil {
