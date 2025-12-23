@@ -419,11 +419,7 @@ func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader
 	// Collect the nodes first, because we can't read data for each node while
 	// holding the lock on the database that ForEachNode has. This means holding a
 	// bunch of nodes in memory, but it's limited to the size of a shard.
-	var nodes []dagsmodel.Node
-	err := a.Repo.ForEachNode(ctx, shardID, func(node dagsmodel.Node, _ uint64) error {
-		nodes = append(nodes, node)
-		return nil
-	})
+	nodes, err := a.Repo.NodesByShard(ctx, shardID, 0)
 	if err != nil {
 		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 	}
