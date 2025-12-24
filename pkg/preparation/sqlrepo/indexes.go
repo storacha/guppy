@@ -29,28 +29,11 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		_, err := r.db.ExecContext(ctx, `
-			INSERT INTO indexes (
-				id,
-				upload_id,
-				size,
-				slice_count,
-				digest,
-				piece_cid,
-				state,
-				location_inv,
-				pdp_accept_inv
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id,
-			uploadID,
-			size,
-			sliceCount,
-			digest,
-			util.DbCID(&pieceCID),
-			state,
-			util.DbInvocation(&location),
-			util.DbInvocation(&pdpAccept),
-		)
+		stmt, err := r.prepareStmt(ctx, `INSERT INTO indexes (id, upload_id, size, slice_count, digest, piece_cid, state, location_inv, pdp_accept_inv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx, id, uploadID, size, sliceCount, digest, util.DbCID(&pieceCID), state, util.DbInvocation(&location), util.DbInvocation(&pdpAccept))
 		return err
 	})
 	if err != nil {
@@ -61,23 +44,11 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 }
 
 func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Index, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			id,
-			upload_id,
-			size,
-			slice_count,
-			digest,
-			piece_cid,
-			state,
-			location_inv,
-			pdp_accept_inv
-		FROM indexes
-		WHERE upload_id = ?
-		  AND state = ?`,
-		uploadID,
-		state,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, size, slice_count, digest, piece_cid, state, location_inv, pdp_accept_inv FROM indexes WHERE upload_id = ? AND state = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID, state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query indexes for upload %s in state %s: %w", uploadID, state, err)
 	}
@@ -116,21 +87,11 @@ func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID
 }
 
 func (r *Repo) GetIndexByID(ctx context.Context, indexID id.IndexID) (*model.Index, error) {
-	row := r.db.QueryRowContext(ctx, `
-		SELECT
-			id,
-			upload_id,
-			digest,
-			piece_cid,
-			size,
-			slice_count,
-			state,
-			location_inv,
-			pdp_accept_inv
-		FROM indexes
-		WHERE id = ?`,
-		indexID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, digest, piece_cid, size, slice_count, state, location_inv, pdp_accept_inv FROM indexes WHERE id = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, indexID)
 
 	index, err := model.ReadIndexFromDatabase(func(
 		id *id.IndexID,
@@ -164,53 +125,32 @@ func (r *Repo) UpdateIndex(ctx context.Context, index *model.Index) error {
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		_, err := r.db.ExecContext(ctx, `
-			UPDATE indexes
-			SET id = ?,
-			    upload_id = ?,
-			    size = ?,
-			    slice_count = ?,
-			    digest = ?,
-			    piece_cid = ?,
-			    state = ?,
-			    location_inv = ?,
-			    pdp_accept_inv = ?
-			WHERE id = ?`,
-			id,
-			uploadID,
-			size,
-			sliceCount,
-			digest,
-			util.DbCID(&pieceCID),
-			state,
-			util.DbInvocation(&location),
-			util.DbInvocation(&pdpAccept),
-			id,
-		)
+		stmt, err := r.prepareStmt(ctx, `UPDATE indexes SET id = ?, upload_id = ?, size = ?, slice_count = ?, digest = ?, piece_cid = ?, state = ?, location_inv = ?, pdp_accept_inv = ? WHERE id = ?`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx, id, uploadID, size, sliceCount, digest, util.DbCID(&pieceCID), state, util.DbInvocation(&location), util.DbInvocation(&pdpAccept), id)
 		return err
 	})
 }
 
 func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error {
 	// Add the shard to the index
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO shards_in_indexes (shard_id, index_id)
-		VALUES (?, ?)`,
-		shardID,
-		indexID,
-	)
+	stmt, err := r.prepareStmt(ctx, `INSERT INTO shards_in_indexes (shard_id, index_id) VALUES (?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, shardID, indexID)
 	if err != nil {
 		return fmt.Errorf("failed to add shard %s to index %s: %w", shardID, indexID, err)
 	}
 
 	// Update the index's slice count using a subquery to avoid a separate read
-	_, err = r.db.ExecContext(ctx, `
-		UPDATE indexes
-		SET slice_count = slice_count + (SELECT slice_count FROM shards WHERE id = ?)
-		WHERE id = ?`,
-		shardID,
-		indexID,
-	)
+	stmt, err = r.prepareStmt(ctx, `UPDATE indexes SET slice_count = slice_count + (SELECT slice_count FROM shards WHERE id = ?) WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, shardID, indexID)
 	if err != nil {
 		return fmt.Errorf("failed to update index %s slice count: %w", indexID, err)
 	}
@@ -219,26 +159,11 @@ func (r *Repo) AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID 
 }
 
 func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			s.id,
-			s.upload_id,
-			s.size,
-			s.slice_count,
-			s.digest,
-			s.piece_cid,
-			s.digest_state_up_to,
-			s.digest_state,
-			s.piece_cid_state,
-			s.state,
-			s.location_inv,
-			s.pdp_accept_inv
-		FROM shards s
-		INNER JOIN shards_in_indexes si ON s.id = si.shard_id
-		WHERE si.index_id = ?
-		ORDER BY s.id`,
-		indexID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT s.id, s.upload_id, s.size, s.slice_count, s.digest, s.piece_cid, s.digest_state_up_to, s.digest_state, s.piece_cid_state, s.state, s.location_inv, s.pdp_accept_inv FROM shards s INNER JOIN shards_in_indexes si ON s.id = si.shard_id WHERE si.index_id = ? ORDER BY s.id`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, indexID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query shards for index %s: %w", indexID, err)
 	}

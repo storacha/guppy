@@ -11,7 +11,7 @@ import (
 )
 
 func TestCreateUploads(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 	did := testutil.RandomDID(t)
 	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
 	require.NoError(t, err)
