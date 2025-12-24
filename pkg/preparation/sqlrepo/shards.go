@@ -39,21 +39,11 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		_, err := r.db.ExecContext(ctx, `
-			INSERT INTO shards (
-				id,
-				upload_id,
-				size,
-				slice_count,
-				digest,
-				piece_cid,
-				digest_state_up_to,
-				digest_state,
-				piece_cid_state,
-				state,
-				location_inv,
-				pdp_accept_inv
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		stmt, err := r.prepareStmt(ctx, `INSERT INTO shards (id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx,
 			id,
 			uploadID,
 			size,
@@ -77,26 +67,11 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 }
 
 func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			id,
-			upload_id,
-			size,
-			slice_count,
-			digest,
-			piece_cid,
-			digest_state_up_to,
-			digest_state,
-			piece_cid_state,
-			state,
-			location_inv,
-			pdp_accept_inv
-		FROM shards
-		WHERE upload_id = ?
-		  AND state = ?`,
-		uploadID,
-		state,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv FROM shards WHERE upload_id = ? AND state = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID, state)
 	if err != nil {
 		return nil, err
 	}
@@ -132,24 +107,11 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 }
 
 func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error) {
-	row := r.db.QueryRowContext(ctx, `
-		SELECT
-			id,
-			upload_id,
-			size,
-			slice_count,
-			digest,
-			piece_cid,
-			digest_state_up_to,
-			digest_state,
-			piece_cid_state,
-			state,
-			location_inv,
-			pdp_accept_inv
-		FROM shards
-		WHERE id = ?`,
-		shardID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv FROM shards WHERE id = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, shardID)
 
 	shard, err := model.ReadShardFromDatabase(func(
 		id *id.ShardID,
@@ -181,15 +143,7 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 // indexed as appearing at `shard.size + offset`, running for `node.size` bytes,
 // and then the shard size will be increased by `offset + node.size`.
 func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...blobs.AddNodeToShardOption) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	config := blobs.NewAddNodeConfig(options...)
-
-	_, err = tx.ExecContext(ctx, `
+	nodesInShardsStmt, err := r.prepareStmt(ctx, `
 		INSERT INTO nodes_in_shards (
 			node_cid,
 			space_did,
@@ -198,7 +152,40 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		)
 		SELECT ?, ?, s.id, s.size + ?
 		FROM shards s
-		WHERE s.id = ?`,
+		WHERE s.id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	updateShardStmt, err := r.prepareStmt(ctx, `
+    UPDATE shards
+    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?),
+        slice_count = slice_count + 1
+    WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	digestStateUpdateStmt, err := r.prepareStmt(ctx, `
+			UPDATE shards
+			SET digest_state_up_to = ?,
+			    digest_state = ?,
+			    piece_cid_state = ?
+			WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	config := blobs.NewAddNodeConfig(options...)
+
+	nodesInShardsStmt = tx.StmtContext(ctx, nodesInShardsStmt)
+	_, err = nodesInShardsStmt.ExecContext(ctx,
 		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
 		offset,
@@ -208,11 +195,8 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		return fmt.Errorf("failed to add node %s to shard %s: %w", nodeCID, shardID, err)
 	}
 
-	_, err = tx.ExecContext(ctx, `
-    UPDATE shards
-    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?),
-        slice_count = slice_count + 1
-    WHERE id = ?`,
+	updateShardStmt = tx.StmtContext(ctx, updateShardStmt)
+	_, err = updateShardStmt.ExecContext(ctx,
 		offset, util.DbCID(&nodeCID), shardID)
 	if err != nil {
 		return err
@@ -221,12 +205,8 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	if config.HasDigestStateUpdate() {
 		digestState := config.DigestStateUpdate().DigestState()
 		pieceCIDState := config.DigestStateUpdate().PieceCIDState()
-		_, err = tx.ExecContext(ctx, `
-			UPDATE shards
-			SET digest_state_up_to = ?,
-			    digest_state = ?,
-			    piece_cid_state = ?
-			WHERE id = ?`,
+		digestStateUpdateStmt = tx.StmtContext(ctx, digestStateUpdateStmt)
+		_, err = digestStateUpdateStmt.ExecContext(ctx,
 			config.DigestStateUpdate().DigestStateUpTo(),
 			util.DbBytes(&digestState),
 			util.DbBytes(&pieceCIDState),
@@ -241,45 +221,20 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 }
 
 func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
-	findQuery := `
-		SELECT
-			cid,
-			size,
-			space_did,
-			ufsdata,
-			path,
-			source_id,
-			offset
-		FROM nodes
-		WHERE cid = ? AND space_did = ?
-	`
-	row := r.db.QueryRowContext(
-		ctx,
-		findQuery,
-		util.DbCID(&c),
-		util.DbDID(&spaceDID),
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT cid, size, space_did, ufsdata, path, source_id, offset FROM nodes WHERE cid = ? AND space_did = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, util.DbCID(&c), util.DbDID(&spaceDID))
 	return r.getNodeFromRow(row)
 }
 
 func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error) {
-	rows, err := r.db.QueryContext(ctx, `
-			SELECT
-				nodes.cid,
-				nodes.size,
-				nodes.space_did,
-				nodes.ufsdata,
-				nodes.path,
-				nodes.source_id,
-				nodes.offset
-			FROM nodes_in_shards
-			JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
-			WHERE shard_id = ?
-			AND nodes_in_shards.shard_offset >= ?
-			ORDER BY nodes_in_shards.shard_offset ASC`,
-		shardID,
-		startOffset,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ? AND nodes_in_shards.shard_offset >= ? ORDER BY nodes_in_shards.shard_offset ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, shardID, startOffset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err)
 	}
@@ -302,21 +257,11 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 }
 
 func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT
-			nodes.cid,
-			nodes.size,
-			nodes.space_did,
-			nodes.ufsdata,
-			nodes.path,
-			nodes.source_id,
-			nodes.offset,
-			nodes_in_shards.shard_offset
-		FROM nodes_in_shards
-		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did
-		WHERE shard_id = ?`,
-		shardID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset, nodes_in_shards.shard_offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, shardID)
 	if err != nil {
 		return fmt.Errorf("failed to get sizes of blocks in shard %s: %w", shardID, err)
 	}
@@ -357,21 +302,11 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		_, err := r.db.ExecContext(ctx,
-			`UPDATE shards
-			SET id = ?,
-			    upload_id = ?,
-			    size = ?,
-			    slice_count = ?,
-			    digest = ?,
-			    piece_cid = ?,
-			    digest_state_up_to = ?,
-					digest_state = ?,
-			    piece_cid_state = ?,
-			    state = ?,
-			    location_inv = ?,
-			    pdp_accept_inv = ?
-			WHERE id = ?`,
+		stmt, err := r.prepareStmt(ctx, `UPDATE shards SET id = ?, upload_id = ?, size = ?, slice_count = ?, digest = ?, piece_cid = ?, digest_state_up_to = ?, digest_state = ?, piece_cid_state = ?, state = ?, location_inv = ?, pdp_accept_inv = ? WHERE id = ?`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx,
 			id,
 			uploadID,
 			size,
@@ -391,11 +326,11 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 }
 
 func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
-	_, err := r.db.ExecContext(ctx, `
-		DELETE FROM shards
-		WHERE id = ?`,
-		shardID,
-	)
+	stmt, err := r.prepareStmt(ctx, `DELETE FROM shards WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, shardID)
 	if err != nil {
 		return fmt.Errorf("failed to delete shard %s: %w", shardID, err)
 	}
