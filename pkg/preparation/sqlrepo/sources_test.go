@@ -4,13 +4,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCreateSource(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	source, err := repo.CreateSource(t.Context(), "source name", "source/path")
 	require.NoError(t, err)
@@ -27,7 +28,7 @@ func TestCreateSource(t *testing.T) {
 }
 
 func TestCreateSourceReturnsExisting(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	source, err := repo.CreateSource(t.Context(), "source name", "source/path")
 	require.NoError(t, err)
