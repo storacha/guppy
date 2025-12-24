@@ -37,7 +37,7 @@ var padding = bytes.Repeat([]byte{0}, 127)
 func TestAddShardsForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
@@ -165,7 +165,7 @@ func TestAddShardsForUpload(t *testing.T) {
 
 	t.Run("does not `space/blob/add` again on retry once it succeeds", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
@@ -255,7 +255,7 @@ func TestAddShardsForUpload(t *testing.T) {
 
 	t.Run("with a shard too small for a CommP, avoids `filecoin/offer`ing it", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
@@ -309,7 +309,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s and `space/blob/replicate`s index CARs", func(t *testing.T) {
 		logging.SetLogLevel("preparation/storacha", "warn")
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		client := mockclient.MockClient{T: t}
@@ -449,7 +449,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 func TestAddStorachaUploadForUpload(t *testing.T) {
 	t.Run("`upload/add`s the root and shards", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 		mclient := mockclient.MockClient{}

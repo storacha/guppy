@@ -15,7 +15,7 @@ import (
 
 func TestFindOrCreateFile(t *testing.T) {
 	t.Run("finds a matching file entry, or creates a new one", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
@@ -37,7 +37,7 @@ func TestFindOrCreateFile(t *testing.T) {
 	})
 
 	t.Run("refuses to create a file entry for a directory", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
@@ -48,7 +48,7 @@ func TestFindOrCreateFile(t *testing.T) {
 
 func TestFindOrCreateDirectory(t *testing.T) {
 	t.Run("finds a matching directory entry, or creates a new one", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
@@ -70,7 +70,7 @@ func TestFindOrCreateDirectory(t *testing.T) {
 	})
 
 	t.Run("refuses to create a directory entry for a file", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		modTime := time.Now().UTC().Truncate(time.Second)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
@@ -80,7 +80,7 @@ func TestFindOrCreateDirectory(t *testing.T) {
 }
 
 func TestCreateDirectoryChildren(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 	modTime := time.Now().UTC().Truncate(time.Second)
 	sourceId := id.New()
 	spaceDID := testutil.RandomDID(t)
@@ -103,7 +103,7 @@ func TestCreateDirectoryChildren(t *testing.T) {
 }
 
 func TestGetFSEntryByID(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 	modTime := time.Now().UTC().Truncate(time.Second)
 	sourceId := id.New()
 	spaceDID := testutil.RandomDID(t)
