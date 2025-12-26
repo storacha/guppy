@@ -58,7 +58,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 			uploadID,
 			size,
 			sliceCount,
-			digest,
+			util.DbBytes(&digest),
 			util.DbCID(&pieceCID),
 			digestStateUpTo,
 			util.DbBytes(&digestState),
@@ -199,7 +199,7 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		SELECT ?, ?, s.id, s.size + ?
 		FROM shards s
 		WHERE s.id = ?`,
-		nodeCID.Bytes(),
+		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
 		offset,
 		shardID,
@@ -256,7 +256,7 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	row := r.db.QueryRowContext(
 		ctx,
 		findQuery,
-		c.Bytes(),
+		util.DbCID(&c),
 		util.DbDID(&spaceDID),
 	)
 	return r.getNodeFromRow(row)
@@ -288,7 +288,7 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 	var nodes []dagsmodel.Node
 	for rows.Next() {
 		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset)
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -325,7 +325,7 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 	for rows.Next() {
 		var shardOffset uint64
 		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset, &shardOffset)
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, sourceID, offset, &shardOffset)
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -376,7 +376,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			uploadID,
 			size,
 			sliceCount,
-			digest,
+			util.DbBytes(&digest),
 			util.DbCID(&pieceCID),
 			digestStateUpTo,
 			util.DbBytes(&digestState),

@@ -12,7 +12,7 @@ func (r *Repo) TotalBytesToScan(ctx context.Context, uploadID id.UploadID) (uint
 			SELECT COALESCE(SUM(fs_entries.size), 0)
 		 	FROM dag_scans
 			JOIN fs_entries ON dag_scans.fs_entry_id = fs_entries.id
-		 	WHERE dag_scans.upload_id = $1
+		 	WHERE dag_scans.upload_id = ?
 			AND dag_scans.cid IS NULL
 		`,
 		uploadID,
@@ -34,10 +34,10 @@ func (r *Repo) FilesToDAGScan(ctx context.Context, uploadID id.UploadID, count i
 			SELECT fs_entries.path, fs_entries.size
 		 	FROM fs_entries
 			JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
-		 	WHERE dag_scans.upload_id = $1
+		 	WHERE dag_scans.upload_id = ?
 			AND dag_scans.cid IS NULL
 			ORDER BY dag_scans.created_at ASC
-			LIMIT $2
+			LIMIT ?
 		`,
 		uploadID,
 		count,

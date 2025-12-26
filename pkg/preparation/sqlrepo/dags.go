@@ -50,13 +50,16 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
   	  ordering
 		) VALUES (?, ?, ?, ?, ?, ?)`
 	for _, link := range links {
+		hash := link.Hash()
+		parent := link.Parent()
+
 		_, err := tx.ExecContext(
 			ctx,
 			insertQuery,
 			link.Name(),
 			link.TSize(),
-			link.Hash().Bytes(),
-			link.Parent().Bytes(),
+			util.DbCID(&hash),
+			util.DbCID(&parent),
 			util.DbDID(&spaceDID),
 			link.Order(),
 		)
@@ -69,7 +72,7 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 
 func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model.Link, error) {
 	query := `SELECT name, t_size, hash, parent_id, space_did, ordering FROM links WHERE parent_id = ? AND space_did = ?`
-	rows, err := r.db.QueryContext(ctx, query, c.Bytes(), util.DbDID(&sd))
+	rows, err := r.db.QueryContext(ctx, query, util.DbCID(&c), util.DbDID(&sd))
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +133,7 @@ func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.Uplo
 		`
 			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
 			FROM dag_scans
-			WHERE upload_id = $1
+			WHERE upload_id = ?
 			AND cid IS NULL
 		`,
 		uploadID,
@@ -158,7 +161,7 @@ func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.Upload
 		`
 			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
 			FROM dag_scans
-			WHERE upload_id = $1
+			WHERE upload_id = ?
 			AND cid IS NOT NULL
 		`,
 		uploadID,
@@ -235,7 +238,7 @@ func (r *Repo) findNode(ctx context.Context, spaceDID did.DID, c cid.Cid) (model
 	row := r.db.QueryRowContext(
 		ctx,
 		findQuery,
-		c.Bytes(),
+		util.DbCID(&c),
 		util.DbDID(&spaceDID),
 	)
 	return r.getNodeFromRow(row)
@@ -249,7 +252,7 @@ type RowScanner interface {
 
 func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-		return scanner.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), ufsdata, path, sourceID, offset)
+		return scanner.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -258,9 +261,9 @@ func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 }
 
 func (r *Repo) createNode(ctx context.Context, node model.Node) error {
-	insertQuery := `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	insertQuery := `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
-		_, err := r.db.ExecContext(ctx, insertQuery, cid.Bytes(), size, util.DbDID(&spaceDID), ufsdata, path, sourceID, offset)
+		_, err := r.db.ExecContext(ctx, insertQuery, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
 		return err
 	}, node)
 }
@@ -371,13 +374,13 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 		_, err := r.db.ExecContext(ctx,
 			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ? WHERE fs_entry_id = ?`,
 			kind,
-			fsEntryID,
-			uploadID,
+			util.DbID(&fsEntryID),
+			util.DbID(&uploadID),
 			util.DbDID(&spaceDID),
 			createdAt.Unix(),
 			updatedAt.Unix(),
 			util.DbCID(&cidValue),
-			fsEntryID,
+			util.DbID(&fsEntryID),
 		)
 		return err
 	})
