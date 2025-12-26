@@ -165,17 +165,17 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 
 // UpdateUpload implements uploads.Repo.
 func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
-	updateQuery := `UPDATE uploads SET space_did = $2, source_id = $3, created_at = $4, updated_at = $5, root_fs_entry_id = $6, root_cid = $7 WHERE id = $1`
+	updateQuery := `UPDATE uploads SET space_did = ?, source_id = ?, created_at = ?, updated_at = ?, root_fs_entry_id = ?, root_cid = ? WHERE id = ?`
 	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error {
 		_, err := r.db.ExecContext(ctx,
 			updateQuery,
-			id, util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCID(&rootCID))
+			util.DbDID(&spaceDID), sourceID, createdAt.Unix(), updatedAt.Unix(), util.DbID(&rootFSEntryID), util.DbCID(&rootCID), id)
 		return err
 	}, upload)
 }
 
 func (r *Repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
-	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE fs_entry_id = $1`
+	query := `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE fs_entry_id = ?`
 	row := r.db.QueryRowContext(ctx, query, fsEntryID)
 	ds, err := dagmodel.ReadDAGScanFromDatabase(r.dagScanScanner(row))
 	if err != nil {

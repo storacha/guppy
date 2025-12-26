@@ -265,7 +265,7 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model
 				uploadID,
 				size,
 				sliceCount,
-				digest,
+				util.DbBytes(digest),
 				util.DbCID(pieceCID),
 				digestStateUpTo,
 				util.DbBytes(digestState),
