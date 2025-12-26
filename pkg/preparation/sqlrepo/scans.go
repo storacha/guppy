@@ -66,7 +66,7 @@ func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 	defer tx.Rollback()
 	insertQuery := `
 		INSERT INTO directory_children (directory_id, child_id)
-		VALUES ($1, $2)
+		VALUES (?, ?)
 	`
 
 	for _, child := range children {
@@ -85,7 +85,7 @@ func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id, fse.space_did
 		FROM directory_children dc
 		JOIN fs_entries fse ON dc.child_id = fse.id
-		WHERE dc.directory_id = $1
+		WHERE dc.directory_id = ?
 	`
 	rows, err := r.db.QueryContext(ctx, query, dir.ID())
 	if err != nil {
@@ -106,13 +106,13 @@ func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 			spaceDID *did.DID,
 		) error {
 			return rows.Scan(
-				id,
+				util.DbID(id),
 				path,
 				util.TimestampScanner(lastModified),
 				mode,
 				size,
-				checksum,
-				sourceID,
+				util.DbBytes(checksum),
+				util.DbID(sourceID),
 				util.DbDID(spaceDID),
 			)
 		})
@@ -130,7 +130,7 @@ func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 		`SELECT id, path, last_modified, mode, size, checksum, source_id, space_did FROM fs_entries WHERE id = ?`, fileID,
 	)
 	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error {
-		return row.Scan(id, path, util.TimestampScanner(lastModified), mode, size, checksum, sourceID, util.DbDID(spaceDID))
+		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -147,10 +147,10 @@ func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, bool, error) {
 	newID := id.New()
 	// On a conflict we do a no-op DO UPDATE SET path = excluded.path only to enable RETURNING,
-	// so existing row values aren’t changed (last_modified/mode/size/checksum stay as stored)
+	// so existing row values aren't changed (last_modified/mode/size/checksum stay as stored)
 	query := `
 		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(space_did, source_id, path, last_modified, mode, size, checksum)
 		DO UPDATE SET path = excluded.path
 		RETURNING id, path, last_modified, mode, size, checksum, source_id, space_did
@@ -158,13 +158,13 @@ func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified
 	row := r.db.QueryRowContext(
 		ctx,
 		query,
-		newID,
+		util.DbID(&newID),
 		path,
 		lastModified.Unix(),
 		mode,
 		size,
-		checksum,
-		sourceID,
+		util.DbBytes(&checksum),
+		util.DbID(&sourceID),
 		util.DbDID(&spaceDID),
 	)
 
@@ -180,13 +180,13 @@ func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified
 		spaceDID *did.DID,
 	) error {
 		if err := row.Scan(
-			id,
+			util.DbID(id),
 			path,
 			util.TimestampScanner(lastModified),
 			mode,
 			size,
-			checksum,
-			sourceID,
+			util.DbBytes(checksum),
+			util.DbID(sourceID),
 			util.DbDID(spaceDID),
 		); err != nil {
 			return err
