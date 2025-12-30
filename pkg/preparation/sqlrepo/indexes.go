@@ -12,6 +12,44 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
+func (r *Repo) ShardsNotInIndexes(ctx context.Context, uploadID id.UploadID) ([]id.ShardID, error) {
+	shardsNotInIndexesQuery, err := r.prepareStmt(ctx, `
+		SELECT id
+		FROM shards
+		WHERE upload_id = ?
+		AND NOT EXISTS (
+			SELECT 1
+			FROM shards_in_indexes si
+			WHERE si.shard_id = shards.id
+		)`)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	rows, err := shardsNotInIndexesQuery.QueryContext(ctx,
+		util.DbID(&uploadID),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query shards not in indexes for upload %s: %w", uploadID, err)
+	}
+	defer rows.Close()
+
+	var shardIDs []id.ShardID
+	for rows.Next() {
+		var shardID id.ShardID
+		if err := rows.Scan(util.DbID(&shardID)); err != nil {
+			return nil, fmt.Errorf("failed to scan shard ID: %w", err)
+		}
+		shardIDs = append(shardIDs, shardID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating shard rows: %w", err)
+	}
+	return shardIDs, nil
+}
+
 func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.Index, error) {
 	index, err := model.NewIndex(uploadID)
 	if err != nil {
