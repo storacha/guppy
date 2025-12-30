@@ -70,11 +70,11 @@ func (r *Repo) ShardedFiles(ctx context.Context, uploadID id.UploadID, count int
 		SELECT fs_entries.path, fs_entries.size
 		FROM fs_entries
 		JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
-		JOIN nodes_in_shards ON nodes_in_shards.node_cid = dag_scans.cid
-		JOIN shards ON shards.id = nodes_in_shards.shard_id
+		JOIN node_uploads ON node_uploads.node_cid = dag_scans.cid
+      		JOIN shards ON shards.id = node_uploads.shard_id
 		WHERE shards.state = 'open'
 		ORDER BY dag_scans.created_at ASC
-		LIMIT 6
+ 		LIMIT 6
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare sharded files statement: %w", err)
