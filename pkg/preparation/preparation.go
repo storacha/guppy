@@ -151,7 +151,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
 		AddNodesToUploadShards:     blobsAPI.AddNodesToUploadShards,
-		AddShardToUploadIndexes:    blobsAPI.AddShardToUploadIndexes,
+		AddShardsToUploadIndexes:   blobsAPI.AddShardsToUploadIndexes,
 		CloseUploadShards:          blobsAPI.CloseUploadShards,
 		CloseUploadIndexes:         blobsAPI.CloseUploadIndexes,
 		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
