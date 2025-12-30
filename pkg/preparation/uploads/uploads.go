@@ -32,6 +32,7 @@ type AddShardToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID,
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *blobsmodel.Shard) error) error
 type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
 type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *blobsmodel.Shard) error) error
+type AddNodesToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *blobsmodel.Shard) error) error
 type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, indexCB func(index *blobsmodel.Index) error) error
 type PostProcessUploadedShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type PostProcessUploadedIndexesFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -53,10 +54,8 @@ type API struct {
 	RemoveBadNodes             RemoveBadNodesFunc
 	RemoveShard                RemoveShardFunc
 
-	// AddNodeToUploadShards adds a node to the upload's shards, creating a new
-	// shard if necessary. If a shard is closed as a result, the provided
-	// `shardCB` callback is called with the closed shard. `shardCB` may be nil.
-	AddNodeToUploadShards AddNodeToUploadShardsFunc
+	// AddNodesToUploadShards assigns all unsharded nodes for an upload to shards.
+	AddNodesToUploadShards AddNodesToUploadShardsFunc
 
 	// AddShardToUploadIndexes adds the contents of a shard to the upload's indexes, creating new
 	// indexes if necessary. If an index is closed as a result, the provided
@@ -116,6 +115,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	var (
 		scansAvailable           = make(chan struct{}, 1)
 		dagScansAvailable        = make(chan struct{}, 1)
+		nodeUploadsAvailable     = make(chan struct{}, 1)
 		closedShardsAvailable    = make(chan struct{}, 1)
 		closedIndexesAvailable   = make(chan struct{}, 1)
 		uploadedShardsAvailable  = make(chan struct{}, 1)
@@ -132,9 +132,16 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable, closedIndexesAvailable)
+		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, nodeUploadsAvailable)
 		if err != nil {
 			return fmt.Errorf("DAG scan worker: %w", err)
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		err := runShardingWorker(wCtx, a, uploadID, spaceDID, nodeUploadsAvailable, closedShardsAvailable, closedIndexesAvailable)
+		if err != nil {
+			return fmt.Errorf("sharding worker: %w", err)
 		}
 		return nil
 	})
@@ -170,6 +177,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	// attempt.
 	signal(scansAvailable)
 	signal(dagScansAvailable)
+	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
 	close(scansAvailable)
 
@@ -272,14 +280,9 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 	if err != nil {
 		return fmt.Errorf("removing bad shard %s for upload %s: %w", badNodesErr.ShardID(), uploadID, err)
 	}
+	// Good CIDs will have their shard_id set to NULL (via ON DELETE SET NULL FK),
+	// so they'll be picked up again by the sharding worker.
 
-	log.Debug("Adding good CIDs back to upload in a different shard", uploadID, ": ", badNodesErr.GoodCIDs())
-	for _, goodCID := range badNodesErr.GoodCIDs().Keys() {
-		err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, goodCID, nil, nil)
-		if err != nil {
-			return fmt.Errorf("adding good CID %s back to upload %s: %w", goodCID, uploadID, err)
-		}
-	}
 	err = upload.Invalidate()
 	if err != nil {
 		return fmt.Errorf("invalidating upload %s after removing bad nodes: %w", uploadID, err)
@@ -333,13 +336,77 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 }
 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
-// and buckets them into shards.
-func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}, closedIndexesAvailable chan<- struct{}) error {
+// and creates node_upload records for each node.
+func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, nodeUploadsAvailable chan<- struct{}) error {
 	ctx, span := tracer.Start(ctx, "dag-scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
 	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
+	defer span.End()
+
+	return Worker(
+		ctx,
+		dagScansAvailable,
+
+		// doWork
+		func() error {
+			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
+				log.Debugf("Creating node upload for node %s in upload %s", node.CID(), uploadID)
+
+				// Create node upload record (node is now tracked for this upload)
+				_, created, err := api.Repo.FindOrCreateNodeUpload(ctx, uploadID, node.CID(), spaceDID)
+				if err != nil {
+					return fmt.Errorf("creating node upload: %w", err)
+				}
+
+				if created {
+					// Signal that new nodes are available for sharding
+					signal(nodeUploadsAvailable)
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
+			}
+
+			return nil
+		},
+
+		// finalize
+		func() error {
+			// Set root CID now that all nodes are scanned
+			upload, err := api.Repo.GetUploadByID(ctx, uploadID)
+			if err != nil {
+				return fmt.Errorf("reloading upload: %w", err)
+			}
+			rootCID, err := api.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
+			if err != nil {
+				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
+			}
+			if err := upload.SetRootCID(rootCID); err != nil {
+				return fmt.Errorf("completing DAG generation: %w", err)
+			}
+			if err := api.Repo.UpdateUpload(ctx, upload); err != nil {
+				return fmt.Errorf("updating upload: %w", err)
+			}
+
+			// Signal completion and close the nodeUploadsAvailable channel
+			close(nodeUploadsAvailable)
+			return nil
+		},
+	)
+}
+
+// runShardingWorker runs the worker that assigns nodes to shards.
+func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, nodeUploadsAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}, closedIndexesAvailable chan<- struct{}) error {
+	ctx, span := tracer.Start(ctx, "sharding-worker", trace.WithAttributes(
+		attribute.String("upload.id", uploadID.String()),
+		attribute.String("space.did", spaceDID.String()),
+	))
+	defer log.Debugf("Sharding worker for upload %s exiting", uploadID)
 	defer span.End()
 
 	handleClosedShard := func(shard *blobsmodel.Shard) error {
@@ -355,56 +422,29 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 
 	return Worker(
 		ctx,
-		dagScansAvailable,
+		nodeUploadsAvailable,
 
 		// doWork
 		func() error {
-			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
-				log.Debugf("Adding node %s to upload shards for upload %s", node.CID(), uploadID)
-
-				err := api.AddNodeToUploadShards(ctx, uploadID, spaceDID, node.CID(), data, handleClosedShard)
-				if err != nil {
-					return fmt.Errorf("adding node to upload shard: %w", err)
-				}
-
-				return nil
-			})
-
+			err := api.AddNodesToUploadShards(ctx, uploadID, spaceDID, handleClosedShard)
 			if err != nil {
-				return fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
+				return fmt.Errorf("adding nodes to shards for upload %s: %w", uploadID, err)
 			}
-
 			return nil
 		},
 
 		// finalize
 		func() error {
-			// We're out of nodes, so we can close any open shards for this upload.
+			// Close any remaining open shards
 			err := api.CloseUploadShards(ctx, uploadID, handleClosedShard)
 			if err != nil {
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
 			}
 
-			// And then we can close any open indexes for this upload.
+			// Close any remaining open indexes
 			err = api.CloseUploadIndexes(ctx, uploadID, nil)
 			if err != nil {
 				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
-			}
-
-			// Reload the upload to get the latest state from the DB.
-			upload, err := api.Repo.GetUploadByID(ctx, uploadID)
-			if err != nil {
-				return fmt.Errorf("reloading upload: %w", err)
-			}
-			rootCID, err := api.Repo.CIDForFSEntry(ctx, upload.RootFSEntryID())
-			if err != nil {
-				return fmt.Errorf("retrieving CID for root fs entry: %w", err)
-			}
-			if err := upload.SetRootCID(rootCID); err != nil {
-				return fmt.Errorf("completing DAG generation: %w", err)
-			}
-			if err := api.Repo.UpdateUpload(ctx, upload); err != nil {
-				return fmt.Errorf("updating upload: %w", err)
 			}
 
 			close(closedShardsAvailable)
