@@ -115,12 +115,42 @@ func (a API) AddNodeToUploadShards(ctx context.Context, uploadID id.UploadID, sp
 		addNodeOptions = append(addNodeOptions, WithDigestStateUpdate(digestStateUpdate.digestStateUpTo, digestStateUpdate.digestState, digestStateUpdate.pieceCIDState))
 	}
 
-	if err := a.Repo.AddNodeToShard(ctx, shard.ID(), node.CID(), spaceDID, a.ShardEncoder.NodeEncodingLength(node)-node.Size(), addNodeOptions...); err != nil {
+	if err := a.Repo.AddNodeToShard(ctx, shard.ID(), node.CID(), spaceDID, uploadID, a.ShardEncoder.NodeEncodingLength(node)-node.Size(), addNodeOptions...); err != nil {
 		return fmt.Errorf("failed to add node %s to shard %s for upload %s: %w", node.CID(), shard.ID(), uploadID, err)
 	}
 
 	return nil
 }
+
+// AddNodesToUploadShards assigns all unsharded nodes for an upload to shards.
+// It fetches nodes that haven't been assigned to shards yet, then iterates through
+// them calling AddNodeToUploadShards for each.
+func (a API) AddNodesToUploadShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *model.Shard) error) error {
+	// Get all nodes not yet in shards
+	nodeCIDs, err := a.Repo.NodesNotInShards(ctx, uploadID, spaceDID)
+	if err != nil {
+		return fmt.Errorf("failed to get nodes not in shards for upload %s: %w", uploadID, err)
+	}
+
+	if len(nodeCIDs) == 0 {
+		return nil // No work to do
+	}
+
+	// Process each node by adding it to a shard
+	for _, nodeCID := range nodeCIDs {
+		// AddNodeToUploadShards handles finding/creating shards and assigns the node
+		// Note: we pass nil for data since we don't have it available in this flow.
+		// The digest state will be calculated later when reading the shard.
+		err := a.AddNodeToUploadShards(ctx, uploadID, spaceDID, nodeCID, nil, shardCB)
+		if err != nil {
+			return fmt.Errorf("failed to add node %s to shard for upload %s: %w", nodeCID, uploadID, err)
+		}
+	}
+
+	return nil
+}
+
+var _ uploads.AddNodesToUploadShardsFunc = API{}.AddNodesToUploadShards
 
 func (a API) roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmodel.Node, space *spacesmodel.Space) (bool, error) {
 	nodeSize := encoder.NodeEncodingLength(node)
