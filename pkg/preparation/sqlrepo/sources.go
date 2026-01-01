@@ -41,6 +41,7 @@ func (r *Repo) CreateSource(ctx context.Context, name string, path string, optio
 		return nil, fmt.Errorf("failed to create source model: %w", err)
 	}
 
+	connectionParams := src.ConnectionParams()
 	_, err = r.db.ExecContext(
 		ctx,
 		`INSERT INTO sources (
@@ -58,7 +59,7 @@ func (r *Repo) CreateSource(ctx context.Context, name string, path string, optio
 		src.UpdatedAt().Unix(),
 		src.Kind(),
 		src.Path(),
-		src.ConnectionParams(),
+		util.DbBytes(&connectionParams),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert source into database: %w", err)
@@ -133,7 +134,7 @@ func (r *Repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 			util.TimestampScanner(updatedAt),
 			kind,
 			path,
-			connectionParamsBytes,
+			util.DbBytes(connectionParamsBytes),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to scan source: %w", err)
@@ -149,9 +150,10 @@ func (r *Repo) getSourceFromRow(row *sql.Row) (*sourcemodel.Source, error) {
 
 // UpdateSource updates the given source in the repository.
 func (r *Repo) UpdateSource(ctx context.Context, src *sourcemodel.Source) error {
+	connectionParams := src.ConnectionParams()
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE sources SET name = ?, updated_at = ?, kind = ?, path = ?, connection_params = ? WHERE id = ?`,
-		src.Name(), src.UpdatedAt(), src.Kind(), src.Path(), src.ConnectionParams(), src.ID(),
+		src.Name(), src.UpdatedAt(), src.Kind(), src.Path(), util.DbBytes(&connectionParams), src.ID(),
 	)
 	return err
 }

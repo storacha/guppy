@@ -69,6 +69,10 @@ func (dc dbCID) Scan(value any) error {
 	}
 	switch v := value.(type) {
 	case []byte:
+		if len(v) == 0 {
+			*dc.cid = cid.Undef
+			return nil
+		}
 		c, err := cid.Cast(v)
 		if err != nil {
 			return fmt.Errorf("failed to cast to cid: %w", err)
@@ -109,6 +113,10 @@ func (dc dbID) Scan(value any) error {
 	}
 	switch v := value.(type) {
 	case []byte:
+		if len(v) == 0 {
+			*dc.id = id.Nil
+			return nil
+		}
 		if len(v) != 16 {
 			return fmt.Errorf("failed to cast to id: invalid length %d", len(v))
 		}
@@ -146,6 +154,10 @@ func (dd dbDID) Scan(value any) error {
 	}
 	switch v := value.(type) {
 	case []byte:
+		if len(v) == 0 {
+			*dd.did = did.Undef
+			return nil
+		}
 		d, err := did.Decode(v)
 		if err != nil {
 			return fmt.Errorf("failed to cast to did: %w", err)
@@ -176,7 +188,7 @@ func (db dbBytes[V]) Value() (driver.Value, error) {
 	if db.v == nil || *db.v == nil || len(*db.v) == 0 {
 		return nil, nil // Return nil for nil or empty slices
 	}
-	return *db.v, nil
+	return []byte(*db.v), nil // Explicitly cast to []byte for driver compatibility
 }
 
 func (db dbBytes[V]) Scan(value any) error {
@@ -191,7 +203,15 @@ func (db dbBytes[V]) Scan(value any) error {
 	if !ok {
 		return fmt.Errorf("unsupported type for TK scanning: %T (%v)", value, value)
 	}
-	*db.v = b
+	if len(b) == 0 {
+		*db.v = zero
+		return nil
+	}
+	// Copy the bytes to avoid referencing the driver's internal buffer
+	// which may be reused between rows
+	copied := make([]byte, len(b))
+	copy(copied, b)
+	*db.v = copied
 
 	return nil
 }
@@ -229,6 +249,10 @@ func (di dbInvocation) Scan(value any) error {
 	}
 	switch v := value.(type) {
 	case []byte:
+		if len(v) == 0 {
+			*di.inv = nil
+			return nil
+		}
 		inv, err := delegation.Extract(v)
 		if err != nil {
 			return fmt.Errorf("failed to extract invocation: %w", err)

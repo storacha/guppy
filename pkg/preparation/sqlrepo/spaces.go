@@ -30,6 +30,7 @@ func (r *Repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, 
 		return nil, fmt.Errorf("failed to create space model: %w", err)
 	}
 
+	spaceDID := space.DID()
 	_, err = r.db.ExecContext(ctx,
 		`INSERT INTO spaces (
 			did,
@@ -37,7 +38,7 @@ func (r *Repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, 
 			created_at,
 			shard_size
 		) VALUES (?, ?, ?, ?)`,
-		space.DID().Bytes(),
+		util.DbDID(&spaceDID),
 		space.Name(),
 		space.CreatedAt().Unix(),
 		space.ShardSize(),
