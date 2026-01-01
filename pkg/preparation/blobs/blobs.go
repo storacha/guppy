@@ -37,7 +37,7 @@ type API struct {
 }
 
 var _ uploads.AddNodeToUploadShardsFunc = API{}.AddNodeToUploadShards
-var _ uploads.AddShardToUploadIndexesFunc = API{}.AddShardToUploadIndexes
+var _ uploads.AddShardsToUploadIndexesFunc = API{}.AddShardsToUploadIndexes
 var _ uploads.CloseUploadShardsFunc = API{}.CloseUploadShards
 var _ storacha.ReaderForShardFunc = API{}.ReaderForShard
 var _ storacha.ReaderForIndexFunc = API{}.ReaderForIndex
@@ -542,6 +542,27 @@ func (a API) closeIndex(ctx context.Context, index *model.Index) error {
 	}
 
 	return a.Repo.UpdateIndex(ctx, index)
+}
+
+func (a API) AddShardsToUploadIndexes(ctx context.Context, uploadID id.UploadID, indexCB func(index *model.Index) error) error {
+	shardsToIndex, err := a.Repo.ShardsNotInIndexes(ctx, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to get shards not in indexes for upload %s: %w", uploadID, err)
+	}
+
+	if len(shardsToIndex) == 0 {
+		return nil // No work to do
+	}
+
+	// Process each shard by adding it to an index
+	for _, shardID := range shardsToIndex {
+		// AddShardToUploadIndexes handles finding/creating indexes and assigns the shard
+		err := a.AddShardToUploadIndexes(ctx, uploadID, shardID, indexCB)
+		if err != nil {
+			return fmt.Errorf("failed to add shard %s to index for upload %s: %w", shardID, uploadID, err)
+		}
+	}
+	return nil
 }
 
 func (a API) AddShardToUploadIndexes(ctx context.Context, uploadID id.UploadID, shardID id.ShardID, indexCB func(index *model.Index) error) error {
