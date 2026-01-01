@@ -19,7 +19,12 @@ type Repo interface {
 	UpdateShard(ctx context.Context, shard *model.Shard) error
 	ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error)
 	GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error)
-	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...AddNodeToShardOption) error
+	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID, offset uint64, options ...AddNodeToShardOption) error
+	// FindOrCreateNodeUpload finds or creates a node upload record.
+	// Returns (nodeUpload, created, error) where created=true if a new record was inserted.
+	FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (*model.NodeUpload, bool, error)
+	// NodesNotInShards returns CIDs of nodes for the given upload that are not yet assigned to shards.
+	NodesNotInShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]cid.Cid, error)
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
 	// NodesByShard fetches all the nodes for a given shard, returned in the order

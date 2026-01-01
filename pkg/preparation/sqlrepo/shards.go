@@ -136,32 +136,30 @@ func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Sha
 	return shard, nil
 }
 
-// AddNodeToShard adds a node to a shard in the repository. Note: the [offset]
+// AddNodeToShard assigns an existing node_upload record to a shard. Note: the [offset]
 // is NOT the absolute offset within the shard, but the offset into the *new*
 // bytes in the shard CAR where the node data begins--in other words, the length
 // of the length varint + the length of the CID bytes. The node's block will be
 // indexed as appearing at `shard.size + offset`, running for `node.size` bytes,
 // and then the shard size will be increased by `offset + node.size`.
-func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, offset uint64, options ...blobs.AddNodeToShardOption) error {
+func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID, offset uint64, options ...blobs.AddNodeToShardOption) error {
 	nodesInShardsStmt, err := r.prepareStmt(ctx, `
-		INSERT INTO nodes_in_shards (
-			node_cid,
-			space_did,
-			shard_id,
-			shard_offset
-		)
-		SELECT ?, ?, s.id, s.size + ?
-		FROM shards s
-		WHERE s.id = ?`)
+		UPDATE node_uploads
+		SET shard_id = ?, shard_offset = (SELECT size FROM shards WHERE id = ?) + ?
+		WHERE node_cid = ? AND space_did = ? AND upload_id = ? AND shard_id IS NULL`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 
 	updateShardStmt, err := r.prepareStmt(ctx, `
     UPDATE shards
-    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ?),
+    SET size = size + ? + (SELECT size FROM nodes WHERE cid = ? AND space_did = ?),
         slice_count = slice_count + 1
     WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -185,19 +183,28 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	config := blobs.NewAddNodeConfig(options...)
 
 	nodesInShardsStmt = tx.StmtContext(ctx, nodesInShardsStmt)
-	_, err = nodesInShardsStmt.ExecContext(ctx,
+	result, err := nodesInShardsStmt.ExecContext(ctx,
+		shardID,
+		shardID,
+		offset,
 		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
-		offset,
-		shardID,
+		uploadID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to add node %s to shard %s: %w", nodeCID, shardID, err)
+		return fmt.Errorf("failed to assign node %s to shard %s: %w", nodeCID, shardID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("node %s not found or already assigned to shard", nodeCID)
 	}
 
 	updateShardStmt = tx.StmtContext(ctx, updateShardStmt)
-	_, err = updateShardStmt.ExecContext(ctx,
-		offset, util.DbCID(&nodeCID), shardID)
+	_, err = updateShardStmt.ExecContext(ctx, offset, util.DbCID(&nodeCID), util.DbDID(&spaceDID), shardID)
 	if err != nil {
 		return err
 	}
@@ -230,7 +237,20 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 }
 
 func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ? AND nodes_in_shards.shard_offset >= ? ORDER BY nodes_in_shards.shard_offset ASC`)
+	stmt, err := r.prepareStmt(ctx, `
+			SELECT
+				nodes.cid,
+				nodes.size,
+				nodes.space_did,
+				nodes.ufsdata,
+				nodes.path,
+				nodes.source_id,
+				nodes.offset
+			FROM node_uploads
+			JOIN nodes ON nodes.cid = node_uploads.node_cid AND nodes.space_did = node_uploads.space_did
+			WHERE node_uploads.shard_id = ?
+			AND node_uploads.shard_offset >= ?
+			ORDER BY node_uploads.shard_offset ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -257,7 +277,19 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 }
 
 func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
-	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset, nodes_in_shards.shard_offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			nodes.cid,
+			nodes.size,
+			nodes.space_did,
+			nodes.ufsdata,
+			nodes.path,
+			nodes.source_id,
+			nodes.offset,
+			node_uploads.shard_offset
+		FROM node_uploads
+		JOIN nodes ON nodes.cid = node_uploads.node_cid AND nodes.space_did = node_uploads.space_did
+		WHERE node_uploads.shard_id = ?`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -335,4 +367,128 @@ func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
 		return fmt.Errorf("failed to delete shard %s: %w", shardID, err)
 	}
 	return nil
+}
+
+// FindOrCreateNodeUpload finds or creates a node upload record.
+// Returns (nodeUpload, created, error) where created=true if a new record was inserted.
+func (r *Repo) FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (*model.NodeUpload, bool, error) {
+	findExistingQuery, err := r.prepareStmt(ctx, `
+		SELECT node_cid, space_did, upload_id, shard_id, shard_offset
+		FROM node_uploads
+		WHERE node_cid = ? AND space_did = ? AND upload_id = ?`)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	createNodeUpload, err := r.prepareStmt(ctx, `
+		INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+		VALUES (?, ?, ?, NULL, NULL)`)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+
+	// Try to find existing record first
+	findExistingQuery = tx.StmtContext(ctx, findExistingQuery)
+	row := findExistingQuery.QueryRowContext(ctx,
+		util.DbCID(&nodeCID),
+		util.DbDID(&spaceDID),
+		uploadID,
+	)
+
+	nu, err := model.ReadNodeUploadFromDatabase(func(
+		nCID *cid.Cid,
+		sDID *did.DID,
+		uID *id.UploadID,
+		shardID **id.ShardID,
+		shardOffset **uint64,
+	) error {
+		var sID id.ShardID
+		var sOffset sql.NullInt64
+		err := row.Scan(
+			util.DbCID(nCID),
+			util.DbDID(sDID),
+			uID,
+			util.DbID(&sID),
+			&sOffset,
+		)
+		if err != nil {
+			return err
+		}
+		// Only set the pointers if the values are non-nil (shard was assigned)
+		if sID != id.Nil {
+			*shardID = &sID
+			offset := uint64(sOffset.Int64)
+			*shardOffset = &offset
+		}
+		return nil
+	})
+
+	if err == nil {
+		// Found existing record
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return nu, false, nil
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, err
+	}
+
+	// Create new record
+	createNodeUpload = tx.StmtContext(ctx, createNodeUpload)
+	_, err = createNodeUpload.ExecContext(ctx,
+		util.DbCID(&nodeCID),
+		util.DbDID(&spaceDID),
+		uploadID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create node upload for node %s: %w", nodeCID, err)
+	}
+
+	nu, err = model.NewNodeUpload(nodeCID, spaceDID, uploadID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+
+	return nu, true, nil
+}
+
+// NodesNotInShards returns CIDs of nodes that are not yet assigned to shards.
+func (r *Repo) NodesNotInShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]cid.Cid, error) {
+	nodesNotInShardsQuery, err := r.prepareStmt(ctx, `
+		SELECT node_cid
+		FROM node_uploads
+		WHERE upload_id = ? AND space_did = ? AND shard_id IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := nodesNotInShardsQuery.QueryContext(ctx,
+		uploadID,
+		util.DbDID(&spaceDID),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query nodes not in shards: %w", err)
+	}
+	defer rows.Close()
+
+	var cids []cid.Cid
+	for rows.Next() {
+		var c cid.Cid
+		if err := rows.Scan(util.DbCID(&c)); err != nil {
+			return nil, err
+		}
+		cids = append(cids, c)
+	}
+	return cids, rows.Err()
 }
