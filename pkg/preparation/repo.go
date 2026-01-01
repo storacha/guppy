@@ -56,7 +56,7 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 		return nil, fmt.Errorf("failed to set goose dialect: %w", err)
 	}
 
-	if err := goose.Up(db, "migrations"); err != nil {
+	if err := goose.Up(db, "migrations", goose.WithAllowMissing()); err != nil {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
