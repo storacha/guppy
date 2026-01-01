@@ -16,7 +16,7 @@ import (
 )
 
 func TestAddNodeToShard(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	spaceDID, err := did.Parse("did:storacha:space:example")
 	require.NoError(t, err)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/filecoin-project/go-data-segment/merkletree"
@@ -458,7 +459,8 @@ func SpaceBlobAddHandler(
 // receiptsTransport is an [http.RoundTripper] (an [http.Client] transport) that
 // serves known receipts directly rather than using the network.
 type receiptsTransport struct {
-	receipts map[string]receipt.AnyReceipt
+	receiptsLk sync.RWMutex
+	receipts   map[string]receipt.AnyReceipt
 }
 
 var _ http.RoundTripper = (*receiptsTransport)(nil)
@@ -466,7 +468,10 @@ var _ http.RoundTripper = (*receiptsTransport)(nil)
 func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	path := req.URL.Path
 	invCID := path[10:]
+
+	r.receiptsLk.RLock()
 	rcpt, ok := r.receipts[invCID]
+	r.receiptsLk.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("no receipt for invocation %s", invCID)
 	}
@@ -508,6 +513,8 @@ func withSpaceBlobAdd(includePDP bool) Option {
 
 	handler := helpers.Must(SpaceBlobAddHandler(
 		func(rcpt receipt.AnyReceipt) {
+			receiptsTrans.receiptsLk.Lock()
+			defer receiptsTrans.receiptsLk.Unlock()
 			receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
 		},
 		includePDP,

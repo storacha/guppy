@@ -73,7 +73,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a UnixFS node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testdb.CreateTestDB(t)),
+			testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
@@ -93,7 +93,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 	t.Run("encodes a leaf node", func(t *testing.T) {
 		v := visitor.NewUnixFSFileNodeVisitor(
 			t.Context(),
-			sqlrepo.New(testdb.CreateTestDB(t)),
+			testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t),
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
@@ -110,7 +110,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 
 	t.Run("stores and calls back with matching CID", func(t *testing.T) {
 		var callbackCIDs []cid.Cid
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		reader := visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data")))
 		spaceDID := testutil.RandomDID(t)
 		v := visitor.NewUnixFSFileNodeVisitor(
@@ -138,7 +138,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 }
 
 func TestUnixFSDirectoryNodeVisitorLinkSystem(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 	spaceDID := testutil.RandomDID(t)
 
 	v := visitor.NewUnixFSDirectoryNodeVisitor(

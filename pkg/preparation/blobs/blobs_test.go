@@ -37,7 +37,7 @@ import (
 func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 	t.Run("adds nodes to shards", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		api := blobs.API{Repo: repo, ShardEncoder: blobs.NewCAREncoder()}
 		spaceDID := stestutil.RandomDID(t)
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
@@ -159,7 +159,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 
 	t.Run("limits shards to index slice count", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -232,7 +232,7 @@ func TestAddNodeToUploadShardsAndCloseUploadShards(t *testing.T) {
 
 	t.Run("with a node too big for a shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		api := blobs.API{Repo: repo, ShardEncoder: blobs.NewCAREncoder()}
 		spaceDID := stestutil.RandomDID(t)
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(128))
@@ -294,7 +294,7 @@ func (s stubNodeReader) GetData(ctx context.Context, node dagsmodel.Node) ([]byt
 func TestReaderForShard(t *testing.T) {
 	t.Run("returns a CAR reader for the shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 
@@ -367,7 +367,7 @@ func TestReaderForShard(t *testing.T) {
 
 	t.Run("upon encountering an error reading a node", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		spaceDID, err := did.Parse("did:storacha:space:example")
 		require.NoError(t, err)
 
@@ -417,7 +417,7 @@ func TestReaderForShard(t *testing.T) {
 func TestAddShardToUploadIndexesAndCloseUploadIndexes(t *testing.T) {
 	t.Run("adds shards to indexes", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		api := blobs.API{Repo: repo, ShardEncoder: blobs.NewCAREncoder(), MaxNodesPerIndex: 4}
 		spaceDID := stestutil.RandomDID(t)
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(2500))
@@ -550,7 +550,7 @@ func TestAddShardToUploadIndexesAndCloseUploadIndexes(t *testing.T) {
 
 	t.Run("with a node too big for a shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
-		repo := sqlrepo.New(db)
+		repo := stestutil.Must(sqlrepo.New(db))(t)
 		api := blobs.API{Repo: repo, ShardEncoder: blobs.NewCAREncoder(), MaxNodesPerIndex: 100}
 		spaceDID := stestutil.RandomDID(t)
 		upload, source := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(3000))
@@ -578,7 +578,7 @@ func TestAddShardToUploadIndexesAndCloseUploadIndexes(t *testing.T) {
 
 func TestComputedShardCIDs(t *testing.T) {
 	db := testdb.CreateTestDB(t)
-	repo := sqlrepo.New(db)
+	repo := stestutil.Must(sqlrepo.New(db))(t)
 	// we're going to use fileback here because it doesn't add any bytes, making expected CIDs easier to calculate
 	api := blobs.API{Repo: repo, ShardEncoder: blobs.NewFilepackEncoder()}
 	spaceDID := stestutil.RandomDID(t)
@@ -628,7 +628,7 @@ func TestComputedShardCIDs(t *testing.T) {
 
 func TestReaderForIndex(t *testing.T) {
 	t.Run("returns a reader for a single-shard index", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -693,7 +693,7 @@ func TestReaderForIndex(t *testing.T) {
 	})
 
 	t.Run("returns a reader for a multi-shard index", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -779,7 +779,7 @@ func TestReaderForIndex(t *testing.T) {
 	})
 
 	t.Run("returns an error when index does not exist", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -793,7 +793,7 @@ func TestReaderForIndex(t *testing.T) {
 	})
 
 	t.Run("returns an error when upload has no root CID", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -814,7 +814,7 @@ func TestReaderForIndex(t *testing.T) {
 	})
 
 	t.Run("returns an error when shard has no digest", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),
@@ -854,7 +854,7 @@ func TestReaderForIndex(t *testing.T) {
 	})
 
 	t.Run("returns an empty index when index has no shards", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		api := blobs.API{
 			Repo:         repo,
 			ShardEncoder: blobs.NewCAREncoder(),

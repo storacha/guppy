@@ -34,13 +34,7 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 		links = append(links, link)
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	insertQuery := `
+	insertQuery, err := r.prepareStmt(ctx, `
 		INSERT INTO links (
 			name,
   		t_size,
@@ -48,14 +42,25 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
   		parent_id,
   		space_did,
   	  ordering
-		) VALUES (?, ?, ?, ?, ?, ?)`
+		) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	insertQuery = tx.StmtContext(ctx, insertQuery)
+
 	for _, link := range links {
 		hash := link.Hash()
 		parent := link.Parent()
 
-		_, err := tx.ExecContext(
+		_, err := insertQuery.ExecContext(
 			ctx,
-			insertQuery,
 			link.Name(),
 			link.TSize(),
 			util.DbCID(&hash),
@@ -71,8 +76,11 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 }
 
 func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model.Link, error) {
-	query := `SELECT name, t_size, hash, parent_id, space_did, ordering FROM links WHERE parent_id = ? AND space_did = ?`
-	rows, err := r.db.QueryContext(ctx, query, util.DbCID(&c), util.DbDID(&sd))
+	stmt, err := r.prepareStmt(ctx, `SELECT name, t_size, hash, parent_id, space_did, ordering FROM links WHERE parent_id = ? AND space_did = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, util.DbCID(&c), util.DbDID(&sd))
 	if err != nil {
 		return nil, err
 	}
@@ -128,16 +136,11 @@ func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 }
 
 func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
-	rows, err := r.db.QueryContext(
-		ctx,
-		`
-			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
-			FROM dag_scans
-			WHERE upload_id = ?
-			AND cid IS NULL
-		`,
-		uploadID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE upload_id = ? AND cid IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID)
 	if err != nil {
 		return nil, err
 	}
@@ -156,16 +159,11 @@ func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.Uplo
 }
 
 func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
-	rows, err := r.db.QueryContext(
-		ctx,
-		`
-			SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
-			FROM dag_scans
-			WHERE upload_id = ?
-			AND cid IS NOT NULL
-		`,
-		uploadID,
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE upload_id = ? AND cid IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,17 +183,11 @@ func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.Upload
 
 // DirectoryLinks retrieves link parameters for a given directory scan.
 func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
-	query := `
-		SELECT
-			fs_entries.path,
-			nodes.size,
-			nodes.cid
-		FROM directory_children
-		JOIN fs_entries ON directory_children.child_id = fs_entries.id
-		JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id
-		JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did
-		WHERE directory_children.directory_id = ?`
-	rows, err := r.db.QueryContext(ctx, query, dirScan.FsEntryID())
+	stmt, err := r.prepareStmt(ctx, `SELECT fs_entries.path, nodes.size, nodes.cid FROM directory_children JOIN fs_entries ON directory_children.child_id = fs_entries.id JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did WHERE directory_children.directory_id = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, dirScan.FsEntryID())
 	if err != nil {
 		return nil, err
 	}
@@ -222,25 +214,11 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 }
 
 func (r *Repo) findNode(ctx context.Context, spaceDID did.DID, c cid.Cid) (model.Node, error) {
-	findQuery := `
-		SELECT
-			cid,
-			size,
-			space_did,
-			ufsdata,
-			path,
-			source_id,
-			offset
-		FROM nodes
-		WHERE cid = ?
-	    AND space_did = ?
-	`
-	row := r.db.QueryRowContext(
-		ctx,
-		findQuery,
-		util.DbCID(&c),
-		util.DbDID(&spaceDID),
-	)
+	stmt, err := r.prepareStmt(ctx, `SELECT cid, size, space_did, ufsdata, path, source_id, offset FROM nodes WHERE cid = ? AND space_did = ?`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, util.DbCID(&c), util.DbDID(&spaceDID))
 	return r.getNodeFromRow(row)
 }
 
@@ -261,9 +239,12 @@ func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 }
 
 func (r *Repo) createNode(ctx context.Context, node model.Node) error {
-	insertQuery := `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
-		_, err := r.db.ExecContext(ctx, insertQuery, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
+		stmt, err := r.prepareStmt(ctx, `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
 		return err
 	}, node)
 }
@@ -331,17 +312,12 @@ func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 // HasIncompleteChildren returns whether the given directory scan has at least
 // one child scan that is not completed.
 func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error) {
+	stmt, err := r.prepareStmt(ctx, `SELECT 1 FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ? AND dag_scans.cid IS NULL LIMIT 1`)
+	if err != nil {
+		return false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
 	var dummy int
-	err := r.db.QueryRowContext(ctx,
-		`
-			SELECT 1
-			FROM dag_scans
-			JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id
-			WHERE directory_children.directory_id = ?
-			  AND dag_scans.cid IS NULL
-			LIMIT 1
-		`,
-		directoryScans.FsEntryID()).Scan(&dummy)
+	err = stmt.QueryRowContext(ctx, directoryScans.FsEntryID()).Scan(&dummy)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -371,9 +347,11 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 		} else {
 			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: %v\n", fsEntryID, cidValue)
 		}
-		_, err := r.db.ExecContext(ctx,
-			`UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ? WHERE fs_entry_id = ?`,
-			kind,
+		stmt, err := r.prepareStmt(ctx, `UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ? WHERE fs_entry_id = ?`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare statement: %w", err)
+		}
+		_, err = stmt.ExecContext(ctx, kind,
 			util.DbID(&fsEntryID),
 			util.DbID(&uploadID),
 			util.DbDID(&spaceDID),

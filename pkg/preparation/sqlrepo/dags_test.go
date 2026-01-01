@@ -14,7 +14,7 @@ import (
 
 func TestDAGScan(t *testing.T) {
 	t.Run("updates the DAG scan state and error message", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		uploadID := id.New()
 		spaceDID := testutil.RandomDID(t)
 		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), false, uploadID, spaceDID)
@@ -46,7 +46,7 @@ func TestDAGScan(t *testing.T) {
 
 func TestFindOrCreateRawNode(t *testing.T) {
 	t.Run("finds a matching raw node, or creates a new one", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
 
@@ -72,7 +72,7 @@ func TestFindOrCreateRawNode(t *testing.T) {
 
 func TestDirectoryLinks(t *testing.T) {
 	t.Run("for a new DAG scan is empty", func(t *testing.T) {
-		repo := sqlrepo.New(testdb.CreateTestDB(t))
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		spaceDID := testutil.RandomDID(t)
 		dagScan, err := repo.CreateDAGScan(t.Context(), id.New(), true, id.New(), spaceDID)
 		require.NoError(t, err)

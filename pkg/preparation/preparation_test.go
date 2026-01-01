@@ -34,6 +34,7 @@ import (
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-libstoracha/digestutil"
+	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
@@ -219,7 +220,7 @@ func TestExecuteUpload(t *testing.T) {
 		// Enable foreign keys for this high-level test.
 		_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;")
 		require.NoError(t, err, "failed to enable foreign keys")
-		repo := sqlrepo.New(db)
+		repo := testutil.Must(sqlrepo.New(db))(t)
 
 		aBytes := randomBytes((1 << 16) - 128)
 		fsData := map[string][]byte{
@@ -333,7 +334,7 @@ func TestExecuteUpload(t *testing.T) {
 		// Enable foreign keys for this high-level test.
 		_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = ON;")
 		require.NoError(t, err, "failed to enable foreign keys")
-		repo := sqlrepo.New(db)
+		repo := testutil.Must(sqlrepo.New(db))(t)
 
 		fsData := map[string][]byte{
 			// These numbers are tuned to create 5 shards at a shard size of 1<<16.

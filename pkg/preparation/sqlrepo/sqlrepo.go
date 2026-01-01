@@ -6,6 +6,7 @@ import (
 	"embed"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	logging "github.com/ipfs/go-log/v2"
 )
 
@@ -34,13 +35,22 @@ func Null[T any](v *T) sql.Null[T] {
 // DefaultCheckpointInterval is the default interval for automatic WAL checkpointing.
 const DefaultCheckpointInterval = 5 * time.Minute
 
+const DefaultPreparedStmtCacheSize = 128
+
 // New creates a new Repo instance with the given database connection.
-func New(db *sql.DB) *Repo {
-	return &Repo{db: db}
+func New(db *sql.DB) (*Repo, error) {
+	cache, err := lru.NewWithEvict(DefaultPreparedStmtCacheSize, func(key string, stmt *sql.Stmt) {
+		stmt.Close()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Repo{db: db, preparedStmts: cache}, nil
 }
 
 type Repo struct {
 	db             *sql.DB
+	preparedStmts  *lru.Cache[string, *sql.Stmt]
 	checkpointStop chan struct{}
 }
 
@@ -72,6 +82,18 @@ func (r *Repo) StartAutoCheckpoint(ctx context.Context, interval time.Duration) 
 	}()
 }
 
+func (r *Repo) prepareStmt(ctx context.Context, query string) (*sql.Stmt, error) {
+	if stmt, ok := r.preparedStmts.Get(query); ok {
+		return stmt, nil
+	}
+	stmt, err := r.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	_ = r.preparedStmts.Add(query, stmt)
+	return stmt, nil
+}
+
 // StopAutoCheckpoint stops the background checkpoint goroutine if running.
 func (r *Repo) StopAutoCheckpoint() {
 	if r.checkpointStop != nil {
@@ -82,6 +104,7 @@ func (r *Repo) StopAutoCheckpoint() {
 
 func (r *Repo) Close() error {
 	r.StopAutoCheckpoint()
+	r.preparedStmts.Purge()
 	return r.db.Close()
 }
 

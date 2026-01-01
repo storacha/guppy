@@ -63,7 +63,10 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	// Re-enable logging
 	log.Default().SetOutput(os.Stderr)
 
-	repo := sqlrepo.New(db)
+	repo, err := sqlrepo.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SQL repo: %w", err)
+	}
 
 	// Start automatic WAL checkpointing to prevent unbounded WAL growth
 	// during long-running upload operations.

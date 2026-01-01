@@ -12,7 +12,7 @@ import (
 )
 
 func TestFindOrCreateSpace(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	did := testutil.RandomDID(t)
 	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
@@ -30,7 +30,7 @@ func TestFindOrCreateSpace(t *testing.T) {
 }
 
 func TestAddSourceToSpace(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	did := testutil.RandomDID(t)
 	space, err := repo.FindOrCreateSpace(t.Context(), did, "space name")
@@ -59,7 +59,7 @@ func TestAddSourceToSpace(t *testing.T) {
 }
 
 func TestAddSameSourceToMultipleSpaces(t *testing.T) {
-	repo := sqlrepo.New(testdb.CreateTestDB(t))
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
 	source, err := repo.CreateSource(t.Context(), "shared source", "shared/path")
 	require.NoError(t, err)
