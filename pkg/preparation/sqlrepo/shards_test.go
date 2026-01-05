@@ -26,7 +26,7 @@ func TestAddNodeToShard(t *testing.T) {
 	makeRawNodeWithSize := func(size uint64) dagsmodel.Node {
 		node, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, size, spaceDID, "dir/file", id.New(), 0)
 		require.NoError(t, err)
-		// Create node_upload record (required since AddNodeToShard now does UPDATE instead of INSERT)
+		// Mark the node as part of this upload, to ensure it ends up in a shard
 		_, _, err = repo.FindOrCreateNodeUpload(t.Context(), uploadID, node.CID(), spaceDID)
 		require.NoError(t, err)
 		return node
