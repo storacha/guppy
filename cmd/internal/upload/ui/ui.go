@@ -8,7 +8,9 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -17,8 +19,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/ipfs/go-cid"
 	"github.com/mattn/go-isatty"
-
 	"github.com/storacha/go-libstoracha/digestutil"
+
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
 	"github.com/storacha/guppy/pkg/preparation"
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
@@ -43,9 +45,11 @@ type uploadModel struct {
 	uploads []*uploadsmodel.Upload
 	rng     *rand.Rand
 
+	observer *uploadObserver
+
 	// State (Maps for multi-upload support)
-	recentAddedShards  map[id.UploadID][]*blobsmodel.Shard
-	recentClosedShards map[id.UploadID][]*blobsmodel.Shard
+	recentAddedShards  map[id.UploadID][]*sqlrepo.ShardView
+	recentClosedShards map[id.UploadID][]*sqlrepo.ShardView
 	filesToDAGScan     map[id.UploadID][]sqlrepo.FileInfo
 	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
 
@@ -74,7 +78,7 @@ func (m uploadModel) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.uploads)*2)
 	for _, u := range m.uploads {
 		cmds = append(cmds, executeUpload(m.ctx, m.api, u))
-		cmds = append(cmds, checkStats(m.ctx, m.repo, u.ID()))
+		cmds = append(cmds, checkStats(m.ctx, m.observer, m.repo, u.ID()))
 	}
 	return tea.Batch(cmds...)
 }
@@ -111,7 +115,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 2. Update stats for THIS specific upload
 		openSize := uint64(0)
 		for _, s := range msg.openShards {
-			openSize += s.Size()
+			openSize += s.Size
 		}
 		m.openShardsStats[msg.uploadID] = openSize
 		m.dagScanStats[msg.uploadID] = msg.bytesToDAGScan
@@ -124,11 +128,11 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		newSpinners := make(map[id.ShardID]spinner.Model)
 		for _, s := range msg.closedShards {
-			if sp, ok := currentSpinners[s.ID()]; ok {
-				newSpinners[s.ID()] = sp
+			if sp, ok := currentSpinners[s.ID]; ok {
+				newSpinners[s.ID] = sp
 			} else {
 				newSpinner := spinner.New(spinner.WithSpinner(bubbleup.Spinner(m.rng)))
-				newSpinners[s.ID()] = newSpinner
+				newSpinners[s.ID] = newSpinner
 				cmds = append(cmds, newSpinner.Tick)
 			}
 		}
@@ -142,12 +146,12 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		for _, shards := range m.recentAddedShards {
 			for _, s := range shards {
-				m.addedShardsSize += s.Size()
+				m.addedShardsSize += s.Size
 			}
 		}
 		for _, shards := range m.recentClosedShards {
 			for _, s := range shards {
-				m.closedShardsSize += s.Size()
+				m.closedShardsSize += s.Size
 			}
 		}
 		for _, size := range m.openShardsStats {
@@ -157,7 +161,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dagScans += size
 		}
 
-		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.repo, msg.uploadID))...)
+		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.observer, m.repo, msg.uploadID))...)
 
 	case error:
 
@@ -221,18 +225,18 @@ func (m uploadModel) View() string {
 		uid := u.ID()
 		if shards, ok := m.recentAddedShards[uid]; ok {
 			for _, s := range shards {
-				output.WriteString(renderListItem(style.Foreground(addedShardColor), digestutil.Format(s.Digest()), s.Size()))
+				output.WriteString(renderListItem(style.Foreground(addedShardColor), digestutil.Format(s.Digest), s.Size))
 			}
 		}
 		if shards, ok := m.recentClosedShards[uid]; ok {
 			for _, s := range shards {
 				spView := ""
 				if spMap, ok := m.closedShardSpinners[uid]; ok {
-					if sp, ok := spMap[s.ID()]; ok {
+					if sp, ok := spMap[s.ID]; ok {
 						spView = sp.View() + " "
 					}
 				}
-				output.WriteString(renderListItem(style.Foreground(closedShardColor), spView+s.ID().String(), s.Size()))
+				output.WriteString(renderListItem(style.Foreground(closedShardColor), spView+s.ID.String(), s.Size))
 			}
 		}
 	}
@@ -315,27 +319,139 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 
 type statsMsg struct {
 	uploadID       id.UploadID
-	addedShards    []*blobsmodel.Shard
-	closedShards   []*blobsmodel.Shard
-	openShards     []*blobsmodel.Shard
+	addedShards    []*sqlrepo.ShardView
+	closedShards   []*sqlrepo.ShardView
+	openShards     []*sqlrepo.ShardView
 	bytesToDAGScan uint64
 	filesToDAGScan []sqlrepo.FileInfo
 	shardedFiles   []sqlrepo.FileInfo
 }
 
-func checkStats(ctx context.Context, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
-	return tea.Tick(10*time.Millisecond, func(t time.Time) tea.Msg {
-		addedShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateAdded)
+func newUploadObserver(repo *sqlrepo.Repo, uploadIDs []id.UploadID) *uploadObserver {
+	uploads := make(map[id.UploadID]*uploadView, len(uploadIDs))
+	for _, uid := range uploadIDs {
+		uploads[uid] = &uploadView{
+			UploadID: uid,
+			Shards:   make(map[id.ShardID]*sqlrepo.ShardView),
+		}
+	}
+	return &uploadObserver{
+		Uploads: uploads,
+		Repo:    repo,
+	}
+
+}
+
+type uploadObserver struct {
+	Repo      *sqlrepo.Repo
+	Uploads   map[id.UploadID]*uploadView
+	uploadsMu sync.RWMutex
+}
+
+type uploadView struct {
+	// The ID of the upload this view is for
+	UploadID id.UploadID
+	// The shards for the upload
+	Shards   map[id.ShardID]*sqlrepo.ShardView
+	shardsMu sync.RWMutex
+
+	once sync.Once
+}
+
+func (o *uploadObserver) subscribe(ctx context.Context) error {
+	o.uploadsMu.Lock()
+	for uploadID := range o.Uploads {
+		// get the current state one time from the DB, since the subscriber will only get _new_ DB changes
+		// if there is existing state, from a resumed upload, or duplicate upload this logic loads it
+		shards, err := o.Repo.ShardsForUpload(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+		shardView := make(map[id.ShardID]*sqlrepo.ShardView, len(shards))
+		for _, shard := range shards {
+			shardView[shard.ID()] = &sqlrepo.ShardView{
+				ID:        shard.ID(),
+				UploadID:  shard.UploadID(),
+				Size:      shard.Size(),
+				Digest:    shard.Digest(),
+				PieceCID:  shard.PieceCID(),
+				State:     shard.State(),
+				Location:  shard.Location(),
+				PDPAccept: shard.PDPAccept(),
+			}
+		}
+
+		o.Uploads[uploadID] = &uploadView{
+			UploadID: uploadID,
+			Shards:   shardView,
+		}
+
+		// now subscribe to receive all new state
+		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("shard:%s", uploadID), func(shard *sqlrepo.ShardView) {
+
+			upload := o.Uploads[uploadID]
+
+			// add shard to upload view
+			upload.shardsMu.Lock()
+			upload.Shards[shard.ID] = shard
+			upload.shardsMu.Unlock()
+
+		}); err != nil {
+			return err
+		}
+	}
+	o.uploadsMu.Unlock()
+	return nil
+}
+
+func (o *uploadObserver) ShardsForUploadByState(
+	ctx context.Context,
+	uploadID id.UploadID,
+	state blobsmodel.BlobState,
+) ([]*sqlrepo.ShardView, error) {
+	o.uploadsMu.RLock()
+	defer o.uploadsMu.RUnlock()
+
+	upload, ok := o.Uploads[uploadID]
+	if !ok {
+		return []*sqlrepo.ShardView{}, nil
+	}
+
+	upload.shardsMu.RLock()
+	defer upload.shardsMu.RUnlock()
+
+	// Collect matching shards
+	out := make([]*sqlrepo.ShardView, 0, len(upload.Shards))
+	for _, v := range upload.Shards {
+		if v.State == state {
+			out = append(out, v)
+		}
+	}
+
+	// Sort: size descending, ID asc as tie-break
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Size != out[j].Size {
+			return out[i].Size > out[j].Size // larger first
+		}
+		return out[i].ID.String() < out[j].ID.String()
+	})
+
+	return out, nil
+}
+
+func checkStats(ctx context.Context, observer *uploadObserver, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		addedShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateAdded)
 		if err != nil {
 			return fmt.Errorf("getting added shards for upload %s: %w", uploadID, err)
 		}
 
-		closedShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateClosed)
+		closedShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateClosed)
 		if err != nil {
 			return fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err)
 		}
 
-		openShards, err := repo.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateOpen)
+		openShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateOpen)
 		if err != nil {
 			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
 		}
@@ -374,6 +490,15 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	uids := make([]id.UploadID, 0, len(uploads))
+	for _, u := range uploads {
+		uids = append(uids, u.ID())
+	}
+	obs := newUploadObserver(repo, uids)
+	if err := obs.subscribe(ctx); err != nil {
+		panic(err)
+	}
+
 	return uploadModel{
 		ctx:     ctx,
 		cancel:  cancel,
@@ -383,9 +508,11 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		results: make(map[id.UploadID]cid.Cid),
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
 
+		observer: obs,
+
 		// Initialize Maps
-		recentAddedShards:   make(map[id.UploadID][]*blobsmodel.Shard),
-		recentClosedShards:  make(map[id.UploadID][]*blobsmodel.Shard),
+		recentAddedShards:   make(map[id.UploadID][]*sqlrepo.ShardView),
+		recentClosedShards:  make(map[id.UploadID][]*sqlrepo.ShardView),
 		filesToDAGScan:      make(map[id.UploadID][]sqlrepo.FileInfo),
 		shardedFiles:        make(map[id.UploadID][]sqlrepo.FileInfo),
 		openShardsStats:     make(map[id.UploadID]uint64),

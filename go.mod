@@ -3,6 +3,7 @@ module github.com/storacha/guppy
 go 1.25.3
 
 require (
+	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
 	github.com/briandowns/spinner v1.23.2
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.9
@@ -33,6 +34,7 @@ require (
 	github.com/multiformats/go-multicodec v0.9.2
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/multiformats/go-varint v0.1.0
+	github.com/samber/lo v1.47.0
 	github.com/spf13/afero v1.12.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
