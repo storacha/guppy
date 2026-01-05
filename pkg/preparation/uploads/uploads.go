@@ -280,7 +280,7 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 	if err != nil {
 		return fmt.Errorf("removing bad shard %s for upload %s: %w", badNodesErr.ShardID(), uploadID, err)
 	}
-	// Good CIDs will have their shard_id set to NULL (via ON DELETE SET NULL FK),
+	// Good nodes will have their shard_id set to NULL (via ON DELETE SET NULL FK),
 	// so they'll be picked up again by the sharding worker.
 
 	err = upload.Invalidate()
