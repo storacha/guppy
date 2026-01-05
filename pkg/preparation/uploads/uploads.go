@@ -117,11 +117,26 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		dagScansAvailable        = make(chan struct{}, 1)
 		nodeUploadsAvailable     = make(chan struct{}, 1)
 		closedShardsAvailable    = make(chan struct{}, 1)
-		shardsNeedIndexing       = make(chan struct{}, 1)
 		closedIndexesAvailable   = make(chan struct{}, 1)
 		uploadedShardsAvailable  = make(chan struct{}, 1)
 		uploadedIndexesAvailable = make(chan struct{}, 1)
 	)
+
+	var (
+		shardsNeedIndexing  = make(chan struct{}, 1)
+		shardsNeedUploading = make(chan struct{}, 1)
+	)
+
+	// Multiplex closed shards to both indexing and uploading workers
+	go func() {
+		for range closedShardsAvailable {
+			signal(shardsNeedIndexing)
+			signal(shardsNeedUploading)
+		}
+
+		close(shardsNeedIndexing)
+		close(shardsNeedUploading)
+	}()
 
 	// Start the workers
 	eg, wCtx := bettererrgroup.WithContext(ctx)
@@ -140,7 +155,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runShardingWorker(wCtx, a, uploadID, spaceDID, nodeUploadsAvailable, closedShardsAvailable, shardsNeedIndexing)
+		err := runShardingWorker(wCtx, a, uploadID, spaceDID, nodeUploadsAvailable, closedShardsAvailable)
 		if err != nil {
 			return fmt.Errorf("sharding worker: %w", err)
 		}
@@ -155,7 +170,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 		return nil
 	})
 	eg.Go(func() error {
-		err := runShardUploadWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable, uploadedShardsAvailable)
+		err := runShardUploadWorker(wCtx, a, uploadID, spaceDID, shardsNeedUploading, uploadedShardsAvailable)
 		if err != nil {
 			return fmt.Errorf("shard worker: %w", err)
 		}
@@ -188,7 +203,6 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	signal(dagScansAvailable)
 	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
-	signal(shardsNeedIndexing)
 	close(scansAvailable)
 
 	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
@@ -411,7 +425,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 }
 
 // runShardingWorker runs the worker that assigns nodes to shards.
-func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, nodeUploadsAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}, shardsNeedIndexing chan<- struct{}) error {
+func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, nodeUploadsAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
 	ctx, span := tracer.Start(ctx, "sharding-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
@@ -421,7 +435,6 @@ func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, space
 
 	handleClosedShard := func(shard *blobsmodel.Shard) error {
 		signal(closedShardsAvailable)
-		signal(shardsNeedIndexing)
 		return nil
 	}
 
@@ -446,7 +459,6 @@ func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, space
 				return fmt.Errorf("closing upload shards for upload %s: %w", uploadID, err)
 			}
 			close(closedShardsAvailable)
-			close(shardsNeedIndexing)
 
 			return nil
 		},
