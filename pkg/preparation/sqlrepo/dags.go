@@ -12,6 +12,8 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
+
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
@@ -513,7 +515,16 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			util.DbCID(&cidValue),
 			util.DbID(&fsEntryID),
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		r.bus.Publish(events.TopicDagScan(uploadID), events.DAGScanView{
+			FSEntryID: fsEntryID,
+			Created:   createdAt,
+			Updated:   updatedAt,
+			CID:       cidValue,
+		})
+		return nil
 	})
 }
 

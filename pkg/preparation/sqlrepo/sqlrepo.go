@@ -8,6 +8,8 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	logging "github.com/ipfs/go-log/v2"
+
+	"github.com/storacha/guppy/pkg/bus"
 )
 
 //go:embed schema.sql
@@ -32,24 +34,38 @@ func Null[T any](v *T) sql.Null[T] {
 	return sql.Null[T]{Valid: true, V: *v}
 }
 
+type Option func(*Repo)
+
+func WithEventBus(bus bus.Bus) Option {
+	return func(r *Repo) {
+		r.bus = bus
+	}
+}
+
 // DefaultCheckpointInterval is the default interval for automatic WAL checkpointing.
 const DefaultCheckpointInterval = 5 * time.Minute
 
 const DefaultPreparedStmtCacheSize = 128
 
 // New creates a new Repo instance with the given database connection.
-func New(db *sql.DB) (*Repo, error) {
+func New(db *sql.DB, opts ...Option) (*Repo, error) {
 	cache, err := lru.NewWithEvict(DefaultPreparedStmtCacheSize, func(key string, stmt *sql.Stmt) {
 		stmt.Close()
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &Repo{db: db, preparedStmts: cache}, nil
+	r := &Repo{db: db, bus: &bus.NoopBus{}, preparedStmts: cache}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r, nil
 }
 
 type Repo struct {
 	db             *sql.DB
+	bus            bus.Publisher
 	preparedStmts  *lru.Cache[string, *sql.Stmt]
 	checkpointStop chan struct{}
 }

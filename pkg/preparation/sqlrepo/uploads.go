@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/bus/events"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -229,6 +230,12 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
 		_, err = stmt.ExecContext(ctx, kind, fsEntryID, uploadID, util.DbDID(&spaceDID), createdAt.Unix(), updatedAt.Unix(), util.DbCID(&cid))
+		r.bus.Publish(events.TopicDagScan(uploadID), events.DAGScanView{
+			FSEntryID: fsEntryID,
+			Created:   createdAt,
+			Updated:   updatedAt,
+			CID:       cid,
+		})
 		return err
 	})
 }

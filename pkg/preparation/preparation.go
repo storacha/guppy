@@ -10,6 +10,7 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/pkg/bus"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
@@ -46,6 +47,7 @@ type API struct {
 	Sources sources.API
 	DAGs    dags.API
 	Scans   scans.API
+	Bus     bus.Bus
 }
 
 // Option is an option configuring the API.
@@ -55,6 +57,7 @@ type config struct {
 	getLocalFSForPathFn   func(path string) (fs.FS, error)
 	maxNodesPerIndex      int
 	blobUploadParallelism int
+	bus                   bus.Bus
 }
 
 const defaultBlobUploadParallelism = 6
@@ -79,6 +82,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 			return fsys, nil
 		},
 		maxNodesPerIndex: defaultMaxNodesPerIndex,
+		bus:              &bus.NoopBus{},
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
@@ -144,6 +148,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		ReaderForShard:        blobsAPI.ReaderForShard,
 		ReaderForIndex:        blobsAPI.ReaderForIndex,
 		BlobUploadParallelism: cfg.blobUploadParallelism,
+		Bus:                   cfg.bus,
 	}
 
 	uploadsAPI = uploads.API{
@@ -162,6 +167,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
 		RemoveShard:                blobsAPI.RemoveShard,
+		Publisher:                  cfg.bus,
 	}
 
 	return API{
@@ -171,6 +177,14 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		Sources: sourcesAPI,
 		DAGs:    dagsAPI,
 		Scans:   scansAPI,
+		Bus:     cfg.bus,
+	}
+}
+
+func WithEventBus(bus bus.Bus) Option {
+	return func(cfg *config) error {
+		cfg.bus = bus
+		return nil
 	}
 }
 
