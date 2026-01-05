@@ -8,6 +8,12 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -15,9 +21,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -67,6 +70,9 @@ type API struct {
 
 	// CloseUploadIndexes closes any remaining open index for the upload.
 	CloseUploadIndexes CloseUploadIndexesFunc
+
+	// Publishes events observation
+	Publisher bus.Publisher
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -327,13 +333,37 @@ func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID 
 	return nil
 }
 
-func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, scansAvailable <-chan struct{}, dagScansAvailable chan<- struct{}) error {
+func runScanWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	scansAvailable <-chan struct{},
+	dagScansAvailable chan<- struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Scan worker for upload %s exiting", uploadID)
-	defer span.End()
+
+	const eventName = "Scan-FS"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Scan worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -368,13 +398,36 @@ func runScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID 
 
 // runDAGScanWorker runs the worker that scans files and directories into blocks,
 // and creates node_upload records for each node.
-func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, dagScansAvailable <-chan struct{}, nodeUploadsAvailable chan<- struct{}) error {
+func runDAGScanWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	dagScansAvailable <-chan struct{},
+	nodeUploadsAvailable chan<- struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "dag-scan-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("DAG scan worker for upload %s exiting", uploadID)
-	defer span.End()
+	const eventName = "Scan-DAG"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("DAG scan worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -420,13 +473,36 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 }
 
 // runShardingWorker runs the worker that assigns nodes to shards.
-func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, nodeUploadsAvailable <-chan struct{}, closedShardsAvailable chan<- struct{}) error {
+func runShardingWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	nodeUploadsAvailable <-chan struct{},
+	closedShardsAvailable chan<- struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "sharding-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Sharding worker for upload %s exiting", uploadID)
-	defer span.End()
+	const eventName = "Scan-Shard"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Sharding worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	handleClosedShard := func(shard *blobsmodel.Shard) error {
 		signal(closedShardsAvailable)
@@ -460,13 +536,36 @@ func runShardingWorker(ctx context.Context, api API, uploadID id.UploadID, space
 	)
 }
 
-func runIndexingWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, shardsNeedIndexing <-chan struct{}, closedIndexesAvailable chan<- struct{}) error {
+func runIndexingWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	shardsNeedIndexing <-chan struct{},
+	closedIndexesAvailable chan<- struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "indexing-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Indexing worker for upload %s exiting", uploadID)
-	defer span.End()
+	const eventName = "Index"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Indexing worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -501,13 +600,36 @@ func runIndexingWorker(ctx context.Context, api API, uploadID id.UploadID, space
 }
 
 // runShardUploadWorker runs the worker that adds shards to Storacha.
-func runShardUploadWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, closedShardsAvailable <-chan struct{}, uploadedShardsAvailable chan<- struct{}) error {
+func runShardUploadWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	closedShardsAvailable <-chan struct{},
+	uploadedShardsAvailable chan<- struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "shard-upload-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Shard upload worker for upload %s exiting", uploadID)
-	defer span.End()
+	const eventName = "Upload-Shard"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Shard upload worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -534,13 +656,35 @@ func runShardUploadWorker(ctx context.Context, api API, uploadID id.UploadID, sp
 	)
 }
 
-func runPostProcessShardWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, uploadedShardsAvailable <-chan struct{}) error {
+func runPostProcessShardWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	uploadedShardsAvailable <-chan struct{},
+) (err error) {
 	ctx, span := tracer.Start(ctx, "post-process-shard-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Post-process shard worker for upload %s exiting", uploadID)
-	defer span.End()
+	const eventName = "Process-Shard"
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Post-process shard worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -568,13 +712,36 @@ func runPostProcessShardWorker(ctx context.Context, api API, uploadID id.UploadI
 }
 
 // runIndexUploadWorker runs the worker that adds indexes to Storacha.
-func runIndexUploadWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, closedIndexesAvailable <-chan struct{}, uploadedIndexesAvailable chan<- struct{}) error {
+func runIndexUploadWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	closedIndexesAvailable <-chan struct{},
+	uploadedIndexesAvailable chan<- struct{},
+) (err error) {
+	const eventName = "Upload-Index"
 	ctx, span := tracer.Start(ctx, "index-upload-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Index upload worker for upload %s exiting", uploadID)
-	defer span.End()
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Index upload worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,
@@ -600,13 +767,35 @@ func runIndexUploadWorker(ctx context.Context, api API, uploadID id.UploadID, sp
 	)
 }
 
-func runPostProcessIndexWorker(ctx context.Context, api API, uploadID id.UploadID, spaceDID did.DID, uploadedIndexesAvailable <-chan struct{}) error {
+func runPostProcessIndexWorker(
+	ctx context.Context,
+	api API,
+	uploadID id.UploadID,
+	spaceDID did.DID,
+	uploadedIndexesAvailable <-chan struct{},
+) (err error) {
+	const eventName = "Process-Index"
 	ctx, span := tracer.Start(ctx, "post-process-index-worker", trace.WithAttributes(
 		attribute.String("upload.id", uploadID.String()),
 		attribute.String("space.did", spaceDID.String()),
 	))
-	defer log.Debugf("Post-process index worker for upload %s exiting", uploadID)
-	defer span.End()
+	api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+		Name:   eventName,
+		Status: events.Running,
+	})
+	defer func() {
+		status := events.Stopped
+		if err != nil {
+			status = events.Failed
+		}
+		api.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   eventName,
+			Status: status,
+			Error:  err,
+		})
+		log.Debugf("Post-process index worker for upload %s exiting", uploadID)
+		span.End()
+	}()
 
 	return Worker(
 		ctx,

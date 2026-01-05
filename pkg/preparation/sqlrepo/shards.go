@@ -10,6 +10,7 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -73,6 +74,17 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 			util.DbInvocation(&location),
 			util.DbInvocation(&pdpAccept),
 		)
+
+		r.bus.Publish(events.TopicShard(uploadID), events.ShardView{
+			ID:        id,
+			UploadID:  uploadID,
+			Size:      size,
+			Digest:    digest,
+			PieceCID:  pieceCID,
+			State:     state,
+			Location:  location,
+			PDPAccept: pdpAccept,
+		})
 		return err
 	})
 	if err != nil {
@@ -80,6 +92,60 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 	}
 
 	return shard, nil
+}
+
+func (r *Repo) ShardsForUpload(ctx context.Context, uploadID id.UploadID) ([]*model.Shard, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			id,
+			upload_id,
+			size,
+			slice_count,
+			digest,
+			piece_cid,
+			digest_state_up_to,
+			digest_state,
+			piece_cid_state,
+			state,
+			location_inv,
+			pdp_accept_inv
+		FROM shards
+		WHERE upload_id = ?`,
+		uploadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shards []*model.Shard
+	for rows.Next() {
+		shard, err := model.ReadShardFromDatabase(func(
+			id *id.ShardID,
+			uploadID *id.UploadID,
+			size *uint64,
+			sliceCount *int,
+			digest *multihash.Multihash,
+			pieceCID *cid.Cid,
+			digestStateUpTo *uint64,
+			digestState *[]byte,
+			pieceCIDState *[]byte,
+			state *model.BlobState,
+			location *invocation.Invocation,
+			pdpAccept *invocation.Invocation,
+		) error {
+			return rows.Scan(id, uploadID, size, sliceCount, util.DbBytes(digest), util.DbCID(pieceCID), digestStateUpTo, util.DbBytes(digestState), util.DbBytes(pieceCIDState), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
+		})
+		if err != nil {
+			return nil, err
+		}
+		if shard == nil {
+			continue
+		}
+		shards = append(shards, shard)
+	}
+	return shards, nil
+
 }
 
 func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error) {
@@ -425,6 +491,16 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			util.DbInvocation(&pdpAccept),
 			id,
 		)
+		r.bus.Publish(events.TopicShard(uploadID), events.ShardView{
+			ID:        id,
+			UploadID:  uploadID,
+			Size:      size,
+			Digest:    digest,
+			PieceCID:  pieceCID,
+			State:     state,
+			Location:  location,
+			PDPAccept: pdpAccept,
+		})
 		return err
 	})
 }
