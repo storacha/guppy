@@ -25,7 +25,7 @@ func CreateUpload(t *testing.T, repo *sqlrepo.Repo, spaceDID did.DID, options ..
 
 	_, err := repo.FindOrCreateSpace(t.Context(), spaceDID, "Test Space", options...)
 	require.NoError(t, err)
-	source, err := repo.CreateSource(t.Context(), fmt.Sprintf("Test Source %d", sourceCounter), fmt.Sprintf(".%d", sourceCounter))
+	source, err := repo.CreateSource(t.Context(), fmt.Sprintf("Test Source %d", sourceCounter), fmt.Sprintf("/%d", sourceCounter))
 	require.NoError(t, err)
 	sourceCounter++
 	uploads, err := repo.FindOrCreateUploads(t.Context(), spaceDID, []id.SourceID{source.ID()})
