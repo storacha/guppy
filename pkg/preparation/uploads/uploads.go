@@ -355,7 +355,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 				log.Debugf("Creating node upload for node %s in upload %s", node.CID(), uploadID)
 
 				// Create node upload record (node is now tracked for this upload)
-				_, created, err := api.Repo.FindOrCreateNodeUpload(ctx, uploadID, node.CID(), spaceDID)
+				created, err := api.Repo.FindOrCreateNodeUpload(ctx, uploadID, node.CID(), spaceDID)
 				if err != nil {
 					return fmt.Errorf("creating node upload: %w", err)
 				}

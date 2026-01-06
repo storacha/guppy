@@ -49,7 +49,7 @@ func AddNodeToUploadShardsWithData(t *testing.T, repo *sqlrepo.Repo, blobsApi bl
 	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, path, sourceID, 0)
 	require.NoError(t, err)
 	// Create node_upload record first (required since AddNodeToShard now does UPDATE instead of INSERT)
-	_, _, err = repo.FindOrCreateNodeUpload(t.Context(), uploadID, nodeCID, spaceDID)
+	_, err = repo.FindOrCreateNodeUpload(t.Context(), uploadID, nodeCID, spaceDID)
 	require.NoError(t, err)
 	err = blobsApi.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, shardCB)
 	require.NoError(t, err)
