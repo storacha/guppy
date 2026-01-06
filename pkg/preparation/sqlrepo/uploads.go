@@ -20,7 +20,11 @@ var _ uploads.Repo = (*Repo)(nil)
 
 // GetUploadByID retrieves an upload by its unique ID from the repository.
 func (r *Repo) GetUploadByID(ctx context.Context, uploadID id.UploadID) (*model.Upload, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid FROM uploads WHERE id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid
+		FROM uploads
+		WHERE id = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -161,7 +165,11 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 // UpdateUpload implements uploads.Repo.
 func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 	return model.WriteUploadToDatabase(func(id id.UploadID, spaceDID did.DID, sourceID id.SourceID, createdAt, updatedAt time.Time, rootFSEntryID id.FSEntryID, rootCID cid.Cid) error {
-		stmt, err := r.prepareStmt(ctx, `UPDATE uploads SET space_did = ?, source_id = ?, created_at = ?, updated_at = ?, root_fs_entry_id = ?, root_cid = ? WHERE id = ?`)
+		stmt, err := r.prepareStmt(ctx, `
+			UPDATE uploads
+			SET space_did = ?, source_id = ?, created_at = ?, updated_at = ?, root_fs_entry_id = ?, root_cid = ?
+			WHERE id = ?
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
@@ -171,7 +179,11 @@ func (r *Repo) UpdateUpload(ctx context.Context, upload *model.Upload) error {
 }
 
 func (r *Repo) CIDForFSEntry(ctx context.Context, fsEntryID id.FSEntryID) (cid.Cid, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE fs_entry_id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+		FROM dag_scans
+		WHERE fs_entry_id = ?
+	`)
 	if err != nil {
 		return cid.Undef, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -209,7 +221,10 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 		updatedAt time.Time,
 		cid cid.Cid,
 	) error {
-		stmt, err := r.prepareStmt(ctx, `INSERT INTO dag_scans (kind, fs_entry_id, upload_id, space_did, created_at, updated_at, cid) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		stmt, err := r.prepareStmt(ctx, `
+			INSERT INTO dag_scans (kind, fs_entry_id, upload_id, space_did, created_at, updated_at, cid)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
@@ -220,7 +235,11 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 
 // ListSpaceSources lists all sources associated with a given space DID.
 func (r *Repo) ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT cs.source_id FROM space_sources cs WHERE cs.space_did = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT cs.source_id
+		FROM space_sources cs
+		WHERE cs.space_did = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
