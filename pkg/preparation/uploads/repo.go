@@ -5,7 +5,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
-	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -26,5 +25,5 @@ type Repo interface {
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
 	// FindOrCreateNodeUpload finds or creates a node upload record.
 	// Returns (nodeUpload, created, error) where created=true if a new record was inserted.
-	FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (*blobsmodel.NodeUpload, bool, error)
+	FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (bool, error)
 }
