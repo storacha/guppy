@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS node_uploads (
 CREATE INDEX IF NOT EXISTS idx_node_uploads_no_shard
   ON node_uploads(upload_id) WHERE shard_id IS NULL;
 
+-- Create index for efficient querying by shard_id and shard_offset
+CREATE INDEX IF NOT EXISTS idx_node_uploads_shard_id_shard_offset
+  ON node_uploads (shard_id, shard_offset) WHERE shard_id IS NOT NULL;
+
 -- Migrate existing data from nodes_in_shards to node_uploads
 -- Join with shards table to get upload_id for each node
 INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
@@ -67,6 +71,7 @@ WHERE shard_id IS NOT NULL;
 
 -- Drop the new table and index
 DROP INDEX IF EXISTS idx_node_uploads_no_shard;
+DROP INDEX IF EXISTS idx_node_uploads_shard_id_shard_offset;
 DROP TABLE IF EXISTS node_uploads;
 
 -- +goose StatementEnd
