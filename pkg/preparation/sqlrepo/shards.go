@@ -39,7 +39,23 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		stmt, err := r.prepareStmt(ctx, `INSERT INTO shards (id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		stmt, err := r.prepareStmt(ctx, `
+			INSERT INTO shards (
+				id,
+				upload_id,
+				size,
+				slice_count,
+				digest,
+				piece_cid,
+				digest_state_up_to,
+				digest_state,
+				piece_cid_state,
+				state,
+				location_inv,
+				pdp_accept_inv
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
@@ -67,7 +83,24 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 }
 
 func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv FROM shards WHERE upload_id = ? AND state = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			id,
+			upload_id,
+			size,
+			slice_count,
+			digest,
+			piece_cid,
+			digest_state_up_to,
+			digest_state,
+			piece_cid_state,
+			state,
+			location_inv,
+			pdp_accept_inv
+		FROM shards
+		WHERE upload_id = ?
+		  AND state = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -107,7 +140,23 @@ func (r *Repo) ShardsForUploadByState(ctx context.Context, uploadID id.UploadID,
 }
 
 func (r *Repo) GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT id, upload_id, size, slice_count, digest, piece_cid, digest_state_up_to, digest_state, piece_cid_state, state, location_inv, pdp_accept_inv FROM shards WHERE id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			id,
+			upload_id,
+			size,
+			slice_count,
+			digest,
+			piece_cid,
+			digest_state_up_to,
+			digest_state,
+			piece_cid_state,
+			state,
+			location_inv,
+			pdp_accept_inv
+		FROM shards
+		WHERE id = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -182,9 +231,12 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	}
 	defer tx.Rollback()
 
+	nodesInShardsStmt = tx.StmtContext(ctx, nodesInShardsStmt)
+	updateShardStmt = tx.StmtContext(ctx, updateShardStmt)
+	digestStateUpdateStmt = tx.StmtContext(ctx, digestStateUpdateStmt)
+
 	config := blobs.NewAddNodeConfig(options...)
 
-	nodesInShardsStmt = tx.StmtContext(ctx, nodesInShardsStmt)
 	_, err = nodesInShardsStmt.ExecContext(ctx,
 		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
@@ -195,7 +247,6 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		return fmt.Errorf("failed to add node %s to shard %s: %w", nodeCID, shardID, err)
 	}
 
-	updateShardStmt = tx.StmtContext(ctx, updateShardStmt)
 	_, err = updateShardStmt.ExecContext(ctx,
 		offset, util.DbCID(&nodeCID), shardID)
 	if err != nil {
@@ -205,7 +256,6 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 	if config.HasDigestStateUpdate() {
 		digestState := config.DigestStateUpdate().DigestState()
 		pieceCIDState := config.DigestStateUpdate().PieceCIDState()
-		digestStateUpdateStmt = tx.StmtContext(ctx, digestStateUpdateStmt)
 		_, err = digestStateUpdateStmt.ExecContext(ctx,
 			config.DigestStateUpdate().DigestStateUpTo(),
 			util.DbBytes(&digestState),
@@ -221,7 +271,12 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 }
 
 func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT cid, size, space_did, ufsdata, path, source_id, offset FROM nodes WHERE cid = ? AND space_did = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT cid, size, space_did, ufsdata, path, source_id, offset
+		FROM nodes
+		WHERE cid = ?
+		  AND space_did = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -230,7 +285,22 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 }
 
 func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ? AND nodes_in_shards.shard_offset >= ? ORDER BY nodes_in_shards.shard_offset ASC`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			nodes.cid,
+			nodes.size,
+			nodes.space_did,
+			nodes.ufsdata,
+			nodes.path,
+			nodes.source_id,
+			nodes.offset
+		FROM nodes_in_shards
+		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid
+		         AND nodes.space_did = nodes_in_shards.space_did
+		WHERE shard_id = ?
+		  AND nodes_in_shards.shard_offset >= ?
+		ORDER BY nodes_in_shards.shard_offset ASC
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -257,7 +327,21 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 }
 
 func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
-	stmt, err := r.prepareStmt(ctx, `SELECT nodes.cid, nodes.size, nodes.space_did, nodes.ufsdata, nodes.path, nodes.source_id, nodes.offset, nodes_in_shards.shard_offset FROM nodes_in_shards JOIN nodes ON nodes.cid = nodes_in_shards.node_cid AND nodes.space_did = nodes_in_shards.space_did WHERE shard_id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			nodes.cid,
+			nodes.size,
+			nodes.space_did,
+			nodes.ufsdata,
+			nodes.path,
+			nodes.source_id,
+			nodes.offset,
+			nodes_in_shards.shard_offset
+		FROM nodes_in_shards
+		JOIN nodes ON nodes.cid = nodes_in_shards.node_cid
+		         AND nodes.space_did = nodes_in_shards.space_did
+		WHERE shard_id = ?
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -302,7 +386,22 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 		location invocation.Invocation,
 		pdpAccept invocation.Invocation,
 	) error {
-		stmt, err := r.prepareStmt(ctx, `UPDATE shards SET id = ?, upload_id = ?, size = ?, slice_count = ?, digest = ?, piece_cid = ?, digest_state_up_to = ?, digest_state = ?, piece_cid_state = ?, state = ?, location_inv = ?, pdp_accept_inv = ? WHERE id = ?`)
+		stmt, err := r.prepareStmt(ctx, `
+			UPDATE shards
+			SET id = ?,
+			    upload_id = ?,
+			    size = ?,
+			    slice_count = ?,
+			    digest = ?,
+			    piece_cid = ?,
+			    digest_state_up_to = ?,
+			    digest_state = ?,
+			    piece_cid_state = ?,
+			    state = ?,
+			    location_inv = ?,
+			    pdp_accept_inv = ?
+			WHERE id = ?
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
@@ -326,7 +425,10 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 }
 
 func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
-	stmt, err := r.prepareStmt(ctx, `DELETE FROM shards WHERE id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		DELETE FROM shards
+		WHERE id = ?
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}

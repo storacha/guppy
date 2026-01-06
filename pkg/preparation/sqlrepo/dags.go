@@ -76,7 +76,12 @@ func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID
 }
 
 func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model.Link, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT name, t_size, hash, parent_id, space_did, ordering FROM links WHERE parent_id = ? AND space_did = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT name, t_size, hash, parent_id, space_did, ordering
+		FROM links
+		WHERE parent_id = ?
+		AND space_did = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -136,7 +141,12 @@ func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 }
 
 func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE upload_id = ? AND cid IS NULL`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+		FROM dag_scans
+		WHERE upload_id = ?
+		AND cid IS NULL
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -159,7 +169,12 @@ func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.Uplo
 }
 
 func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind FROM dag_scans WHERE upload_id = ? AND cid IS NOT NULL`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+		FROM dag_scans
+		WHERE upload_id = ?
+		AND cid IS NOT NULL
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -183,7 +198,17 @@ func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.Upload
 
 // DirectoryLinks retrieves link parameters for a given directory scan.
 func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT fs_entries.path, nodes.size, nodes.cid FROM directory_children JOIN fs_entries ON directory_children.child_id = fs_entries.id JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did WHERE directory_children.directory_id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			fs_entries.path,
+			nodes.size,
+			nodes.cid
+		FROM directory_children
+		JOIN fs_entries ON directory_children.child_id = fs_entries.id
+		JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id
+		JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did
+		WHERE directory_children.directory_id = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -214,7 +239,19 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 }
 
 func (r *Repo) findNode(ctx context.Context, spaceDID did.DID, c cid.Cid) (model.Node, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT cid, size, space_did, ufsdata, path, source_id, offset FROM nodes WHERE cid = ? AND space_did = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT
+			cid,
+			size,
+			space_did,
+			ufsdata,
+			path,
+			source_id,
+			offset
+		FROM nodes
+		WHERE cid = ?
+		AND space_did = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -240,7 +277,10 @@ func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 
 func (r *Repo) createNode(ctx context.Context, node model.Node) error {
 	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
-		stmt, err := r.prepareStmt(ctx, `INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		stmt, err := r.prepareStmt(ctx, `
+			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
@@ -312,7 +352,14 @@ func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 // HasIncompleteChildren returns whether the given directory scan has at least
 // one child scan that is not completed.
 func (r *Repo) HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT 1 FROM dag_scans JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id WHERE directory_children.directory_id = ? AND dag_scans.cid IS NULL LIMIT 1`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT 1
+		FROM dag_scans
+		JOIN directory_children ON directory_children.child_id = dag_scans.fs_entry_id
+		WHERE directory_children.directory_id = ?
+		  AND dag_scans.cid IS NULL
+		LIMIT 1
+	`)
 	if err != nil {
 		return false, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -347,7 +394,11 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 		} else {
 			log.Debugf("Updating DAG scan: fs_entry_id: %s, cid: %v\n", fsEntryID, cidValue)
 		}
-		stmt, err := r.prepareStmt(ctx, `UPDATE dag_scans SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ? WHERE fs_entry_id = ?`)
+		stmt, err := r.prepareStmt(ctx, `
+			UPDATE dag_scans
+			SET kind = ?, fs_entry_id = ?, upload_id = ?, space_did = ?, created_at = ?, updated_at = ?, cid = ?
+			WHERE fs_entry_id = ?
+		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare statement: %w", err)
 		}
