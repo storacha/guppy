@@ -86,7 +86,12 @@ func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 
 // DirectoryChildren retrieves the children of a directory from the repository.
 func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id, fse.space_did FROM directory_children dc JOIN fs_entries fse ON dc.child_id = fse.id WHERE dc.directory_id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fse.id, fse.path, fse.last_modified, fse.mode, fse.size, fse.checksum, fse.source_id, fse.space_did
+		FROM directory_children dc
+		JOIN fs_entries fse ON dc.child_id = fse.id
+		WHERE dc.directory_id = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -129,7 +134,11 @@ func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 
 // GetFileByID retrieves a file by its unique ID from the repository.
 func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
-	stmt, err := r.prepareStmt(ctx, `SELECT id, path, last_modified, mode, size, checksum, source_id, space_did FROM fs_entries WHERE id = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
+		FROM fs_entries
+		WHERE id = ?
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -153,7 +162,13 @@ func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified
 	newID := id.New()
 	// On a conflict we do a no-op DO UPDATE SET path = excluded.path only to enable RETURNING,
 	// so existing row values aren't changed (last_modified/mode/size/checksum stay as stored)
-	stmt, err := r.prepareStmt(ctx, `INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(space_did, source_id, path, last_modified, mode, size, checksum) DO UPDATE SET path = excluded.path RETURNING id, path, last_modified, mode, size, checksum, source_id, space_did`)
+	stmt, err := r.prepareStmt(ctx, `
+		INSERT INTO fs_entries (id, path, last_modified, mode, size, checksum, source_id, space_did)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(space_did, source_id, path, last_modified, mode, size, checksum)
+		DO UPDATE SET path = excluded.path
+		RETURNING id, path, last_modified, mode, size, checksum, source_id, space_did
+	`)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
 	}
@@ -205,7 +220,11 @@ func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified
 }
 
 func (r *Repo) DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
-	stmt, err := r.prepareStmt(ctx, `DELETE FROM fs_entries WHERE id = ? AND space_did = ?`)
+	stmt, err := r.prepareStmt(ctx, `
+		DELETE FROM fs_entries
+		WHERE id = ?
+		  AND space_did = ?
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
