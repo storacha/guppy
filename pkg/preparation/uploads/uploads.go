@@ -104,6 +104,21 @@ func signal(work chan<- struct{}) {
 	}
 }
 
+func multiplexSignal(input <-chan struct{}, outputs ...chan<- struct{}) {
+	// Multiplex closed shards to both indexing and uploading workers
+	go func() {
+		for range input {
+			for _, out := range outputs {
+				signal(out)
+			}
+		}
+
+		for _, out := range outputs {
+			close(out)
+		}
+	}()
+}
+
 // ExecuteUpload executes the upload process for a given upload, handling its state transitions and processing steps.
 func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) (cid.Cid, error) {
 	ctx, span := tracer.Start(ctx, "execute-upload", trace.WithAttributes(
@@ -128,15 +143,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	)
 
 	// Multiplex closed shards to both indexing and uploading workers
-	go func() {
-		for range closedShardsAvailable {
-			signal(shardsNeedIndexing)
-			signal(shardsNeedUploading)
-		}
-
-		close(shardsNeedIndexing)
-		close(shardsNeedUploading)
-	}()
+	multiplexSignal(closedShardsAvailable, shardsNeedIndexing, shardsNeedUploading)
 
 	// Start the workers
 	eg, wCtx := bettererrgroup.WithContext(ctx)
