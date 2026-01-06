@@ -446,97 +446,65 @@ func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
 
 // FindOrCreateNodeUpload finds or creates a node upload record.
 // Returns (nodeUpload, created, error) where created=true if a new record was inserted.
-func (r *Repo) FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (*model.NodeUpload, bool, error) {
+func (r *Repo) FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (bool, error) {
 	findExistingQuery, err := r.prepareStmt(ctx, `
-		SELECT node_cid, space_did, upload_id, shard_id, shard_offset
+		SELECT 1
 		FROM node_uploads
 		WHERE node_cid = ? AND space_did = ? AND upload_id = ?`)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
+		return false, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 
 	createNodeUpload, err := r.prepareStmt(ctx, `
 		INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
 		VALUES (?, ?, ?, NULL, NULL)`)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
+		return false, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	defer tx.Rollback()
+	findExistingQuery = tx.StmtContext(ctx, findExistingQuery)
+	createNodeUpload = tx.StmtContext(ctx, createNodeUpload)
 
 	// Try to find existing record first
-	findExistingQuery = tx.StmtContext(ctx, findExistingQuery)
 	row := findExistingQuery.QueryRowContext(ctx,
 		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
 		uploadID,
 	)
-
-	nu, err := model.ReadNodeUploadFromDatabase(func(
-		nCID *cid.Cid,
-		sDID *did.DID,
-		uID *id.UploadID,
-		shardID **id.ShardID,
-		shardOffset **uint64,
-	) error {
-		var sID id.ShardID
-		var sOffset sql.NullInt64
-		err := row.Scan(
-			util.DbCID(nCID),
-			util.DbDID(sDID),
-			uID,
-			util.DbID(&sID),
-			&sOffset,
-		)
-		if err != nil {
-			return err
-		}
-		// Only set the pointers if the values are non-nil (shard was assigned)
-		if sID != id.Nil {
-			*shardID = &sID
-			offset := uint64(sOffset.Int64)
-			*shardOffset = &offset
-		}
-		return nil
-	})
-
+	var dummy int
+	err = row.Scan(&dummy)
 	if err == nil {
 		// Found existing record
 		if err := tx.Commit(); err != nil {
-			return nil, false, err
+			return false, err
 		}
-		return nu, false, nil
+		return false, nil
 	}
 
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, err
+		return false, err
 	}
 
 	// Create new record
-	createNodeUpload = tx.StmtContext(ctx, createNodeUpload)
 	_, err = createNodeUpload.ExecContext(ctx,
 		util.DbCID(&nodeCID),
 		util.DbDID(&spaceDID),
 		uploadID,
 	)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to create node upload for node %s: %w", nodeCID, err)
-	}
-
-	nu, err = model.NewNodeUpload(nodeCID, spaceDID, uploadID)
-	if err != nil {
-		return nil, false, err
+		return false, fmt.Errorf("failed to create node upload for node %s: %w", nodeCID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, false, err
+		return false, err
 	}
 
-	return nu, true, nil
+	return true, nil
 }
 
 // NodesNotInShards returns CIDs of nodes that are not yet assigned to shards.
