@@ -220,7 +220,16 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 			updatedAt.Unix(),
 			util.DbCID(&cid),
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		r.bus.Publish(fmt.Sprintf("dag_scan:%s", uploadID), &DAGScanView{
+			FSEntryID: fsEntryID,
+			Created:   createdAt,
+			Updated:   updatedAt,
+			CID:       cid,
+		})
+		return nil
 	})
 }
 

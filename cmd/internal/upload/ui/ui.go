@@ -19,6 +19,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/ipfs/go-cid"
 	"github.com/mattn/go-isatty"
+	"github.com/samber/lo"
 	"github.com/storacha/go-libstoracha/digestutil"
 
 	"github.com/storacha/guppy/internal/largeupload/bubbleup"
@@ -50,7 +51,7 @@ type uploadModel struct {
 	// State (Maps for multi-upload support)
 	recentAddedShards  map[id.UploadID][]*sqlrepo.ShardView
 	recentClosedShards map[id.UploadID][]*sqlrepo.ShardView
-	filesToDAGScan     map[id.UploadID][]sqlrepo.FileInfo
+	filesToDAGScan     map[id.UploadID][]*sqlrepo.FSScanView
 	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
 
 	// Aggregated Totals
@@ -63,6 +64,10 @@ type uploadModel struct {
 	// Internal tracking for totals
 	openShardsStats map[id.UploadID]uint64
 	dagScanStats    map[id.UploadID]uint64
+
+	dagsScanned      uint64
+	dagsToScan       uint64
+	fileBytesScanned uint64
 
 	results map[id.UploadID]cid.Cid
 
@@ -111,6 +116,9 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recentClosedShards[msg.uploadID] = msg.closedShards
 		m.filesToDAGScan[msg.uploadID] = msg.filesToDAGScan
 		m.shardedFiles[msg.uploadID] = msg.shardedFiles
+		m.dagsToScan = msg.dagsToScan
+		m.dagsScanned = msg.dagsScanned
+		m.fileBytesScanned = msg.fileBytesScanned
 
 		// 2. Update stats for THIS specific upload
 		openSize := uint64(0)
@@ -219,6 +227,9 @@ func (m uploadModel) View() string {
 		output.WriteString(style.Bold(true).Render("Uploading with auto-retry enabled...\n\n"))
 	}
 
+	output.WriteString(fmt.Sprintf("Dags To Scan: %d\n", m.dagsToScan))
+	output.WriteString(fmt.Sprintf("Dags Scanned: %d\n", m.dagsScanned))
+	output.WriteString(fmt.Sprintf("File Bytes Scanned: %s\n", humanize.Bytes(m.fileBytesScanned)))
 	output.WriteString("Shards:\n")
 	// Iterate uploads to show shards for everyone
 	for _, u := range m.uploads {
@@ -318,13 +329,16 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 }
 
 type statsMsg struct {
-	uploadID       id.UploadID
-	addedShards    []*sqlrepo.ShardView
-	closedShards   []*sqlrepo.ShardView
-	openShards     []*sqlrepo.ShardView
-	bytesToDAGScan uint64
-	filesToDAGScan []sqlrepo.FileInfo
-	shardedFiles   []sqlrepo.FileInfo
+	uploadID         id.UploadID
+	addedShards      []*sqlrepo.ShardView
+	closedShards     []*sqlrepo.ShardView
+	openShards       []*sqlrepo.ShardView
+	bytesToDAGScan   uint64
+	filesToDAGScan   []*sqlrepo.FSScanView
+	shardedFiles     []sqlrepo.FileInfo
+	dagsToScan       uint64
+	dagsScanned      uint64
+	fileBytesScanned uint64
 }
 
 func newUploadObserver(repo *sqlrepo.Repo, uploadIDs []id.UploadID) *uploadObserver {
@@ -333,6 +347,8 @@ func newUploadObserver(repo *sqlrepo.Repo, uploadIDs []id.UploadID) *uploadObser
 		uploads[uid] = &uploadView{
 			UploadID: uid,
 			Shards:   make(map[id.ShardID]*sqlrepo.ShardView),
+			DagScans: make(map[id.FSEntryID]*sqlrepo.DAGScanView),
+			FSScans:  make(map[id.FSEntryID]*sqlrepo.FSScanView),
 		}
 	}
 	return &uploadObserver{
@@ -355,7 +371,11 @@ type uploadView struct {
 	Shards   map[id.ShardID]*sqlrepo.ShardView
 	shardsMu sync.RWMutex
 
-	once sync.Once
+	DagScans   map[id.FSEntryID]*sqlrepo.DAGScanView
+	dagScansMu sync.RWMutex
+
+	FSScans  map[id.FSEntryID]*sqlrepo.FSScanView
+	fsScanMu sync.RWMutex
 }
 
 func (o *uploadObserver) subscribe(ctx context.Context) error {
@@ -384,18 +404,32 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 		o.Uploads[uploadID] = &uploadView{
 			UploadID: uploadID,
 			Shards:   shardView,
+			DagScans: make(map[id.FSEntryID]*sqlrepo.DAGScanView),
+			FSScans:  make(map[id.FSEntryID]*sqlrepo.FSScanView),
 		}
 
 		// now subscribe to receive all new state
 		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("shard:%s", uploadID), func(shard *sqlrepo.ShardView) {
-
 			upload := o.Uploads[uploadID]
-
-			// add shard to upload view
 			upload.shardsMu.Lock()
 			upload.Shards[shard.ID] = shard
 			upload.shardsMu.Unlock()
-
+		}); err != nil {
+			return err
+		}
+		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("dag_scan:%s", uploadID), func(scan *sqlrepo.DAGScanView) {
+			upload := o.Uploads[uploadID]
+			upload.dagScansMu.Lock()
+			upload.DagScans[scan.FSEntryID] = scan
+			upload.dagScansMu.Unlock()
+		}); err != nil {
+			return err
+		}
+		if err := o.Repo.Subscriber().Subscribe("fsentry", func(fsentry *sqlrepo.FSScanView) {
+			upload := o.Uploads[uploadID]
+			upload.fsScanMu.Lock()
+			upload.FSScans[fsentry.FSEntryID] = fsentry
+			upload.fsScanMu.Unlock()
 		}); err != nil {
 			return err
 		}
@@ -439,6 +473,83 @@ func (o *uploadObserver) ShardsForUploadByState(
 	return out, nil
 }
 
+func (o *uploadObserver) FilesScanned(ctx context.Context, uploadID id.UploadID) ([]*sqlrepo.FSScanView, error) {
+	o.uploadsMu.RLock()
+	defer o.uploadsMu.RUnlock()
+
+	upload, ok := o.Uploads[uploadID]
+	if !ok {
+		return []*sqlrepo.FSScanView{}, nil
+	}
+	upload.fsScanMu.RLock()
+	defer upload.fsScanMu.RUnlock()
+	out := make([]*sqlrepo.FSScanView, 0, len(upload.FSScans))
+	for _, v := range upload.FSScans {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (o *uploadObserver) BytesScanned(ctx context.Context, uploadID id.UploadID) (uint64, error) {
+	o.uploadsMu.RLock()
+	defer o.uploadsMu.RUnlock()
+
+	upload, ok := o.Uploads[uploadID]
+	if !ok {
+		return 0, nil
+	}
+	upload.fsScanMu.RLock()
+	defer upload.fsScanMu.RUnlock()
+	return lo.Sum(
+		lo.MapToSlice(upload.FSScans, func(_ id.ShardID, v *sqlrepo.FSScanView) uint64 {
+			return v.Size
+		}),
+	), nil
+}
+
+func (o *uploadObserver) DagsToScan(ctx context.Context, uploadID id.UploadID) (uint64, error) {
+	o.uploadsMu.RLock()
+	defer o.uploadsMu.RUnlock()
+
+	upload, ok := o.Uploads[uploadID]
+	if !ok {
+		return 0, nil
+	}
+
+	upload.dagScansMu.RLock()
+	defer upload.dagScansMu.RUnlock()
+
+	total := uint64(0)
+	for _, v := range upload.DagScans {
+		if v.CID == cid.Undef {
+			total++
+		}
+	}
+	return total, nil
+}
+
+func (o *uploadObserver) DagsCompleted(ctx context.Context, uploadID id.UploadID) (uint64, error) {
+	o.uploadsMu.RLock()
+	defer o.uploadsMu.RUnlock()
+
+	upload, ok := o.Uploads[uploadID]
+	if !ok {
+		return 0, nil
+	}
+
+	upload.dagScansMu.RLock()
+	defer upload.dagScansMu.RUnlock()
+
+	total := uint64(0)
+	for _, v := range upload.DagScans {
+		if v.CID != cid.Undef {
+			total++
+		}
+	}
+	return total, nil
+
+}
+
 func checkStats(ctx context.Context, observer *uploadObserver, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		addedShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateAdded)
@@ -456,12 +567,12 @@ func checkStats(ctx context.Context, observer *uploadObserver, repo *sqlrepo.Rep
 			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
 		}
 
-		bytesToDAGScan, err := repo.TotalBytesToScan(ctx, uploadID)
+		bytesToDAGScan, err := observer.BytesScanned(ctx, uploadID)
 		if err != nil {
 			return fmt.Errorf("getting total bytes to scan for upload %s: %w", uploadID, err)
 		}
 
-		filesToDAGScan, err := repo.FilesToDAGScan(ctx, uploadID, 6)
+		filesToDAGScan, err := observer.FilesScanned(ctx, uploadID)
 		if err != nil {
 			return fmt.Errorf("getting info on remaining files for upload %s: %w", uploadID, err)
 		}
@@ -471,14 +582,31 @@ func checkStats(ctx context.Context, observer *uploadObserver, repo *sqlrepo.Rep
 			return fmt.Errorf("getting info on sharded files for upload %s: %w", uploadID, err)
 		}
 
+		scanTodo, err := observer.DagsToScan(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+
+		scanDone, err := observer.DagsCompleted(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+		bytesScanned, err := observer.BytesScanned(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+
 		return statsMsg{
-			uploadID:       uploadID,
-			addedShards:    addedShards,
-			closedShards:   closedShards,
-			openShards:     openShards,
-			bytesToDAGScan: bytesToDAGScan,
-			filesToDAGScan: filesToDAGScan,
-			shardedFiles:   shardedFiles,
+			uploadID:         uploadID,
+			addedShards:      addedShards,
+			closedShards:     closedShards,
+			openShards:       openShards,
+			bytesToDAGScan:   bytesToDAGScan,
+			filesToDAGScan:   filesToDAGScan,
+			shardedFiles:     shardedFiles,
+			dagsScanned:      scanDone,
+			dagsToScan:       scanTodo,
+			fileBytesScanned: bytesScanned,
 		}
 	})
 }
@@ -513,7 +641,7 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		// Initialize Maps
 		recentAddedShards:   make(map[id.UploadID][]*sqlrepo.ShardView),
 		recentClosedShards:  make(map[id.UploadID][]*sqlrepo.ShardView),
-		filesToDAGScan:      make(map[id.UploadID][]sqlrepo.FileInfo),
+		filesToDAGScan:      make(map[id.UploadID][]*sqlrepo.FSScanView),
 		shardedFiles:        make(map[id.UploadID][]sqlrepo.FileInfo),
 		openShardsStats:     make(map[id.UploadID]uint64),
 		dagScanStats:        make(map[id.UploadID]uint64),

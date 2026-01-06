@@ -27,6 +27,12 @@ func (r *Repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 		return nil, false, fmt.Errorf("failed to find or create file entry: %w", err)
 	}
 	if file, ok := entry.(*scanmodel.File); ok {
+		r.bus.Publish("fsentry", &FSScanView{
+			Path:      file.Path(),
+			IsDir:     false,
+			Size:      file.Size(),
+			FSEntryID: file.ID(),
+		})
 		return file, created, nil
 	}
 	return nil, false, errors.New("found entry is not a file")
@@ -48,6 +54,12 @@ func (r *Repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 		if created {
 			log.Debugf("Created new directory %s: %s", path, dir.ID())
 		}
+		r.bus.Publish("fsentry", &FSScanView{
+			Path:      dir.Path(),
+			IsDir:     true,
+			Size:      0,
+			FSEntryID: dir.ID(),
+		})
 		return dir, created, nil
 	}
 	return nil, false, errors.New("found entry is not a directory")

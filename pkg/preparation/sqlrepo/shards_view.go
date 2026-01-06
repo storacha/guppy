@@ -1,6 +1,8 @@
 package sqlrepo
 
 import (
+	"time"
+
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
@@ -18,4 +20,18 @@ type ShardView struct {
 	State     model.BlobState
 	Location  invocation.Invocation
 	PDPAccept invocation.Invocation
+}
+
+type DAGScanView struct {
+	FSEntryID id.FSEntryID
+	Created   time.Time
+	Updated   time.Time
+	CID       cid.Cid
+}
+
+type FSScanView struct {
+	Path      string
+	IsDir     bool
+	Size      uint64
+	FSEntryID id.FSEntryID
 }

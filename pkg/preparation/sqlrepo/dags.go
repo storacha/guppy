@@ -379,7 +379,16 @@ func (r *Repo) UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error {
 			util.DbCID(&cidValue),
 			fsEntryID,
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		r.bus.Publish(fmt.Sprintf("dag_scan:%s", uploadID), &DAGScanView{
+			FSEntryID: fsEntryID,
+			Created:   createdAt,
+			Updated:   updatedAt,
+			CID:       cidValue,
+		})
+		return nil
 	})
 }
 
