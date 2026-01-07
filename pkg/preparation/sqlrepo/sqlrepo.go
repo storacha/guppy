@@ -54,10 +54,10 @@ type Repo struct {
 	checkpointStop chan struct{}
 }
 
-// StartAutoCheckpoint starts a background goroutine that periodically
+// StartPeriodicCheckpoint starts a background goroutine that periodically
 // checkpoints the WAL to prevent unbounded growth during long operations.
-// Call StopAutoCheckpoint to stop it, or it will be stopped when Close is called.
-func (r *Repo) StartAutoCheckpoint(ctx context.Context, interval time.Duration) {
+// Call StopPeriodicCheckpoint to stop it, or it will be stopped when Close is called.
+func (r *Repo) StartPeriodicCheckpoint(ctx context.Context, interval time.Duration) {
 	if r.checkpointStop != nil {
 		return // already running
 	}
@@ -94,8 +94,8 @@ func (r *Repo) prepareStmt(ctx context.Context, query string) (*sql.Stmt, error)
 	return stmt, nil
 }
 
-// StopAutoCheckpoint stops the background checkpoint goroutine if running.
-func (r *Repo) StopAutoCheckpoint() {
+// StopPeriodicCheckpoint stops the background checkpoint goroutine if running.
+func (r *Repo) StopPeriodicCheckpoint() {
 	if r.checkpointStop != nil {
 		close(r.checkpointStop)
 		r.checkpointStop = nil
@@ -103,16 +103,16 @@ func (r *Repo) StopAutoCheckpoint() {
 }
 
 func (r *Repo) Close() error {
-	r.StopAutoCheckpoint()
+	r.StopPeriodicCheckpoint()
 	r.preparedStmts.Purge()
 	return r.db.Close()
 }
 
 // Checkpoint forces a WAL checkpoint to transfer data from the write-ahead log
 // to the main database file. This should be called periodically during long
-// operations to prevent unbounded WAL growth. The TRUNCATE mode resets the WAL
-// file to zero bytes after a successful checkpoint.
+// operations to prevent unbounded WAL growth. The RESTART mode runs until the WAL
+// is fully checkpointed, so that write can start from the beginning of the file.
 func (r *Repo) Checkpoint(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+	_, err := r.db.ExecContext(ctx, "PRAGMA wal_checkpoint(RESTART)")
 	return err
 }

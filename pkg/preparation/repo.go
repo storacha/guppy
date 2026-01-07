@@ -68,9 +68,9 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 		return nil, fmt.Errorf("failed to create SQL repo: %w", err)
 	}
 
-	// Start automatic WAL checkpointing to prevent unbounded WAL growth
+	// Start periodic forced WAL checkpointing to prevent unbounded WAL growth
 	// during long-running upload operations.
-	repo.StartAutoCheckpoint(ctx, sqlrepo.DefaultCheckpointInterval)
+	repo.StartPeriodicCheckpoint(ctx, sqlrepo.DefaultCheckpointInterval)
 
 	return repo, nil
 }
