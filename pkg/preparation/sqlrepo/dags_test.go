@@ -49,24 +49,31 @@ func TestFindOrCreateRawNode(t *testing.T) {
 		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 		sourceId := id.New()
 		spaceDID := testutil.RandomDID(t)
+		uploadID := id.New()
 
 		cid1 := testutil.RandomCID(t)
 		cid2 := testutil.RandomCID(t)
 
-		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, "some/path1", sourceId, 0)
+		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0)
 		require.NoError(t, err)
 		require.True(t, created)
 		require.NotNil(t, rawNode)
 
-		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, "some/path1", sourceId, 0)
+		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0)
 		require.NoError(t, err)
 		require.False(t, created2)
 		require.Equal(t, rawNode, rawNode2)
 
-		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, spaceDID, "some/path2", sourceId, 0)
+		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path2", sourceId, 0)
 		require.NoError(t, err)
 		require.True(t, created3)
 		require.NotEqual(t, rawNode.CID(), rawNode3.CID())
+
+		cids, err := repo.NodesNotInShards(t.Context(), uploadID, spaceDID)
+		require.NoError(t, err)
+		require.Len(t, cids, 2)
+		require.Contains(t, cids, cid1.(cidlink.Link).Cid)
+		require.Contains(t, cids, cid2.(cidlink.Link).Cid)
 	})
 }
 

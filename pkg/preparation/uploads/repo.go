@@ -23,7 +23,4 @@ type Repo interface {
 	CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDirectory bool, uploadID id.UploadID, spaceDID did.DID) (dagmodel.DAGScan, error)
 	// ListSpaceSources lists all space sources for the given space DID.
 	ListSpaceSources(ctx context.Context, spaceDID did.DID) ([]id.SourceID, error)
-	// FindOrCreateNodeUpload finds or creates a node upload record.
-	// Returns (nodeUpload, created, error) where created=true if a new record was inserted.
-	FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (bool, error)
 }

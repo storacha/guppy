@@ -383,19 +383,7 @@ func runDAGScanWorker(ctx context.Context, api API, uploadID id.UploadID, spaceD
 		// doWork
 		func() error {
 			err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
-				log.Debugf("Creating node upload for node %s in upload %s", node.CID(), uploadID)
-
-				// Create node upload record (node is now tracked for this upload)
-				created, err := api.Repo.FindOrCreateNodeUpload(ctx, uploadID, node.CID(), spaceDID)
-				if err != nil {
-					return fmt.Errorf("creating node upload: %w", err)
-				}
-
-				if created {
-					// Signal that new nodes are available for sharding
-					signal(nodeUploadsAvailable)
-				}
-
+				signal(nodeUploadsAvailable)
 				return nil
 			})
 

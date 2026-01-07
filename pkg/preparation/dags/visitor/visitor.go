@@ -27,15 +27,17 @@ type UnixFSDirectoryNodeVisitor struct {
 	ctx      context.Context
 	cb       NodeCallback
 	spaceDID did.DID
+	uploadID id.UploadID
 }
 
 // NewUnixFSDirectoryNodeVisitor creates a new [UnixFSDirectoryNodeVisitor].
-func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, cb NodeCallback) UnixFSDirectoryNodeVisitor {
+func NewUnixFSDirectoryNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, uploadID id.UploadID, cb NodeCallback) UnixFSDirectoryNodeVisitor {
 	return UnixFSDirectoryNodeVisitor{
 		repo:     repo,
 		ctx:      ctx,
 		cb:       cb,
 		spaceDID: spaceDID,
+		uploadID: uploadID,
 	}
 }
 
@@ -53,25 +55,19 @@ func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node
 		_, pbLink := iter.Next()
 		pbLinks = append(pbLinks, pbLink)
 	}
-
-	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, v.spaceDID, ufsData)
+	links := make([]model.LinkParams, len(pbLinks))
+	for i, link := range pbLinks {
+		links[i] = model.LinkParams{
+			Hash:  link.FieldHash().Link().(cidlink.Link).Cid,
+			Name:  link.FieldName().Must().String(),
+			TSize: uint64(link.FieldTsize().Must().Int()),
+		}
+	}
+	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, v.spaceDID, v.uploadID, ufsData, links)
 	if err != nil {
 		return fmt.Errorf("creating unixfs node: %w", err)
 	}
 	if created {
-		if len(pbLinks) > 0 {
-			links := make([]model.LinkParams, len(pbLinks))
-			for i, link := range pbLinks {
-				links[i] = model.LinkParams{
-					Hash:  link.FieldHash().Link().(cidlink.Link).Cid,
-					Name:  link.FieldName().Must().String(),
-					TSize: uint64(link.FieldTsize().Must().Int()),
-				}
-			}
-			if err := v.repo.CreateLinks(v.ctx, cid, v.spaceDID, links); err != nil {
-				return fmt.Errorf("creating links for unixfs node %s: %w", cid, err)
-			}
-		}
 		if v.cb != nil {
 			if err := v.cb(node, data); err != nil {
 				return fmt.Errorf("on node callback: %w", err)
@@ -91,9 +87,9 @@ type UnixFSFileNodeVisitor struct {
 	readerPosition ReaderPosition
 }
 
-func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, sourceID id.SourceID, path string, readerPosition ReaderPosition, spaceDID did.DID, cb NodeCallback) UnixFSFileNodeVisitor {
+func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, uploadID id.UploadID, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSFileNodeVisitor {
 	return UnixFSFileNodeVisitor{
-		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, spaceDID, cb),
+		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, spaceDID, uploadID, cb),
 		sourceID:                   sourceID,
 		path:                       path,
 		readerPosition:             readerPosition,
@@ -107,7 +103,7 @@ func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid ci
 
 	// this raw block has already been read, so we subtract its size to get the beginning offset
 	offset := v.readerPosition.Offset() - size
-	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.spaceDID, v.path, v.sourceID, offset)
+	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.spaceDID, v.uploadID, v.path, v.sourceID, offset)
 	if err != nil {
 		return fmt.Errorf("creating raw node: %w", err)
 	}

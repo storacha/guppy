@@ -20,61 +20,6 @@ import (
 
 var _ dags.Repo = (*Repo)(nil)
 
-// CreateLinks creates links in the repository for the given parent CID and link parameters.
-func (r *Repo) CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID, linkParams []model.LinkParams) error {
-	if len(linkParams) == 0 {
-		return nil
-	}
-	links := make([]*model.Link, 0, len(linkParams))
-	for i, p := range linkParams {
-		link, err := model.NewLink(p, parent, spaceDID, uint64(i))
-		if err != nil {
-			return err
-		}
-		links = append(links, link)
-	}
-
-	insertQuery, err := r.prepareStmt(ctx, `
-		INSERT INTO links (
-			name,
-  		t_size,
-  	  hash,
-  		parent_id,
-  		space_did,
-  	  ordering
-		) VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	insertQuery = tx.StmtContext(ctx, insertQuery)
-
-	for _, link := range links {
-		hash := link.Hash()
-		parent := link.Parent()
-
-		_, err := insertQuery.ExecContext(
-			ctx,
-			link.Name(),
-			link.TSize(),
-			util.DbCID(&hash),
-			util.DbCID(&parent),
-			util.DbDID(&spaceDID),
-			link.Order(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert link %s for parent %s: %w", link.Name(), parent, err)
-		}
-	}
-	return tx.Commit()
-}
-
 func (r *Repo) LinksForCID(ctx context.Context, c cid.Cid, sd did.DID) ([]*model.Link, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT name, t_size, hash, parent_id, space_did, ordering
@@ -238,7 +183,22 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 	return links, nil
 }
 
-func (r *Repo) findNode(ctx context.Context, spaceDID did.DID, c cid.Cid) (model.Node, error) {
+type nodeFinder struct {
+	r    *Repo
+	stmt *sql.Stmt
+	ctx  context.Context
+}
+
+func (n nodeFinder) Find(spaceDID did.DID, c cid.Cid, tx *sql.Tx) (model.Node, error) {
+	stmt := n.stmt
+	if tx != nil {
+		stmt = tx.StmtContext(n.ctx, stmt)
+	}
+	row := stmt.QueryRowContext(n.ctx, util.DbCID(&c), util.DbDID(&spaceDID))
+	return n.r.getNodeFromRow(row)
+}
+
+func (r *Repo) nodeFinder(ctx context.Context) (nodeFinder, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT
 			cid,
@@ -253,10 +213,9 @@ func (r *Repo) findNode(ctx context.Context, spaceDID did.DID, c cid.Cid) (model
 		AND space_did = ?
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+		return nodeFinder{}, fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	row := stmt.QueryRowContext(ctx, util.DbCID(&c), util.DbDID(&spaceDID))
-	return r.getNodeFromRow(row)
+	return nodeFinder{r: r, stmt: stmt, ctx: ctx}, nil
 }
 
 // RowScanner can scan a row into a set of destinations. It should not be
@@ -275,32 +234,116 @@ func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
 	return node, err
 }
 
-func (r *Repo) createNode(ctx context.Context, node model.Node) error {
-	return model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
-		stmt, err := r.prepareStmt(ctx, `
+type nodeCreator struct {
+	r                    *Repo
+	stmt                 *sql.Stmt
+	createNodeUploadStmt *sql.Stmt
+	findExistingQuery    *sql.Stmt
+	ctx                  context.Context
+}
+
+func (r *Repo) nodeCreator(ctx context.Context) (nodeCreator, error) {
+	stmt, err := r.prepareStmt(ctx, `
 			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`)
-		if err != nil {
-			return fmt.Errorf("failed to prepare statement: %w", err)
+
+	if err != nil {
+		return nodeCreator{}, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	createNodeUploadStmt, err := r.prepareStmt(ctx, `
+		INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+		VALUES (?, ?, ?, NULL, NULL)`)
+
+	if err != nil {
+		return nodeCreator{}, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	findExistingQuery, err := r.prepareStmt(ctx, `
+		SELECT 1
+		FROM node_uploads
+		WHERE node_cid = ? AND space_did = ? AND upload_id = ?`)
+	if err != nil {
+		return nodeCreator{}, fmt.Errorf("failed to prepare find existing query: %w", err)
+	}
+	return nodeCreator{
+		r:                    r,
+		stmt:                 stmt,
+		createNodeUploadStmt: createNodeUploadStmt,
+		findExistingQuery:    findExistingQuery,
+		ctx:                  ctx,
+	}, nil
+}
+
+func (n nodeCreator) Create(node model.Node, uploadID id.UploadID, tx *sql.Tx) error {
+	err := model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
+		stmt := n.stmt
+		if tx != nil {
+			stmt = tx.StmtContext(n.ctx, stmt)
 		}
-		_, err = stmt.ExecContext(ctx, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
+		_, err := stmt.ExecContext(n.ctx, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
 		return err
 	}, node)
+	if err != nil {
+		return err
+	}
+
+	nodeCID := node.CID()
+	spaceDID := node.SpaceDID()
+	findExistingQuery := n.findExistingQuery
+	if tx != nil {
+		findExistingQuery = tx.StmtContext(n.ctx, findExistingQuery)
+	}
+
+	// Try to find existing record first
+	row := findExistingQuery.QueryRowContext(n.ctx,
+		util.DbCID(&nodeCID),
+		util.DbDID(&spaceDID),
+		uploadID,
+	)
+	var dummy int
+	err = row.Scan(&dummy)
+	if err == nil {
+		return nil // Record already exists, nothing to do
+	}
+	createNodeUploadStmt := n.createNodeUploadStmt
+	if tx != nil {
+		createNodeUploadStmt = tx.StmtContext(n.ctx, createNodeUploadStmt)
+	}
+	_, err = createNodeUploadStmt.ExecContext(n.ctx, util.DbCID(&nodeCID), util.DbDID(&spaceDID), util.DbID(&uploadID))
+	if err != nil {
+		return fmt.Errorf("failed to create node upload entry: %w", err)
+	}
+	return nil
 }
 
 // FindOrCreateRawNode finds or creates a raw node in the repository.
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
-func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
-	node, err := r.findNode(ctx, spaceDID, cid)
+func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
+	nf, err := r.nodeFinder(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	nc, err := r.nodeCreator(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+
+	node, err := nf.Find(spaceDID, cid, tx)
 	if err != nil {
 		return nil, false, err
 	}
 	if node != nil {
 		// File already exists, return it
 		if rawNode, ok := node.(*model.RawNode); ok {
-			return rawNode, false, nil
+			return rawNode, false, tx.Commit()
 		}
 		return nil, false, errors.New("found entry is not a raw node")
 	}
@@ -310,27 +353,54 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 		return nil, false, err
 	}
 
-	err = r.createNode(ctx, newNode)
-
+	err = nc.Create(newNode, uploadID, tx)
 	if err != nil {
 		return nil, false, err
 	}
 
-	return newNode, true, nil
+	return newNode, true, tx.Commit()
 }
 
 // FindOrCreateUnixFSNode finds or creates a UnixFS node in the repository.
 // If a node with the same CID, size, and ufsdata already exists, it returns that node.
 // If not, it creates a new UnixFS node with the provided parameters.
-func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte) (*model.UnixFSNode, bool, error) {
-	node, err := r.findNode(ctx, spaceDID, cid)
+func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, ufsdata []byte, linkParams []model.LinkParams) (*model.UnixFSNode, bool, error) {
+	insertQuery, err := r.prepareStmt(ctx, `
+		INSERT INTO links (
+			name,
+  		t_size,
+  	  hash,
+  		parent_id,
+  		space_did,
+  	  ordering
+		) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	nf, err := r.nodeFinder(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	nc, err := r.nodeCreator(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+
+	node, err := nf.Find(spaceDID, cid, tx)
 	if err != nil {
 		return nil, false, err
 	}
 	if node != nil {
 		// File already exists, return it
 		if unixFSNode, ok := node.(*model.UnixFSNode); ok {
-			return unixFSNode, false, nil
+			return unixFSNode, false, tx.Commit()
 		}
 		return nil, false, errors.New("found entry is not a UnixFS node")
 	}
@@ -340,13 +410,45 @@ func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 		return nil, false, err
 	}
 
-	err = r.createNode(ctx, newNode)
+	err = nc.Create(newNode, uploadID, tx)
 
 	if err != nil {
 		return nil, false, err
 	}
 
-	return newNode, true, nil
+	if len(linkParams) == 0 {
+		return newNode, true, tx.Commit()
+	}
+
+	links := make([]*model.Link, 0, len(linkParams))
+	for i, p := range linkParams {
+		link, err := model.NewLink(p, cid, spaceDID, uint64(i))
+		if err != nil {
+			return nil, false, err
+		}
+		links = append(links, link)
+	}
+
+	insertQuery = tx.StmtContext(ctx, insertQuery)
+
+	for _, link := range links {
+		hash := link.Hash()
+		parent := link.Parent()
+
+		_, err := insertQuery.ExecContext(
+			ctx,
+			link.Name(),
+			link.TSize(),
+			util.DbCID(&hash),
+			util.DbCID(&parent),
+			util.DbDID(&spaceDID),
+			link.Order(),
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to insert link %s for parent %s: %w", link.Name(), parent, err)
+		}
+	}
+	return newNode, true, tx.Commit()
 }
 
 // HasIncompleteChildren returns whether the given directory scan has at least
