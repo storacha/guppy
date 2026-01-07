@@ -3,7 +3,6 @@ package dagservice
 import (
 	"context"
 	"fmt"
-	"math/rand"
 
 	"github.com/ipfs/boxo/exchange"
 	blocks "github.com/ipfs/go-block-format"
@@ -40,10 +39,7 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
 
-	// Randomly pick one of the available locations
-	location := locations[rand.Intn(len(locations))]
-
-	blockBytes, err := se.retriever.Retrieve(ctx, se.space, location)
+	blockBytes, err := se.retriever.Retrieve(ctx, se.space, locations)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}

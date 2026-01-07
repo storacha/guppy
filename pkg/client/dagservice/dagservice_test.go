@@ -130,7 +130,9 @@ func commitmentKey(commitment ucan.Capability[assertcap.LocationCaveats]) (strin
 	return string(json), err
 }
 
-func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, location locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+func (r stubRetriever) Retrieve(ctx context.Context, space did.DID, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+	location := locations[0]
+
 	key, err := commitmentKey(location.Commitment)
 	if err != nil {
 		return nil, err

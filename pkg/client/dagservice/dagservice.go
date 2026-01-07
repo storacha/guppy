@@ -16,7 +16,7 @@ import (
 )
 
 type Retriever interface {
-	Retrieve(ctx context.Context, space did.DID, location locator.Location, retrievalOpts ...rclient.Option) ([]byte, error)
+	Retrieve(ctx context.Context, space did.DID, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error)
 }
 
 var _ Retriever = (*client.Client)(nil)
