@@ -444,69 +444,6 @@ func (r *Repo) DeleteShard(ctx context.Context, shardID id.ShardID) error {
 	return nil
 }
 
-// FindOrCreateNodeUpload finds or creates a node upload record.
-// Returns (nodeUpload, created, error) where created=true if a new record was inserted.
-func (r *Repo) FindOrCreateNodeUpload(ctx context.Context, uploadID id.UploadID, nodeCID cid.Cid, spaceDID did.DID) (bool, error) {
-	findExistingQuery, err := r.prepareStmt(ctx, `
-		SELECT 1
-		FROM node_uploads
-		WHERE node_cid = ? AND space_did = ? AND upload_id = ?`)
-	if err != nil {
-		return false, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-
-	createNodeUpload, err := r.prepareStmt(ctx, `
-		INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
-		VALUES (?, ?, ?, NULL, NULL)`)
-	if err != nil {
-		return false, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	findExistingQuery = tx.StmtContext(ctx, findExistingQuery)
-	createNodeUpload = tx.StmtContext(ctx, createNodeUpload)
-
-	// Try to find existing record first
-	row := findExistingQuery.QueryRowContext(ctx,
-		util.DbCID(&nodeCID),
-		util.DbDID(&spaceDID),
-		uploadID,
-	)
-	var dummy int
-	err = row.Scan(&dummy)
-	if err == nil {
-		// Found existing record
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-
-	if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
-	}
-
-	// Create new record
-	_, err = createNodeUpload.ExecContext(ctx,
-		util.DbCID(&nodeCID),
-		util.DbDID(&spaceDID),
-		uploadID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("failed to create node upload for node %s: %w", nodeCID, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
 // NodesNotInShards returns CIDs of nodes that are not yet assigned to shards.
 func (r *Repo) NodesNotInShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]cid.Cid, error) {
 	nodesNotInShardsQuery, err := r.prepareStmt(ctx, `
