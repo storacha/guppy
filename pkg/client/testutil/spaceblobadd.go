@@ -569,7 +569,8 @@ type BlobReceiver interface {
 // blobPutTransport is an [http.RoundTripper] (an [http.Client] transport) that
 // accepts blob PUTs and remembers what was received.
 type blobPutTransport struct {
-	receivedBlobs BlobMap
+	receivedBlobsLk sync.RWMutex
+	receivedBlobs   BlobMap
 }
 
 var _ http.RoundTripper = (*blobPutTransport)(nil)
@@ -590,6 +591,8 @@ func (r *blobPutTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil {
 		return nil, fmt.Errorf("reading blob from request: %w", err)
 	}
+	r.receivedBlobsLk.Lock()
+	defer r.receivedBlobsLk.Unlock()
 	r.receivedBlobs.Set(digest, blob)
 
 	return &http.Response{
