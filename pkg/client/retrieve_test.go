@@ -75,7 +75,7 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve the content using the custom HTTP client
-		data, err := c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
+		data, err := c.Retrieve(testContext(t), space.DID(), []locator.Location{location}, rclient.WithClient(httpClient))
 		require.NoError(t, err)
 		require.Equal(t, testData, data)
 	})
@@ -138,7 +138,7 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve should fail because client detects data hash mismatch
-		_, err = c.Retrieve(testContext(t), space.DID(), location, rclient.WithClient(httpClient))
+		_, err = c.Retrieve(testContext(t), space.DID(), []locator.Location{location}, rclient.WithClient(httpClient))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "content hash mismatch")
 	})
@@ -187,7 +187,7 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve should fail due to invalid DID (no HTTP client needed since it fails before connection)
-		_, err = c.Retrieve(testContext(t), space.DID(), location)
+		_, err = c.Retrieve(testContext(t), space.DID(), []locator.Location{location})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "parsing DID")
 	})
@@ -243,7 +243,7 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve should fail due to connection error (use default HTTP client which will fail to connect)
-		_, err = c.Retrieve(testContext(t), space.DID(), location)
+		_, err = c.Retrieve(testContext(t), space.DID(), []locator.Location{location})
 		require.Error(t, err)
 	})
 }

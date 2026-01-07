@@ -21,7 +21,10 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
-func (c *Client) Retrieve(ctx context.Context, space did.DID, location locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+func (c *Client) Retrieve(ctx context.Context, space did.DID, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+	// Randomly pick one of the available locations
+	location := locations[rand.Intn(len(locations))]
+
 	locationCommitment := location.Commitment
 
 	nodeID, err := did.Parse(locationCommitment.With())
