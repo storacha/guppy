@@ -15,6 +15,7 @@ import (
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/bus"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -71,7 +72,8 @@ var uploadCmd = &cobra.Command{
 		// to see the usage.
 		cmd.SilenceUsage = true
 
-		repo, err := makeRepo(ctx)
+		eb := bus.New()
+		repo, err := makeRepo(ctx, sqlrepo.WithEventBus(eb))
 		if err != nil {
 			return err
 		}
@@ -80,7 +82,10 @@ var uploadCmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath), preparation.WithBlobUploadParallelism(int(uploadFlags.parallelism)))
+		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath),
+			preparation.WithBlobUploadParallelism(int(uploadFlags.parallelism)),
+			preparation.WithEventBus(eb),
+		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)
@@ -126,7 +131,7 @@ var uploadCmd = &cobra.Command{
 		}
 
 		if useUI {
-			return ui.RunUploadUI(ctx, repo, api, uploadsToRun, uploadFlags.retry)
+			return ui.RunUploadUI(ctx, repo, api, uploadsToRun, uploadFlags.retry, eb)
 		}
 		// UI disabled, log at info level
 		logging.SetAllLoggers(logging.LevelInfo)
@@ -384,6 +389,6 @@ func init() {
 	uploadSourceCmd.AddCommand(uploadSourcesListCmd)
 }
 
-func makeRepo(ctx context.Context) (*sqlrepo.Repo, error) {
-	return preparation.OpenRepo(ctx, uploadFlags.dbPath)
+func makeRepo(ctx context.Context, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
+	return preparation.OpenRepo(ctx, uploadFlags.dbPath, opts...)
 }

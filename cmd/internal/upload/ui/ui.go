@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,11 +21,10 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/mattn/go-isatty"
 	"github.com/samber/lo"
-	"github.com/storacha/go-libstoracha/digestutil"
 
-	"github.com/storacha/guppy/internal/largeupload/bubbleup"
+	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation"
-	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -46,13 +46,14 @@ type uploadModel struct {
 	uploads []*uploadsmodel.Upload
 	rng     *rand.Rand
 
-	observer *uploadObserver
+	observer            *UploadObserver
+	currentObservations []Observation
 
-	// State (Maps for multi-upload support)
-	recentAddedShards  map[id.UploadID][]*sqlrepo.ShardView
-	recentClosedShards map[id.UploadID][]*sqlrepo.ShardView
-	filesToDAGScan     map[id.UploadID][]*sqlrepo.FSScanView
-	shardedFiles       map[id.UploadID][]sqlrepo.FileInfo
+	clientPutProgress map[id.UploadID]map[id.ID]progress.Model
+	dagProgress       map[id.UploadID]progress.Model
+	uploadTotals      map[id.UploadID]float64
+	uploadCompleted   map[id.UploadID]float64
+	progressSamples   map[id.UploadID]progressSample
 
 	// Aggregated Totals
 	addedShardsSize  uint64
@@ -65,10 +66,6 @@ type uploadModel struct {
 	openShardsStats map[id.UploadID]uint64
 	dagScanStats    map[id.UploadID]uint64
 
-	dagsScanned      uint64
-	dagsToScan       uint64
-	fileBytesScanned uint64
-
 	results map[id.UploadID]cid.Cid
 
 	// Bubbles (Nested map: UploadID -> ShardID -> Spinner)
@@ -79,11 +76,19 @@ type uploadModel struct {
 	lastRetriableErr *types.RetriableError
 }
 
+type progressSample struct {
+	bytes float64
+	rate  float64
+	t     time.Time
+}
+
 func (m uploadModel) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.uploads)*2)
 	for _, u := range m.uploads {
 		cmds = append(cmds, executeUpload(m.ctx, m.api, u))
-		cmds = append(cmds, checkStats(m.ctx, m.observer, m.repo, u.ID()))
+		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return m.observer.Observe(m.ctx)
+		}))
 	}
 	return tea.Batch(cmds...)
 }
@@ -104,72 +109,81 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Only quit if ALL uploads are finished
 		if len(m.results) == len(m.uploads) {
+			time.Sleep(time.Second)
 			return m, tea.Quit
 		}
 		return m, nil
 
-	case statsMsg:
+	case []Observation:
 		var cmds []tea.Cmd
+		m.currentObservations = msg
 
-		// 1. Store data for THIS specific upload
-		m.recentAddedShards[msg.uploadID] = msg.addedShards
-		m.recentClosedShards[msg.uploadID] = msg.closedShards
-		m.filesToDAGScan[msg.uploadID] = msg.filesToDAGScan
-		m.shardedFiles[msg.uploadID] = msg.shardedFiles
-		m.dagsToScan = msg.dagsToScan
-		m.dagsScanned = msg.dagsScanned
-		m.fileBytesScanned = msg.fileBytesScanned
+		for _, obs := range m.currentObservations {
+			uid := obs.Model.ID()
+			if _, ok := m.clientPutProgress[uid]; !ok {
+				m.clientPutProgress[uid] = make(map[id.ID]progress.Model)
+			}
+			if _, ok := m.dagProgress[uid]; !ok {
+				m.dagProgress[uid] = progress.New(progress.WithDefaultGradient())
+			}
+			var uploadedBytes float64
+			for bid, pgrs := range obs.ClientUploadProgress {
+				cpb, ok := m.clientPutProgress[uid][bid]
+				if !ok {
+					cpb = progress.New(progress.WithDefaultGradient())
+				}
+				if pgrs.Total > 0 {
+					if cmd := cpb.SetPercent(float64(pgrs.Uploaded) / float64(pgrs.Total)); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+				m.clientPutProgress[uid][bid] = cpb
+				uploadedBytes += float64(pgrs.Uploaded)
+			}
 
-		// 2. Update stats for THIS specific upload
-		openSize := uint64(0)
-		for _, s := range msg.openShards {
-			openSize += s.Size
-		}
-		m.openShardsStats[msg.uploadID] = openSize
-		m.dagScanStats[msg.uploadID] = msg.bytesToDAGScan
-
-		// 3. Handle Spinners
-		if m.closedShardSpinners[msg.uploadID] == nil {
-			m.closedShardSpinners[msg.uploadID] = make(map[id.ShardID]spinner.Model)
-		}
-		currentSpinners := m.closedShardSpinners[msg.uploadID]
-
-		newSpinners := make(map[id.ShardID]spinner.Model)
-		for _, s := range msg.closedShards {
-			if sp, ok := currentSpinners[s.ID]; ok {
-				newSpinners[s.ID] = sp
+			// Update DAG progress for this upload.
+			pb := m.dagProgress[uid]
+			dagPercent := 1.0
+			if obs.TotalDags > 0 {
+				dagPercent = float64(obs.ProcessedDags) / float64(obs.TotalDags)
+			} else if obs.ProcessedDags > 0 {
+				dagPercent = 1
+			}
+			if obs.ProcessedDags == 0 {
+				if cmd := pb.SetPercent(1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			} else {
-				newSpinner := spinner.New(spinner.WithSpinner(bubbleup.Spinner(m.rng)))
-				newSpinners[s.ID] = newSpinner
-				cmds = append(cmds, newSpinner.Tick)
+				if cmd := pb.SetPercent(dagPercent); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
-		}
-		m.closedShardSpinners[msg.uploadID] = newSpinners
+			m.dagProgress[uid] = pb
 
-		// 4. Recalculate Global Totals
-		m.addedShardsSize = 0
-		m.closedShardsSize = 0
-		m.openShardsSize = 0
-		m.dagScans = 0
-
-		for _, shards := range m.recentAddedShards {
-			for _, s := range shards {
-				m.addedShardsSize += s.Size
+			// Track aggregate upload bytes and throughput for ETA/progress.
+			m.uploadTotals[uid] = float64(obs.BytesRead)
+			m.uploadCompleted[uid] = uploadedBytes
+			now := time.Now()
+			prev := m.progressSamples[uid]
+			sample := progressSample{bytes: uploadedBytes, t: now, rate: prev.rate}
+			if !prev.t.IsZero() && uploadedBytes >= prev.bytes {
+				deltaBytes := uploadedBytes - prev.bytes
+				deltaT := now.Sub(prev.t).Seconds()
+				if deltaT > 0 {
+					instRate := deltaBytes / deltaT
+					if prev.rate > 0 {
+						instRate = 0.7*prev.rate + 0.3*instRate
+					}
+					sample.rate = instRate
+				}
 			}
-		}
-		for _, shards := range m.recentClosedShards {
-			for _, s := range shards {
-				m.closedShardsSize += s.Size
-			}
-		}
-		for _, size := range m.openShardsStats {
-			m.openShardsSize += size
-		}
-		for _, size := range m.dagScanStats {
-			m.dagScans += size
+			m.progressSamples[uid] = sample
 		}
 
-		return m, tea.Batch(append(cmds, checkStats(m.ctx, m.observer, m.repo, msg.uploadID))...)
+		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return m.observer.Observe(m.ctx)
+		}))
+		return m, tea.Sequence(cmds...)
 
 	case error:
 
@@ -198,6 +212,20 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	default:
 		var cmds []tea.Cmd
+		for uid, blobBars := range m.clientPutProgress {
+			for bid, pb := range blobBars {
+				npb, cmd := pb.Update(msg)
+				pb = npb.(progress.Model)
+				m.clientPutProgress[uid][bid] = pb
+				cmds = append(cmds, cmd)
+			}
+		}
+		for uid, pb := range m.dagProgress {
+			npb, cmd := pb.Update(msg)
+			pb = npb.(progress.Model)
+			m.dagProgress[uid] = pb
+			cmds = append(cmds, cmd)
+		}
 		for uid, shardMap := range m.closedShardSpinners {
 			for sid, sp := range shardMap {
 				updatedSpinner, cmd := sp.Update(msg)
@@ -205,7 +233,7 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Sequence(cmds...)
 	}
 }
 
@@ -213,11 +241,41 @@ func renderListItem(style lipgloss.Style, text string, size uint64) string {
 	return "• " + style.Render(text) + " " + style.Faint(true).Render(humanize.Bytes(size)) + "\n"
 }
 
+func formatETA(total, uploaded float64, sample progressSample) string {
+	if total <= 0 {
+		return ""
+	}
+	remaining := total - uploaded
+	if remaining <= 0 {
+		return ""
+	}
+	if sample.rate <= 0 {
+		return ""
+	}
+	eta := time.Duration(remaining/sample.rate) * time.Second
+	if eta < time.Second {
+		return "<1s"
+	}
+	etaStr := eta.Round(time.Second).String()
+
+	// Convert bytes/sec -> bits/sec and display Mbps or Gbps.
+	bps := sample.rate * 8
+	throughput := ""
+	switch {
+	case bps >= 1_000_000_000:
+		throughput = fmt.Sprintf(" @ %.2f Gbps", bps/1_000_000_000)
+	case bps > 0:
+		throughput = fmt.Sprintf(" @ %.2f Mbps", bps/1_000_000)
+	}
+
+	return etaStr + throughput
+}
+
 func (m uploadModel) View() string {
-	addedShardColor := lipgloss.Color("#0176CE")
-	closedShardColor := lipgloss.Color("#7CABCF")
-	shardedColor := lipgloss.Color("#FFE299")
-	scannedColor := lipgloss.Color("#E88B8D")
+	//addedShardColor := lipgloss.Color("#0176CE")
+	//closedShardColor := lipgloss.Color("#7CABCF")
+	//shardedColor := lipgloss.Color("#FFE299")
+	//scannedColor := lipgloss.Color("#E88B8D")
 
 	var output strings.Builder
 
@@ -227,64 +285,102 @@ func (m uploadModel) View() string {
 		output.WriteString(style.Bold(true).Render("Uploading with auto-retry enabled...\n\n"))
 	}
 
-	output.WriteString(fmt.Sprintf("Dags To Scan: %d\n", m.dagsToScan))
-	output.WriteString(fmt.Sprintf("Dags Scanned: %d\n", m.dagsScanned))
-	output.WriteString(fmt.Sprintf("File Bytes Scanned: %s\n", humanize.Bytes(m.fileBytesScanned)))
-	output.WriteString("Shards:\n")
-	// Iterate uploads to show shards for everyone
-	for _, u := range m.uploads {
-		uid := u.ID()
-		if shards, ok := m.recentAddedShards[uid]; ok {
+	for _, u := range m.currentObservations {
+		output.WriteString(fmt.Sprintf("Upload ID: %s\n", u.Model.ID()))
+		// Aggregate shard totals and build rows.
+		var totalShardSize uint64
+		type shardRow struct {
+			view  events.ShardView
+			state string
+			order int
+		}
+		rows := make([]shardRow, 0, len(u.OpenShards)+len(u.ClosedShards)+len(u.UploadedShards)+len(u.AddedShards))
+
+		addRows := func(shards []events.ShardView, state string, order int, _ bool) {
 			for _, s := range shards {
-				output.WriteString(renderListItem(style.Foreground(addedShardColor), digestutil.Format(s.Digest), s.Size))
+				rows = append(rows, shardRow{view: s, state: state, order: order})
+				totalShardSize += s.Size
 			}
 		}
-		if shards, ok := m.recentClosedShards[uid]; ok {
-			for _, s := range shards {
-				spView := ""
-				if spMap, ok := m.closedShardSpinners[uid]; ok {
-					if sp, ok := spMap[s.ID]; ok {
-						spView = sp.View() + " "
-					}
-				}
-				output.WriteString(renderListItem(style.Foreground(closedShardColor), spView+s.ID.String(), s.Size))
+
+		addRows(u.OpenShards, "Packing", 1, false)
+		addRows(u.ClosedShards, "Queued", 2, false)
+		addRows(u.UploadedShards, "Uploaded", 3, true)
+		addRows(u.AddedShards, "Complete", 4, true)
+
+		blobBars := m.clientPutProgress[u.Model.ID()]
+		var completedShardBytes float64
+		for i := range rows {
+			row := &rows[i]
+			if _, ok := blobBars[row.view.ID]; ok {
+				row.state = "Uploading"
+				completedShardBytes += float64(row.view.Size) * m.clientPutProgress[u.Model.ID()][row.view.ID].Percent()
+				continue
+			}
+			if row.state == "Uploaded" || row.state == "Complete" {
+				completedShardBytes += float64(row.view.Size)
 			}
 		}
+
+		if pb, ok := m.dagProgress[u.Model.ID()]; ok {
+			output.WriteString("Scan Progress:\t\t")
+			output.WriteString(pb.View() + "\n")
+			output.WriteString(fmt.Sprintf("\tFiles Scanned: %d\n", u.ProcessedDags))
+		}
+
+		totalBytes := m.uploadTotals[u.Model.ID()]
+		overallPercent := 0.0
+		if totalBytes == 0 {
+			totalBytes = float64(totalShardSize)
+		}
+		completedBytes := completedShardBytes
+		if totalBytes > 0 {
+			overallPercent = completedBytes / totalBytes
+			if overallPercent > 1 {
+				overallPercent = 1
+			}
+		}
+
+		shardProgressBar := progress.New(progress.WithDefaultGradient())
+		eta := formatETA(totalBytes, completedBytes, m.progressSamples[u.Model.ID()])
+		output.WriteString("Upload Progress:\t")
+		output.WriteString(shardProgressBar.ViewAs(overallPercent))
+		if eta != "" {
+			output.WriteString("\n\tETA: " + eta)
+		}
+		output.WriteString(fmt.Sprintf(" (%s of %s)", humanize.Bytes(uint64(completedBytes)),
+			humanize.Bytes(uint64(totalBytes))))
+		output.WriteString("\n")
+
+		output.WriteString("\nShard Progress:\n")
+		output.WriteString(fmt.Sprintf("%-36s %-9s %-8s %s\n", "Shard", "State", "Size", "Put Progress"))
+
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].order != rows[j].order {
+				return rows[i].order < rows[j].order
+			}
+			return rows[i].view.ID.String() < rows[j].view.ID.String()
+		})
+
+		completeBar := progress.New(progress.WithDefaultGradient())
+		for _, row := range rows {
+			pbStr := "--"
+			if pb, ok := blobBars[row.view.ID]; ok {
+				pbStr = pb.View()
+			} else if row.state == "Uploaded" || row.state == "Complete" {
+				pbStr = completeBar.ViewAs(1)
+			}
+			output.WriteString(fmt.Sprintf("%-36s %-9s %-8s %s\n",
+				row.view.ID.String(),
+				row.state,
+				humanize.Bytes(row.view.Size),
+				pbStr,
+			))
+		}
+
+		output.WriteString("\n\n")
+
 	}
-	output.WriteString("\n")
-
-	output.WriteString("Added to Shards:\n")
-	for _, u := range m.uploads {
-		if files, ok := m.shardedFiles[u.ID()]; ok {
-			for i, fi := range files {
-				if i < 3 {
-					output.WriteString(renderListItem(style.Foreground(shardedColor), fi.Path, fi.Size))
-				}
-			}
-		}
-	}
-
-	output.WriteString("\n")
-
-	output.WriteString("Scanning Files:\n")
-	for _, u := range m.uploads {
-		if files, ok := m.filesToDAGScan[u.ID()]; ok {
-			for i, fi := range files {
-				if i < 3 {
-					output.WriteString(renderListItem(style.Foreground(scannedColor), fi.Path, fi.Size))
-				}
-			}
-		}
-	}
-
-	output.WriteString("\n")
-
-	output.WriteString(renderBars([]bar{
-		{color: addedShardColor, value: int(m.addedShardsSize)},
-		{color: closedShardColor, value: int(m.closedShardsSize)},
-		{color: shardedColor, value: int(m.openShardsSize)},
-		{color: scannedColor, value: int(m.dagScans)},
-	}, 80))
 
 	if m.lastRetriableErr != nil {
 		output.WriteString("\n\n")
@@ -328,34 +424,20 @@ func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmode
 	}
 }
 
-type statsMsg struct {
-	uploadID         id.UploadID
-	addedShards      []*sqlrepo.ShardView
-	closedShards     []*sqlrepo.ShardView
-	openShards       []*sqlrepo.ShardView
-	bytesToDAGScan   uint64
-	filesToDAGScan   []*sqlrepo.FSScanView
-	shardedFiles     []sqlrepo.FileInfo
-	dagsToScan       uint64
-	dagsScanned      uint64
-	fileBytesScanned uint64
+type fileDagStatusSample struct {
+	Path string
+	Size uint64
 }
 
-func newUploadObserver(repo *sqlrepo.Repo, uploadIDs []id.UploadID) *uploadObserver {
-	uploads := make(map[id.UploadID]*uploadView, len(uploadIDs))
-	for _, uid := range uploadIDs {
-		uploads[uid] = &uploadView{
-			UploadID: uid,
-			Shards:   make(map[id.ShardID]*sqlrepo.ShardView),
-			DagScans: make(map[id.FSEntryID]*sqlrepo.DAGScanView),
-			FSScans:  make(map[id.FSEntryID]*sqlrepo.FSScanView),
-		}
-	}
-	return &uploadObserver{
-		Uploads: uploads,
-		Repo:    repo,
-	}
+type fileDagStatusBucket struct {
+	Count   int
+	Samples []fileDagStatusSample
+}
 
+type fileDagStatusSummary struct {
+	Shared   fileDagStatusBucket
+	Pending  fileDagStatusBucket
+	Unshared fileDagStatusBucket
 }
 
 type uploadObserver struct {
@@ -368,17 +450,40 @@ type uploadView struct {
 	// The ID of the upload this view is for
 	UploadID id.UploadID
 	// The shards for the upload
-	Shards   map[id.ShardID]*sqlrepo.ShardView
+	Shards   map[id.ShardID]*events.ShardView
 	shardsMu sync.RWMutex
 
-	DagScans   map[id.FSEntryID]*sqlrepo.DAGScanView
+	DagScans   map[id.FSEntryID]*events.DAGScanView
 	dagScansMu sync.RWMutex
 
-	FSScans  map[id.FSEntryID]*sqlrepo.FSScanView
+	FSScans  map[id.FSEntryID]*events.FSScanView
 	fsScanMu sync.RWMutex
+
+	putProgress map[id.ID]events.PutProgress
+	putMu       sync.RWMutex
 }
 
+/*
 func (o *uploadObserver) subscribe(ctx context.Context) error {
+	if err := o.Repo.Subscriber().Subscribe("put_progress", func(progresses events.PutProgress) {
+		for _, progress := range progresses {
+			o.uploadsMu.RLock()
+			upload, ok := o.Uploads[progress.UploadID]
+			o.uploadsMu.RUnlock()
+			if !ok {
+				continue
+			}
+			upload.putMu.Lock()
+			if upload.putProgress == nil {
+				upload.putProgress = make(map[id.ID]client.PutProgress)
+			}
+			upload.putProgress[progress.BlobID] = progress
+			upload.putMu.Unlock()
+		}
+	}); err != nil {
+		return err
+	}
+
 	o.uploadsMu.Lock()
 	for uploadID := range o.Uploads {
 		// get the current state one time from the DB, since the subscriber will only get _new_ DB changes
@@ -387,9 +492,9 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		shardView := make(map[id.ShardID]*sqlrepo.ShardView, len(shards))
+		shardView := make(map[id.ShardID]*events.ShardView, len(shards))
 		for _, shard := range shards {
-			shardView[shard.ID()] = &sqlrepo.ShardView{
+			shardView[shard.ID()] = &events.ShardView{
 				ID:        shard.ID(),
 				UploadID:  shard.UploadID(),
 				Size:      shard.Size(),
@@ -401,15 +506,69 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 			}
 		}
 
+		// preload DAG scans and FS scans from the database for resumed runs
+		dagScans := make(map[id.FSEntryID]*events.DAGScanView)
+		fsScans := make(map[id.FSEntryID]*events.FSScanView)
+
+		loadDAGScan := func(ds dagmodel.DAGScan) {
+			dagScans[ds.FsEntryID()] = &events.DAGScanView{
+				FSEntryID: ds.FsEntryID(),
+				Created:   ds.CreatedAt(),
+				Updated:   ds.UpdatedAt(),
+				CID:       ds.CID(),
+			}
+		}
+
+		incomplete, err := o.Repo.IncompleteDAGScansForUpload(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+		for _, ds := range incomplete {
+			loadDAGScan(ds)
+		}
+
+		complete, err := o.Repo.CompleteDAGScansForUpload(ctx, uploadID)
+		if err != nil {
+			return err
+		}
+		for _, ds := range complete {
+			loadDAGScan(ds)
+		}
+
+		fsEntryIDs := make(map[id.FSEntryID]struct{}, len(dagScans))
+		for fsID := range dagScans {
+			fsEntryIDs[fsID] = struct{}{}
+		}
+		for fsID := range fsEntryIDs {
+			file, err := o.Repo.GetFileByID(ctx, fsID)
+			if err != nil {
+				if strings.Contains(err.Error(), "found entry is not a file") {
+					// directories may have DAG scans but aren't needed for file status summaries
+					continue
+				}
+				return err
+			}
+			if file == nil {
+				continue // likely a directory; directories are size 0 and ignored in status
+			}
+			fsScans[fsID] = &events.FSScanView{
+				Path:      file.Path(),
+				IsDir:     false,
+				Size:      file.Size(),
+				FSEntryID: file.ID(),
+			}
+		}
+
 		o.Uploads[uploadID] = &uploadView{
-			UploadID: uploadID,
-			Shards:   shardView,
-			DagScans: make(map[id.FSEntryID]*sqlrepo.DAGScanView),
-			FSScans:  make(map[id.FSEntryID]*sqlrepo.FSScanView),
+			UploadID:    uploadID,
+			Shards:      shardView,
+			DagScans:    dagScans,
+			FSScans:     fsScans,
+			putProgress: make(map[id.ID]client.PutProgress),
 		}
 
 		// now subscribe to receive all new state
-		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("shard:%s", uploadID), func(shard *sqlrepo.ShardView) {
+		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("shard:%s", uploadID), func(shard *events.ShardView) {
 			upload := o.Uploads[uploadID]
 			upload.shardsMu.Lock()
 			upload.Shards[shard.ID] = shard
@@ -417,7 +576,7 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("dag_scan:%s", uploadID), func(scan *sqlrepo.DAGScanView) {
+		if err := o.Repo.Subscriber().Subscribe(fmt.Sprintf("dag_scan:%s", uploadID), func(scan *events.DAGScanView) {
 			upload := o.Uploads[uploadID]
 			upload.dagScansMu.Lock()
 			upload.DagScans[scan.FSEntryID] = scan
@@ -425,7 +584,7 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		if err := o.Repo.Subscriber().Subscribe("fsentry", func(fsentry *sqlrepo.FSScanView) {
+		if err := o.Repo.Subscriber().Subscribe("fsentry", func(fsentry *events.FSScanView) {
 			upload := o.Uploads[uploadID]
 			upload.fsScanMu.Lock()
 			upload.FSScans[fsentry.FSEntryID] = fsentry
@@ -438,54 +597,36 @@ func (o *uploadObserver) subscribe(ctx context.Context) error {
 	return nil
 }
 
-func (o *uploadObserver) ShardsForUploadByState(
-	ctx context.Context,
-	uploadID id.UploadID,
-	state blobsmodel.BlobState,
-) ([]*sqlrepo.ShardView, error) {
+*/
+
+func (o *uploadObserver) FilesScanned(ctx context.Context, uploadID id.UploadID) ([]*events.FSScanView, error) {
+	_ = ctx
+
 	o.uploadsMu.RLock()
-	defer o.uploadsMu.RUnlock()
-
 	upload, ok := o.Uploads[uploadID]
+	o.uploadsMu.RUnlock()
 	if !ok {
-		return []*sqlrepo.ShardView{}, nil
+		return []*events.FSScanView{}, nil
 	}
 
-	upload.shardsMu.RLock()
-	defer upload.shardsMu.RUnlock()
-
-	// Collect matching shards
-	out := make([]*sqlrepo.ShardView, 0, len(upload.Shards))
-	for _, v := range upload.Shards {
-		if v.State == state {
-			out = append(out, v)
-		}
+	upload.dagScansMu.RLock()
+	dagScans := make(map[id.FSEntryID]*events.DAGScanView, len(upload.DagScans))
+	for k, v := range upload.DagScans {
+		dagScans[k] = v
 	}
+	upload.dagScansMu.RUnlock()
 
-	// Sort: size descending, ID asc as tie-break
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Size != out[j].Size {
-			return out[i].Size > out[j].Size // larger first
-		}
-		return out[i].ID.String() < out[j].ID.String()
-	})
-
-	return out, nil
-}
-
-func (o *uploadObserver) FilesScanned(ctx context.Context, uploadID id.UploadID) ([]*sqlrepo.FSScanView, error) {
-	o.uploadsMu.RLock()
-	defer o.uploadsMu.RUnlock()
-
-	upload, ok := o.Uploads[uploadID]
-	if !ok {
-		return []*sqlrepo.FSScanView{}, nil
-	}
 	upload.fsScanMu.RLock()
 	defer upload.fsScanMu.RUnlock()
-	out := make([]*sqlrepo.FSScanView, 0, len(upload.FSScans))
+	out := make([]*events.FSScanView, 0, len(upload.FSScans))
 	for _, v := range upload.FSScans {
-		out = append(out, v)
+		if v.IsDir {
+			continue
+		}
+		ds, ok := dagScans[v.FSEntryID]
+		if !ok || ds.CID == cid.Undef {
+			out = append(out, v)
+		}
 	}
 	return out, nil
 }
@@ -501,129 +642,88 @@ func (o *uploadObserver) BytesScanned(ctx context.Context, uploadID id.UploadID)
 	upload.fsScanMu.RLock()
 	defer upload.fsScanMu.RUnlock()
 	return lo.Sum(
-		lo.MapToSlice(upload.FSScans, func(_ id.ShardID, v *sqlrepo.FSScanView) uint64 {
+		lo.MapToSlice(upload.FSScans, func(_ id.ShardID, v *events.FSScanView) uint64 {
 			return v.Size
 		}),
 	), nil
 }
 
-func (o *uploadObserver) DagsToScan(ctx context.Context, uploadID id.UploadID) (uint64, error) {
-	o.uploadsMu.RLock()
-	defer o.uploadsMu.RUnlock()
+/*
+func (o *uploadObserver) FileDagStatus(ctx context.Context, uploadID id.UploadID, sampleLimit int) (fileDagStatusSummary, error) {
+	_ = ctx
 
+	o.uploadsMu.RLock()
 	upload, ok := o.Uploads[uploadID]
+	o.uploadsMu.RUnlock()
 	if !ok {
-		return 0, nil
+		return fileDagStatusSummary{}, nil
 	}
 
 	upload.dagScansMu.RLock()
-	defer upload.dagScansMu.RUnlock()
+	dagScans := make(map[id.FSEntryID]*sqlrepo.DAGScanView, len(upload.DagScans))
+	for k, v := range upload.DagScans {
+		dagScans[k] = v
+	}
+	upload.dagScansMu.RUnlock()
 
-	total := uint64(0)
-	for _, v := range upload.DagScans {
-		if v.CID == cid.Undef {
-			total++
+	upload.fsScanMu.RLock()
+	fsScans := make(map[id.FSEntryID]*sqlrepo.FSScanView, len(upload.FSScans))
+	for k, v := range upload.FSScans {
+		fsScans[k] = v
+	}
+	upload.fsScanMu.RUnlock()
+
+	summary := fileDagStatusSummary{}
+
+	for _, fs := range fsScans {
+		if fs.IsDir {
+			continue
+		}
+
+		scan, ok := dagScans[fs.FSEntryID]
+		switch {
+		case ok && scan.CID != cid.Undef:
+			summary.Shared.Count++
+			if len(summary.Shared.Samples) < sampleLimit {
+				summary.Shared.Samples = append(summary.Shared.Samples, fileDagStatusSample{Path: fs.Path, Size: fs.Size})
+			}
+		case ok:
+			summary.Pending.Count++
+			if len(summary.Pending.Samples) < sampleLimit {
+				summary.Pending.Samples = append(summary.Pending.Samples, fileDagStatusSample{Path: fs.Path, Size: fs.Size})
+			}
+		default:
+			summary.Unshared.Count++
+			if len(summary.Unshared.Samples) < sampleLimit {
+				summary.Unshared.Samples = append(summary.Unshared.Samples, fileDagStatusSample{Path: fs.Path, Size: fs.Size})
+			}
 		}
 	}
-	return total, nil
+	sort.Slice(summary.Shared.Samples, func(i, j int) bool { return summary.Shared.Samples[i].Path < summary.Shared.Samples[j].Path })
+	sort.Slice(summary.Pending.Samples, func(i, j int) bool { return summary.Pending.Samples[i].Path < summary.Pending.Samples[j].Path })
+	sort.Slice(summary.Unshared.Samples, func(i, j int) bool { return summary.Unshared.Samples[i].Path < summary.Unshared.Samples[j].Path })
+
+	return summary, nil
 }
 
-func (o *uploadObserver) DagsCompleted(ctx context.Context, uploadID id.UploadID) (uint64, error) {
-	o.uploadsMu.RLock()
-	defer o.uploadsMu.RUnlock()
+*/
 
-	upload, ok := o.Uploads[uploadID]
-	if !ok {
-		return 0, nil
-	}
-
-	upload.dagScansMu.RLock()
-	defer upload.dagScansMu.RUnlock()
-
-	total := uint64(0)
-	for _, v := range upload.DagScans {
-		if v.CID != cid.Undef {
-			total++
-		}
-	}
-	return total, nil
-
-}
-
-func checkStats(ctx context.Context, observer *uploadObserver, repo *sqlrepo.Repo, uploadID id.UploadID) tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		addedShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateAdded)
-		if err != nil {
-			return fmt.Errorf("getting added shards for upload %s: %w", uploadID, err)
-		}
-
-		closedShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateClosed)
-		if err != nil {
-			return fmt.Errorf("getting closed shards for upload %s: %w", uploadID, err)
-		}
-
-		openShards, err := observer.ShardsForUploadByState(ctx, uploadID, blobsmodel.BlobStateOpen)
-		if err != nil {
-			return fmt.Errorf("getting open shards for upload %s: %w", uploadID, err)
-		}
-
-		bytesToDAGScan, err := observer.BytesScanned(ctx, uploadID)
-		if err != nil {
-			return fmt.Errorf("getting total bytes to scan for upload %s: %w", uploadID, err)
-		}
-
-		filesToDAGScan, err := observer.FilesScanned(ctx, uploadID)
-		if err != nil {
-			return fmt.Errorf("getting info on remaining files for upload %s: %w", uploadID, err)
-		}
-
-		shardedFiles, err := repo.ShardedFiles(ctx, uploadID, 6)
-		if err != nil {
-			return fmt.Errorf("getting info on sharded files for upload %s: %w", uploadID, err)
-		}
-
-		scanTodo, err := observer.DagsToScan(ctx, uploadID)
-		if err != nil {
-			return err
-		}
-
-		scanDone, err := observer.DagsCompleted(ctx, uploadID)
-		if err != nil {
-			return err
-		}
-		bytesScanned, err := observer.BytesScanned(ctx, uploadID)
-		if err != nil {
-			return err
-		}
-
-		return statsMsg{
-			uploadID:         uploadID,
-			addedShards:      addedShards,
-			closedShards:     closedShards,
-			openShards:       openShards,
-			bytesToDAGScan:   bytesToDAGScan,
-			filesToDAGScan:   filesToDAGScan,
-			shardedFiles:     shardedFiles,
-			dagsScanned:      scanDone,
-			dagsToScan:       scanTodo,
-			fileBytesScanned: bytesScanned,
-		}
-	})
-}
-
-func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload, retry bool) uploadModel {
+func newUploadModel(
+	ctx context.Context,
+	repo *sqlrepo.Repo,
+	api preparation.API,
+	uploads []*uploadsmodel.Upload,
+	retry bool,
+	eb bus.Subscriber,
+) uploadModel {
 	if len(uploads) == 0 {
 		panic("no uploads provided to upload model")
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	uids := make([]id.UploadID, 0, len(uploads))
-	for _, u := range uploads {
-		uids = append(uids, u.ID())
-	}
-	obs := newUploadObserver(repo, uids)
-	if err := obs.subscribe(ctx); err != nil {
+	obs := NewUploadObserver(eb, repo, uploads...)
+	if err := obs.Subscribe(); err != nil {
 		panic(err)
 	}
 
@@ -636,17 +736,14 @@ func newUploadModel(ctx context.Context, repo *sqlrepo.Repo, api preparation.API
 		results: make(map[id.UploadID]cid.Cid),
 		rng:     rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(time.Now().UnixNano()))),
 
-		observer: obs,
+		observer:          obs,
+		clientPutProgress: make(map[id.UploadID]map[id.ID]progress.Model),
+		dagProgress:       make(map[id.UploadID]progress.Model),
+		uploadTotals:      make(map[id.UploadID]float64),
+		uploadCompleted:   make(map[id.UploadID]float64),
+		progressSamples:   make(map[id.UploadID]progressSample),
 
-		// Initialize Maps
-		recentAddedShards:   make(map[id.UploadID][]*sqlrepo.ShardView),
-		recentClosedShards:  make(map[id.UploadID][]*sqlrepo.ShardView),
-		filesToDAGScan:      make(map[id.UploadID][]*sqlrepo.FSScanView),
-		shardedFiles:        make(map[id.UploadID][]sqlrepo.FileInfo),
-		openShardsStats:     make(map[id.UploadID]uint64),
-		dagScanStats:        make(map[id.UploadID]uint64),
-		closedShardSpinners: make(map[id.UploadID]map[id.ShardID]spinner.Model),
-		retry:               retry,
+		retry: retry,
 	}
 }
 
@@ -703,7 +800,14 @@ func renderBars(bars []bar, width int) string {
 
 }
 
-func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, uploads []*uploadsmodel.Upload, retry bool) error {
+func RunUploadUI(
+	ctx context.Context,
+	repo *sqlrepo.Repo,
+	api preparation.API,
+	uploads []*uploadsmodel.Upload,
+	retry bool,
+	eb bus.Subscriber,
+) error {
 	if len(uploads) == 0 {
 		return fmt.Errorf("no uploads provided to upload UI")
 	}
@@ -717,7 +821,7 @@ func RunUploadUI(ctx context.Context, repo *sqlrepo.Repo, api preparation.API, u
 			tea.WithOutput(io.Discard),
 		)
 	}
-	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads, retry), teaOpts...).Run()
+	m, err := tea.NewProgram(newUploadModel(ctx, repo, api, uploads, retry, eb), teaOpts...).Run()
 	if err != nil {
 		return fmt.Errorf("command failed to run upload UI: %w", err)
 	}

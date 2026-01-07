@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	_ "modernc.org/sqlite"
+
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
 const (
@@ -22,7 +23,7 @@ const (
 	defaultForeignKeys = true
 )
 
-func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
+func OpenRepo(ctx context.Context, dbPath string, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
 	var pragmas []string
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=journal_mode(%s)", defaultJournalMode))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=busy_timeout(%d)", defaultBusyTimeout.Milliseconds()))
@@ -61,7 +62,7 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	// Re-enable logging
 	log.Default().SetOutput(os.Stderr)
 
-	repo := sqlrepo.New(db)
+	repo := sqlrepo.New(db, opts...)
 	return repo, nil
 }
 

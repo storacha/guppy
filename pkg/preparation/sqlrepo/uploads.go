@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/bus/events"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -223,7 +224,7 @@ func (r *Repo) CreateDAGScan(ctx context.Context, fsEntryID id.FSEntryID, isDire
 		if err != nil {
 			return err
 		}
-		r.bus.Publish(fmt.Sprintf("dag_scan:%s", uploadID), &DAGScanView{
+		r.bus.Publish(events.TopicDagScan(uploadID), events.DAGScanView{
 			FSEntryID: fsEntryID,
 			Created:   createdAt,
 			Updated:   updatedAt,

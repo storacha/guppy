@@ -44,6 +44,7 @@ type SpaceBlobAddConfig struct {
 	putClient          *http.Client
 	precomputedDigest  multihash.Multihash
 	precomputedSizePtr *uint64
+	progressFn         func(uploaded int64)
 }
 
 func (s *SpaceBlobAddConfig) PutClient() *http.Client {
@@ -83,6 +84,14 @@ func WithPrecomputedDigest(d multihash.Multihash, size uint64) SpaceBlobAddOptio
 	return func(cfg *SpaceBlobAddConfig) {
 		cfg.precomputedDigest = d
 		cfg.precomputedSizePtr = &size
+	}
+}
+
+// WithPutProgress registers a callback to receive upload progress for the HTTP PUT.
+// The callback is best-effort and may be invoked frequently.
+func WithPutProgress(progressFn func(uploaded int64)) SpaceBlobAddOption {
+	return func(cfg *SpaceBlobAddConfig) {
+		cfg.progressFn = progressFn
 	}
 }
 
@@ -150,6 +159,14 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		contentReader = bytes.NewReader(contentBytes)
 		contentSize := uint64(len(contentBytes))
 		contentSizePtr = &contentSize
+	}
+
+	if cfg.progressFn != nil {
+		contentReader = &progressReader{
+			r:        contentReader,
+			total:    *contentSizePtr,
+			progress: cfg.progressFn,
+		}
 	}
 	caveats := spaceblobcap.AddCaveats{
 		Blob: captypes.Blob{
@@ -603,4 +620,20 @@ func (c *Client) sendPutReceipt(ctx context.Context, putTask invocation.Invocati
 	}
 
 	return nil
+}
+
+type progressReader struct {
+	r         io.Reader
+	total     uint64
+	progress  func(uploaded int64)
+	readSoFar int64
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.readSoFar += int64(n)
+		p.progress(p.readSoFar)
+	}
+	return n, err
 }

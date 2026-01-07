@@ -356,5 +356,5 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 
 	}
 
-	return ui.RunUploadUI(ctx, repo, api, uploads, false)
+	return ui.RunUploadUI(ctx, repo, api, uploads, false, nil)
 }

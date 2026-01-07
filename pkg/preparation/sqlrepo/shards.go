@@ -10,6 +10,7 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -68,7 +69,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 			util.DbInvocation(&pdpAccept),
 		)
 
-		r.bus.Publish(fmt.Sprintf("shard:%s", uploadID), &ShardView{
+		r.bus.Publish(events.TopicShard(uploadID), events.ShardView{
 			ID:        id,
 			UploadID:  uploadID,
 			Size:      size,
@@ -451,7 +452,7 @@ func (r *Repo) UpdateShard(ctx context.Context, shard *model.Shard) error {
 			util.DbInvocation(&pdpAccept),
 			id,
 		)
-		r.bus.Publish(fmt.Sprintf("shard:%s", uploadID), &ShardView{
+		r.bus.Publish(events.TopicShard(uploadID), events.ShardView{
 			ID:        id,
 			UploadID:  uploadID,
 			Size:      size,
