@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/paginator"
@@ -31,44 +32,54 @@ import (
 )
 
 var (
-	storachaBlueGradient   = lipgloss.Color("#0176CE")
-	storachaYellowGradient = lipgloss.Color("#FEC83F")
-
-	storachaBlue      = lipgloss.Color("#0487D9")
-	storachaYellow    = lipgloss.Color("#F2B441")
-	storachaOrange    = lipgloss.Color("#F28A3A")
-	storachaRed       = lipgloss.Color("#F21628")
-	storachaLightBlue = lipgloss.Color("#B6DBF2")
-
 	activeRed   = lipgloss.Color("#dc3030")
 	inactiveRed = lipgloss.Color("#873b3b")
 
 	tableStyle = table.Styles{
-		Header:   panelStyle,
-		Selected: tabActiveStyle.Border(lipgloss.HiddenBorder()),
-		Cell:     tabActiveStyle.Border(lipgloss.HiddenBorder()),
+		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 0),
+		Selected: lipgloss.NewStyle().Padding(0, 0),
+		Cell:     lipgloss.NewStyle().Padding(0, 0),
 	}
 
-	tabActiveStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
+	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
+	tabActiveStyle    = lipgloss.NewStyle().
+		Border(activeTabBorder, true).
 		BorderForeground(activeRed).
 		BorderBottom(true).
 		Bold(true)
 
 	tabInactiveStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(inactiveTabBorder, true).
 		BorderForeground(inactiveRed)
+
+	uploadTabActiveStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(activeRed).
+		Bold(true).
+		Padding(0, 1)
+	uploadTabInactiveStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(inactiveRed).
+		Padding(0, 1)
 
 	panelStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(activeRed)
+		BorderForeground(inactiveRed)
 
 	shardStates = []string{"Packing", "Queued", "Uploading", "Complete"}
 )
 
+func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
+	border := lipgloss.RoundedBorder()
+	border.BottomLeft = left
+	border.Bottom = middle
+	border.BottomRight = right
+	return border
+}
+
 func NewProgressBar() progress.Model {
 	return progress.New(progress.WithWidth(40), progress.WithColorProfile(termenv.Ascii))
-	//return progress.New(progress.WithGradient(string(storachaYellow), string(storachaRed)))
 }
 
 type Canceled struct{}
@@ -78,6 +89,7 @@ func (c Canceled) Error() string {
 }
 
 type uploadModel struct {
+	updateMu sync.Mutex
 	// Configuration
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -149,6 +161,8 @@ func (m *uploadModel) Init() tea.Cmd {
 }
 
 func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
 	// TODO global lock?
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -172,7 +186,7 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "up", "k":
+		case "shift+up", "shift+k":
 			if uid := m.activeUploadID(); uid != nil {
 				state := shardStates[m.shardTabIndex[*uid]]
 				p := m.ensurePaginator(*uid, state, len(m.shardsByState[*uid][state]))
@@ -180,12 +194,22 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.shardPaginators[*uid][state] = p
 			}
 			return m, nil
-		case "down", "j":
+		case "shift+down", "shift+j":
 			if uid := m.activeUploadID(); uid != nil {
 				state := shardStates[m.shardTabIndex[*uid]]
 				p := m.ensurePaginator(*uid, state, len(m.shardsByState[*uid][state]))
 				p.NextPage()
 				m.shardPaginators[*uid][state] = p
+			}
+			return m, nil
+		case "up", "k":
+			if m.tabIndex > 0 {
+				m.tabIndex--
+			}
+			return m, nil
+		case "down", "j":
+			if m.tabIndex < len(m.tabTitles)-1 {
+				m.tabIndex++
 			}
 			return m, nil
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
@@ -207,13 +231,6 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
-		/*
-			case tea.WindowSizeMsg:
-				m.windowWidth = msg.Width
-				m.windowHeight = msg.Height
-				return m, tea.ClearScreen
-
-		*/
 
 	case []Observation:
 		var cmds []tea.Cmd
@@ -275,12 +292,23 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !prev.t.IsZero() && uploadedBytes >= prev.bytes {
 				deltaBytes := uploadedBytes - prev.bytes
 				deltaT := now.Sub(prev.t).Seconds()
-				if deltaT > 0 {
+				if deltaT > 0 && deltaBytes > 0 {
 					instRate := deltaBytes / deltaT
 					if prev.rate > 0 {
-						instRate = 0.7*prev.rate + 0.3*instRate
+						// Clamp instantaneous rate change to ±20% of previous to reduce jitter.
+						lower := prev.rate * 0.8
+						upper := prev.rate * 1.2
+						if instRate < lower {
+							instRate = lower
+						} else if instRate > upper {
+							instRate = upper
+						}
+						// Smooth with heavier weight on prior rate.
+						instRate = 0.8*prev.rate + 0.2*instRate
 					}
 					sample.rate = instRate
+				} else {
+					sample.rate = prev.rate
 				}
 			}
 			m.progressSamples[uid] = sample
@@ -414,21 +442,33 @@ func renderMiniBar(pct float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
-func renderTabs(titles []string, active int) string {
+func renderUploadTabs(titles []string, active int) string {
 	if len(titles) == 0 {
 		return ""
 	}
 
-	segments := make([]string, len(titles))
+	var renderedTabs []string
 	for i, t := range titles {
 		label := fmt.Sprintf("[%d] %s", i+1, t)
-		if i == active {
-			segments[i] = tabActiveStyle.Render(label)
-		} else {
-			segments[i] = tabInactiveStyle.Render(label)
+		isFirst, isLast, isActive := i == 0, i == len(titles)-1, i == active
+		style := uploadTabInactiveStyle
+		if isActive {
+			style = uploadTabActiveStyle
 		}
+		border, _, _, _, _ := style.GetBorder()
+		if isFirst && isActive {
+			border.BottomLeft = "│"
+		} else if isFirst && !isActive {
+			border.BottomLeft = "├"
+		} else if isLast && isActive {
+			border.BottomRight = "│"
+		} else if isLast && !isActive {
+			border.BottomRight = "┤"
+		}
+		style = style.Border(border)
+		renderedTabs = append(renderedTabs, style.Render(label))
 	}
-	return lipgloss.JoinVertical(lipgloss.Top, segments...)
+	return lipgloss.JoinVertical(lipgloss.Top, renderedTabs...)
 }
 
 func (m *uploadModel) activeUploadID() *id.UploadID {
@@ -452,7 +492,7 @@ func (m *uploadModel) ensurePaginator(uid id.UploadID, state string, totalItems 
 	p, ok := m.shardPaginators[uid][state]
 	if !ok {
 		p = paginator.New()
-		p.PerPage = 5
+		p.PerPage = 10
 	}
 	p.SetTotalPages(totalItems)
 	if p.TotalPages < 1 {
@@ -470,21 +510,35 @@ func (m *uploadModel) overallProgress(obs Observation) (completedBytes float64, 
 	var totalShardSize uint64
 	blobBars := m.clientPutProgress[uid]
 
-	for _, s := range obs.OpenShards {
-		totalShardSize += s.Size
+	// Track which shards are fully done.
+	added := make(map[id.ShardID]struct{}, len(obs.AddedShards))
+	for _, s := range obs.AddedShards {
+		added[s.ID] = struct{}{}
 	}
-	for _, s := range obs.ClosedShards {
-		totalShardSize += s.Size
-	}
+	uploaded := make(map[id.ShardID]struct{}, len(obs.UploadedShards))
 	for _, s := range obs.UploadedShards {
+		uploaded[s.ID] = struct{}{}
+	}
+
+	allShards := make([]events.ShardView, 0, len(obs.OpenShards)+len(obs.ClosedShards)+len(obs.UploadedShards)+len(obs.AddedShards))
+	allShards = append(allShards, obs.OpenShards...)
+	allShards = append(allShards, obs.ClosedShards...)
+	allShards = append(allShards, obs.UploadedShards...)
+	allShards = append(allShards, obs.AddedShards...)
+
+	for _, s := range allShards {
 		totalShardSize += s.Size
+		if _, ok := added[s.ID]; ok {
+			completedBytes += float64(s.Size)
+			continue
+		}
+		if _, ok := uploaded[s.ID]; ok {
+			completedBytes += float64(s.Size)
+			continue
+		}
 		if pb, ok := blobBars[s.ID]; ok {
 			completedBytes += float64(s.Size) * pb.Percent()
 		}
-	}
-	for _, s := range obs.AddedShards {
-		totalShardSize += s.Size
-		completedBytes += float64(s.Size)
 	}
 
 	totalBytes = m.uploadTotals[uid]
@@ -537,7 +591,7 @@ func (m *uploadModel) View() string {
 	if active < 0 {
 		active = 0
 	}
-	tabsRendered := renderTabs(labels, active)
+	tabsRendered := renderUploadTabs(labels, active)
 
 	activeID := m.uploads[active].ID()
 	u, ok := m.observationsByID[activeID]
@@ -546,7 +600,53 @@ func (m *uploadModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Top, tabsRendered, panelStyle.Render(body.String()))
 	}
 
-	body.WriteString(fmt.Sprintf("Upload ID: %s\n", u.Model.ID()))
+	// Summary table
+	completedBytes, totalBytes := m.overallProgress(u)
+	overallPercent := 0.0
+	if totalBytes > 0 {
+		overallPercent = completedBytes / totalBytes
+		if overallPercent > 1 {
+			overallPercent = 1
+		}
+	}
+	summaryCols := []table.Column{
+		{Title: "", Width: 16},
+		{Title: "", Width: 80},
+	}
+	summaryRows := []table.Row{
+		{"Upload ID", u.Model.ID().String()},
+		{"Directory", m.tabTitles[active]},
+		{"Size", humanize.IBytes(uint64(totalBytes))},
+		{"Bytes Uploaded", humanize.IBytes(uint64(completedBytes))},
+		{"Files Found", fmt.Sprintf("%d", u.TotalDags)},
+		{"DAGs Created", fmt.Sprintf("%d", func() uint64 {
+			if u.ProcessedDags != 0 {
+				return u.ProcessedDags
+			}
+			return u.TotalDags
+		}())},
+	}
+	if pb, ok := m.dagProgress[u.Model.ID()]; ok {
+		if pb.Percent() == 1 {
+			summaryRows = append(summaryRows, table.Row{"Scan Progress", "Complete"})
+		} else {
+			summaryRows = append(summaryRows, table.Row{"Scan Progress", pb.View()})
+		}
+	}
+	summaryStyles := table.DefaultStyles()
+	summaryStyles.Header = lipgloss.NewStyle().UnsetPadding().UnsetBorderStyle().Height(0)
+	summaryStyles.Cell = lipgloss.NewStyle().UnsetPadding()
+	summaryStyles.Selected = summaryStyles.Cell
+	summaryTable := table.New(
+		table.WithColumns(summaryCols),
+		table.WithRows(summaryRows),
+		table.WithStyles(summaryStyles),
+		table.WithFocused(false),
+		table.WithHeight(9),
+	)
+	summaryTable.Blur()
+	body.WriteString(summaryTable.View())
+
 	// Aggregate shard totals and build rows.
 	type shardRow struct {
 		view  events.ShardView
@@ -576,32 +676,6 @@ func (m *uploadModel) View() string {
 		}
 	}
 
-	if pb, ok := m.dagProgress[u.Model.ID()]; ok {
-		body.WriteString("Scan Progress:\t\t")
-		body.WriteString(pb.View() + "\n")
-		body.WriteString(fmt.Sprintf("Files Scanned: %d\n", u.ProcessedDags))
-	}
-
-	completedBytes, totalBytes := m.overallProgress(u)
-	overallPercent := 0.0
-	if totalBytes > 0 {
-		overallPercent = completedBytes / totalBytes
-		if overallPercent > 1 {
-			overallPercent = 1
-		}
-	}
-
-	shardProgressBar := NewProgressBar()
-	eta := formatETA(totalBytes, completedBytes, m.progressSamples[u.Model.ID()])
-	body.WriteString("Upload Progress:\t")
-	body.WriteString(shardProgressBar.ViewAs(overallPercent))
-	if eta != "" {
-		body.WriteString("\nETA: " + eta)
-	}
-	body.WriteString(fmt.Sprintf(" (%s of %s)", humanize.Bytes(uint64(completedBytes)),
-		humanize.Bytes(uint64(totalBytes))))
-	body.WriteString("\n")
-
 	body.WriteString("\nShard Progress:\n")
 	uid := u.Model.ID()
 	stateIdx := m.shardTabIndex[uid]
@@ -627,7 +701,7 @@ func (m *uploadModel) View() string {
 		}
 	}
 	body.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, shardTabSegments...))
-	body.WriteString("\n\n")
+	body.WriteString("\n")
 
 	activeShards := stateMap[activeState]
 	p := m.ensurePaginator(uid, activeState, len(activeShards))
@@ -640,8 +714,8 @@ func (m *uploadModel) View() string {
 	switch activeState {
 	case "Packing":
 		cols = []table.Column{
-			{Title: "ID", Width: 36},
-			{Title: "Size", Width: 7},
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
 		}
 		for _, sv := range pageShards {
 			rowsData = append(rowsData, table.Row{
@@ -652,9 +726,9 @@ func (m *uploadModel) View() string {
 
 	case "Queued":
 		cols = []table.Column{
-			{Title: "ID", Width: 36},
-			{Title: "Size", Width: 7},
-			{Title: "Digest", Width: 48},
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
 		}
 		for _, sv := range pageShards {
 			rowsData = append(rowsData, table.Row{
@@ -666,9 +740,9 @@ func (m *uploadModel) View() string {
 
 	case "Uploading":
 		cols = []table.Column{
-			{Title: "ID", Width: 36},
-			{Title: "Size", Width: 7},
-			{Title: "Digest", Width: 48},
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
 			{Title: "Put Progress", Width: 40},
 		}
 		for _, sv := range pageShards {
@@ -686,10 +760,10 @@ func (m *uploadModel) View() string {
 
 	case "Complete":
 		cols = []table.Column{
-			{Title: "ID", Width: 36},
-			{Title: "Size", Width: 7},
-			{Title: "Digest", Width: 48},
-			{Title: "PieceCID", Width: 68},
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
+			{Title: "PieceCID", Width: 72},
 		}
 		for _, sv := range pageShards {
 			rowsData = append(rowsData, table.Row{
@@ -709,7 +783,7 @@ func (m *uploadModel) View() string {
 	)
 	body.WriteString(t.View())
 	body.WriteString("\n")
-	body.WriteString(fmt.Sprintf("Page %d/%d\n\n", p.Page+1, p.TotalPages))
+	body.WriteString(fmt.Sprintf("Page %d/%d\n", p.Page+1, p.TotalPages))
 
 	if m.lastRetriableErr != nil {
 		body.WriteString("\n\n")
@@ -728,7 +802,7 @@ func (m *uploadModel) View() string {
 		}
 	}
 
-	body.WriteString("Use numbers to switch uploads • ←/→ shard tabs • ↑/↓ page\n")
+	body.WriteString("Use numbers or ↑/↓ to switch uploads • ←/→ shard tabs • Shift+↑/↓ page\n")
 	body.WriteString("Press q to quit.\n")
 
 	return lipgloss.JoinVertical(lipgloss.Top, tabsRendered, panelStyle.Render(body.String()))

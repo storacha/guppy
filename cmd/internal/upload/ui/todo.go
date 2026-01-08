@@ -82,6 +82,7 @@ type Observation struct {
 	ProcessedDags  uint64
 	// ID is a blob ID
 	ClientUploadProgress map[id.ID]PutProgress
+	SourceDir            string
 }
 
 func (o *UploadObserver) Observe(ctx context.Context) []Observation {
@@ -106,6 +107,7 @@ func (o *UploadObserver) Observe(ctx context.Context) []Observation {
 			TotalDags:            state.DagsTotal,
 			ProcessedDags:        state.DagsScanned,
 			ClientUploadProgress: state.PutProgress,
+			SourceDir:            state.SourceDir,
 		})
 	}
 
