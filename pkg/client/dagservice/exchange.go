@@ -39,7 +39,7 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
 
-	blockBytes, err := se.retriever.Retrieve(ctx, se.space, locations)
+	blockBytes, err := se.retriever.Retrieve(ctx, locations)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}
