@@ -15,6 +15,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
@@ -50,14 +51,14 @@ func TestRetrieve(t *testing.T) {
 				Content: captypes.FromHash(dataHash),
 				Range: &assertcap.Range{
 					Offset: 0,
-					Length: uint64Ptr(uint64(len(testData))),
+					Length: testutil.Ptr(uint64(len(testData))),
 				},
 				Location: []url.URL{*serverURL},
 			},
 		)
 
 		// Create client with space delegation
-		c, err := testutil.Client()
+		c, err := testutil.Client(testutil.WithClientOptions(client.WithRetrievalOptions(rclient.WithClient(httpClient))))
 		require.NoError(t, err)
 
 		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
@@ -75,7 +76,7 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve the content using the custom HTTP client
-		dataReader, err := c.Retrieve(testContext(t), []locator.Location{location}, rclient.WithClient(httpClient))
+		dataReader, err := c.Retrieve(testContext(t), []locator.Location{location})
 		require.NoError(t, err)
 		data, err := io.ReadAll(dataReader)
 		require.NoError(t, err)
@@ -101,7 +102,7 @@ func TestRetrieve(t *testing.T) {
 				Content: captypes.FromHash(dataHash),
 				Range: &assertcap.Range{
 					Offset: 0,
-					Length: uint64Ptr(uint64(len(testData))),
+					Length: testutil.Ptr(uint64(len(testData))),
 				},
 				Location: testutil.Urls("https://example.com"),
 			},
@@ -156,7 +157,7 @@ func TestRetrieve(t *testing.T) {
 				Content: captypes.FromHash(dataHash),
 				Range: &assertcap.Range{
 					Offset: 0,
-					Length: uint64Ptr(uint64(len(testData))),
+					Length: testutil.Ptr(uint64(len(testData))),
 				},
 				Location: []url.URL{*badURL},
 			},
@@ -184,8 +185,4 @@ func TestRetrieve(t *testing.T) {
 		_, err = c.Retrieve(testContext(t), []locator.Location{location})
 		require.Error(t, err)
 	})
-}
-
-func uint64Ptr(v uint64) *uint64 {
-	return &v
 }

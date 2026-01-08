@@ -10,6 +10,7 @@ import (
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	uclient "github.com/storacha/go-ucanto/client"
+	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt"
@@ -42,6 +43,7 @@ type Client struct {
 	data             agentdata.AgentData
 	saveFn           func(agentdata.AgentData) error
 	additionalProofs []delegation.Delegation
+	retrievalOpts    []rclient.Option
 }
 
 // NewClient creates a new client.

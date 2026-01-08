@@ -18,7 +18,7 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
-func (c *Client) Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) (io.ReadCloser, error) {
+func (c *Client) Retrieve(ctx context.Context, locations []locator.Location) (io.ReadCloser, error) {
 	// Randomly pick one of the available locations
 	location := locations[rand.Intn(len(locations))]
 
@@ -68,7 +68,7 @@ func (c *Client) Retrieve(ctx context.Context, locations []locator.Location, ret
 		return nil, fmt.Errorf("invoking `space/content/retrieve`: %w", err)
 	}
 
-	conn, err := rclient.NewConnection(nodeID, &url, retrievalOpts...)
+	conn, err := rclient.NewConnection(nodeID, &url, c.retrievalOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating connection: %w", err)
 	}

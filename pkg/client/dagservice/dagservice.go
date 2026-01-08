@@ -10,14 +10,13 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	ipldfmt "github.com/ipfs/go-ipld-format"
-	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
 type Retriever interface {
-	Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) (io.ReadCloser, error)
+	Retrieve(ctx context.Context, locations []locator.Location) (io.ReadCloser, error)
 }
 
 var _ Retriever = (*client.Client)(nil)
