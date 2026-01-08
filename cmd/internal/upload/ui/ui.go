@@ -163,7 +163,6 @@ func (m *uploadModel) Init() tea.Cmd {
 func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.updateMu.Lock()
 	defer m.updateMu.Unlock()
-	// TODO global lock?
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -235,8 +234,6 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case []Observation:
 		var cmds []tea.Cmd
 		m.currentObservations = msg
-		// Build a quick lookup by upload ID for the view.
-		m.observationsByID = make(map[id.UploadID]Observation, len(msg))
 		for _, obs := range msg {
 			m.observationsByID[obs.Model.ID()] = obs
 		}

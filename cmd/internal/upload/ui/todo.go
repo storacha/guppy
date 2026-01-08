@@ -96,6 +96,11 @@ func (o *UploadObserver) Observe(ctx context.Context) []Observation {
 
 	out := make([]Observation, 0, len(o.states))
 	for _, state := range o.states {
+		progressCopy := make(map[id.ID]PutProgress, len(state.PutProgress))
+		for k, v := range state.PutProgress {
+			progressCopy[k] = v
+		}
+
 		out = append(out, Observation{
 			Model:                state.Model,
 			OpenShards:           shardsByState(state.Shards, blobsmodel.BlobStateOpen),
@@ -106,7 +111,7 @@ func (o *UploadObserver) Observe(ctx context.Context) []Observation {
 			FilesFound:           uint64(len(state.FsEntries)),
 			TotalDags:            state.DagsTotal,
 			ProcessedDags:        state.DagsScanned,
-			ClientUploadProgress: state.PutProgress,
+			ClientUploadProgress: progressCopy,
 			SourceDir:            state.SourceDir,
 		})
 	}
