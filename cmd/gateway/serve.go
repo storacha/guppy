@@ -43,20 +43,17 @@ var serveCmd = &cobra.Command{
 			pfs = append(pfs, delegation.FromDelegation(del))
 		}
 
-		// Allow the indexing service to retrieve indexes
-		retrievalAuth, err := contentcap.Retrieve.Delegate(
-			client.Issuer(),
-			indexerPrincipal,
-			space.DID().String(),
-			contentcap.RetrieveCaveats{},
-			delegation.WithProof(pfs...),
-			delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
-		)
-		if err != nil {
-			return fmt.Errorf("delegating %s: %w", contentcap.RetrieveAbility, err)
-		}
-
-		locator := locator.NewIndexLocator(indexer, []delegation.Delegation{retrievalAuth})
+		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
+			// Allow the indexing service to retrieve indexes
+			return contentcap.Retrieve.Delegate(
+				client.Issuer(),
+				indexerPrincipal,
+				space.DID().String(),
+				contentcap.RetrieveCaveats{},
+				delegation.WithProof(pfs...),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
+		})
 		exchange := dagservice.NewExchange(locator, client, space)
 
 		gwConf := gateway.Config{
