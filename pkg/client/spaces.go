@@ -2,6 +2,8 @@ package client
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -14,7 +16,7 @@ func (c *Client) Spaces() ([]did.DID, error) {
 }
 
 func spacesFromDelegations(dels []delegation.Delegation) ([]did.DID, error) {
-	var spaces []did.DID
+	spaces := map[did.DID]struct{}{}
 	for _, d := range dels {
 		for _, cap := range d.Capabilities() {
 			if cap.Can() == "ucan/attest" {
@@ -36,15 +38,17 @@ func spacesFromDelegations(dels []delegation.Delegation) ([]did.DID, error) {
 				if err != nil {
 					return nil, fmt.Errorf("getting spaces from proofs: %w", err)
 				}
-				spaces = append(spaces, spacesFromProofs...)
+				for _, s := range spacesFromProofs {
+					spaces[s] = struct{}{}
+				}
 			} else {
 				space, err := did.Parse(cap.With())
 				if err != nil {
 					return nil, fmt.Errorf("parsing space DID %s: %w", cap.With(), err)
 				}
-				spaces = append(spaces, space)
+				spaces[space] = struct{}{}
 			}
 		}
 	}
-	return spaces, nil
+	return slices.Collect(maps.Keys(spaces)), nil
 }
