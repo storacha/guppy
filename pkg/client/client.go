@@ -93,7 +93,7 @@ func (c *Client) Issuer() principal.Signer {
 
 // CapabilityQuery represents a query to filter proofs by capability.
 type CapabilityQuery struct {
-	// Can is the ability to match (e.g., "store/add"). Use "*" to match all abilities.
+	// Can is the ability to match (e.g., "store/add").
 	Can ucan.Ability
 	// With is the resource to match. Omit or set to empty string to query for any
 	// resource. Note: using "ucan:*" will only match "ucan:*" resources.
