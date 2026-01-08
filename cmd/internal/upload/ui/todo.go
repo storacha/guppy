@@ -26,7 +26,8 @@ type UploadObserver struct {
 }
 
 type UploadState struct {
-	Model *uploadsmodel.Upload
+	Model     *uploadsmodel.Upload
+	SourceDir string
 
 	PutProgress map[id.ID]PutProgress
 
@@ -143,13 +144,17 @@ func (o *UploadObserver) init(ctx context.Context) error {
 		}
 		state.DagsTotal = uint64(len(dagsCompleted) + len(dagsToScan))
 		state.DagsScanned = uint64(len(dagsToScan))
+		uploadSource, err := o.repo.GetSourceByID(ctx, state.Model.SourceID())
+		if err != nil {
+			return err
+		}
+		state.SourceDir = uploadSource.Path()
 	}
 	return nil
 }
 
 func (o *UploadObserver) Subscribe() error {
 	for uid, state := range o.states {
-		// TODO unsure if this closure will work...
 		state := state
 
 		// subscribe to client upload events (guppy -> piri(s))
