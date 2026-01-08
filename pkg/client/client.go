@@ -95,7 +95,8 @@ func (c *Client) Issuer() principal.Signer {
 type CapabilityQuery struct {
 	// Can is the ability to match (e.g., "store/add"). Use "*" to match all abilities.
 	Can ucan.Ability
-	// With is the resource to match. Use "ucan:*" to match all resources.
+	// With is the resource to match. Omit or set to empty string to query for any
+	// resource. Note: using "ucan:*" will only match "ucan:*" resources.
 	With ucan.Resource
 }
 
@@ -233,8 +234,9 @@ func matchesAbility(capAbility, queryAbility ucan.Ability) bool {
 // A capability matches if:
 //   - The resources match exactly
 //   - The capability has "ucan:*" (matches any query resource)
+//   - The query resource is empty (matches any capability resource)
 func matchesResource(capResource, queryResource ucan.Resource) bool {
-	return queryResource == "ucan:*" || capResource == "ucan:*" || queryResource == capResource
+	return queryResource == "" || capResource == "ucan:*" || queryResource == capResource
 }
 
 // isSessionProof checks if a delegation is a session proof (ucan/attest capability).
