@@ -113,7 +113,7 @@ var serveCmd = &cobra.Command{
 		defer timer.Stop()
 		go func() {
 			<-timer.C
-			cmd.Println(banner(build.Version, serveFlags.port))
+			cmd.Println(banner(build.Version, serveFlags.port, client.DID(), space))
 		}()
 
 		// shut down the server gracefully on context cancellation
@@ -142,20 +142,26 @@ func init() {
 	GatewayCmd.AddCommand(serveCmd)
 }
 
-func banner(version string, port int) string {
+func banner(version string, port int, id did.DID, space did.DID) string {
 	return fmt.Sprintf(
 		`
-▄▖           
-▌ ▌▌▛▌▌▌▌▀▌▌▌
-▙▌▙▌▙▌▚▚▘█▌▙▌
-    ▌      ▄▌ %s
+%s ▄▖           
+  ▌ ▌▌▛▌▌▌▌▀▌▌▌
+  ▙▌▙▌▙▌▚▚▘█▌▙▌
+      ▌      ▄▌ %s
 
 High performance IPFS Gateway
 %s
------------------------------
+------------------------------
+Server %s
+Space  %s
+------------------------------
 ⇨ HTTP server started on %s`,
+		color.Cyan("⬢"),
 		color.Red(version),
 		color.Blue("https://storacha.network"),
+		color.Grey(id.String()),
+		color.Grey(space.String()),
 		color.Green(fmt.Sprintf("http://localhost:%d", port)),
 	)
 }
