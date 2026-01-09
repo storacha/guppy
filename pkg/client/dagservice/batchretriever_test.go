@@ -1,6 +1,7 @@
 package dagservice_test
 
 import (
+	"io"
 	"net/url"
 	"testing"
 
@@ -14,26 +15,6 @@ import (
 	"github.com/storacha/guppy/pkg/client/testutil"
 	"github.com/stretchr/testify/require"
 )
-
-// // TK: This already exists
-
-// type mockRetriever struct {
-// 	responses map[string][]byte
-// }
-
-// func (mr *mockRetriever) Retrieve(ctx context.Context, space did.DID, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
-// 	return nil, nil
-// }
-
-// func (mr *mockRetriever) addResponse(space did.DID, location locator.Location, data []byte) {
-// 	if mr.responses == nil {
-// 		mr.responses = make(map[string][]byte)
-// 	}
-
-// 	key := fmt.Sprintf("%s-%s", space.String(), location.Commitment.Nb())
-
-// 	mr.responses[key] = data
-// }
 
 func TestBatchRetriever(t *testing.T) {
 	t.Run("retrieves an individual slice", func(t *testing.T) {
@@ -109,12 +90,14 @@ func TestBatchRetriever(t *testing.T) {
 			{Offset: 29, Length: 15},
 		} {
 			go func(position blobindex.Position) {
-				b, err := batchRetriever.Retrieve(t.Context(), []locator.Location{{
+				data, err := batchRetriever.Retrieve(t.Context(), []locator.Location{{
 					Commitment: commitment,
 					Position:   position,
 				}})
 				require.NoError(t, err)
-				retrievedBytesChs[i] <- b
+				dataBytes, err := io.ReadAll(data)
+				require.NoError(t, err)
+				retrievedBytesChs[i] <- dataBytes
 				close(retrievedBytesChs[i])
 			}(position)
 		}

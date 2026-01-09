@@ -52,10 +52,10 @@ func TestStorachaExchange(t *testing.T) {
 
 		lctr := newStubLocator()
 		lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
-		retriever := stubRetriever{data: make(map[string][]byte)}
-		key, err := commitmentKey(location.Commitment)
+		retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+			location.Commitment: shardData,
+		})
 		require.NoError(t, err)
-		retriever.data[key] = shardData
 
 		exchange := dagservice.NewExchange(lctr, retriever, space)
 		blk, err := exchange.GetBlock(t.Context(), blockCID)
@@ -99,10 +99,10 @@ func TestStorachaExchange(t *testing.T) {
 
 		lctr := newStubLocator()
 		lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
-		retriever := stubRetriever{data: make(map[string][]byte)}
-		key, err := commitmentKey(location.Commitment)
+		retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+			location.Commitment: wrongData,
+		})
 		require.NoError(t, err)
-		retriever.data[key] = wrongData
 
 		exchange := dagservice.NewExchange(lctr, retriever, space)
 		_, err = exchange.GetBlock(t.Context(), blockCID)
