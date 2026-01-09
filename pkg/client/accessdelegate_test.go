@@ -231,7 +231,7 @@ func TestAccessDelegate(t *testing.T) {
 						inv invocation.Invocation,
 						context server.InvocationContext,
 					) (result.Result[access.DelegateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
-						return result.Error[access.DelegateOk, failure.IPLDBuilderFailure](
+						return result.Error[access.DelegateOk](
 							failure.FromError(fmt.Errorf("test error")),
 						), nil, nil
 					},
