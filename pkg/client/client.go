@@ -234,7 +234,7 @@ func matchesAbility(capAbility, queryAbility ucan.Ability) bool {
 //   - The resources match exactly
 //   - The capability has "ucan:*" (matches any query resource)
 func matchesResource(capResource, queryResource ucan.Resource) bool {
-	return capResource == "ucan:*" || queryResource == capResource
+	return queryResource == "" || capResource == "ucan:*" || queryResource == capResource
 }
 
 // isSessionProof checks if a delegation is a session proof (ucan/attest capability).
