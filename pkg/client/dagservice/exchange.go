@@ -1,14 +1,18 @@
 package dagservice
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ipfs/boxo/exchange"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
 )
@@ -39,9 +43,30 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
 
-	blockBytes, err := se.retriever.Retrieve(ctx, locations)
+	blockReader, err := se.retriever.Retrieve(ctx, locations)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
+	}
+	defer blockReader.Close()
+
+	blockBytes, err := io.ReadAll(blockReader)
+	if err != nil {
+		return nil, fmt.Errorf("reading block %s data: %w", c.String(), err)
+	}
+
+	expectedDigest := c.Hash()
+	decHash, err := mh.Decode(expectedDigest)
+	if err != nil {
+		return nil, fmt.Errorf("decoding content multihash %s: %w", expectedDigest, err)
+	}
+
+	receivedDigest, err := mh.Sum(blockBytes, decHash.Code, -1)
+	if err != nil {
+		return nil, fmt.Errorf("hashing content %s: %w", expectedDigest, err)
+	}
+
+	if !bytes.Equal(expectedDigest, receivedDigest) {
+		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedDigest), digestutil.Format(receivedDigest))
 	}
 
 	// Create a block from the data and CID

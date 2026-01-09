@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"testing"
 
@@ -67,7 +68,6 @@ func TestRetrieve(t *testing.T) {
 
 		location := locator.Location{
 			Commitment: locationCommitment,
-			Digest:     dataHash,
 			Position: blobindex.Position{
 				Offset: 0,
 				Length: uint64(len(testData)),
@@ -75,72 +75,12 @@ func TestRetrieve(t *testing.T) {
 		}
 
 		// Retrieve the content using the custom HTTP client
-		data, err := c.Retrieve(testContext(t), []locator.Location{location}, rclient.WithClient(httpClient))
+		dataReader, err := c.Retrieve(testContext(t), []locator.Location{location}, rclient.WithClient(httpClient))
 		require.NoError(t, err)
+		data, err := io.ReadAll(dataReader)
+		require.NoError(t, err)
+		dataReader.Close()
 		require.Equal(t, testData, data)
-	})
-
-	t.Run("client validates received data hash", func(t *testing.T) {
-		// Setup test data - we'll create a server that bypasses hash validation
-		// to test that the CLIENT properly validates the received data
-		wrongData := []byte("This is the WRONG data returned by server")
-		correctData := []byte("This is the correct data.")
-		correctHash, err := multihash.Sum(correctData, multihash.SHA2_256, -1)
-		require.NoError(t, err)
-
-		// Create space and storage provider
-		space, err := ed25519signer.Generate()
-		require.NoError(t, err)
-
-		storageProvider, err := ed25519signer.Generate()
-		require.NoError(t, err)
-
-		// Create retrieval server that will serve wrongData but we'll disable
-		// server-side validation by using a custom client that bypasses it
-		httpClient := testutil.NewRetrievalClient(t, storageProvider, wrongData, testutil.WithoutHashValidation())
-
-		// Use URL with correct hash
-		serverURL, err := url.Parse(fmt.Sprintf("https://storage1.example.com/blob/%s", digestutil.Format(correctHash)))
-		require.NoError(t, err)
-
-		// Create location commitment with correct hash
-		locationCommitment := ucan.NewCapability(
-			assertcap.Location.Can(),
-			storageProvider.DID().String(),
-			assertcap.LocationCaveats{
-				Space:   space.DID(),
-				Content: captypes.FromHash(correctHash),
-				Range: &assertcap.Range{
-					Offset: 0,
-					Length: uint64Ptr(uint64(len(wrongData))),
-				},
-				Location: []url.URL{*serverURL},
-			},
-		)
-
-		// Create client with space delegation
-		c, err := testutil.Client()
-		require.NoError(t, err)
-
-		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
-		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
-		require.NoError(t, err)
-		err = c.AddProofs(proof)
-		require.NoError(t, err)
-
-		location := locator.Location{
-			Commitment: locationCommitment,
-			Digest:     correctHash,
-			Position: blobindex.Position{
-				Offset: 0,
-				Length: uint64(len(wrongData)),
-			},
-		}
-
-		// Retrieve should fail because client detects data hash mismatch
-		_, err = c.Retrieve(testContext(t), []locator.Location{location}, rclient.WithClient(httpClient))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "content hash mismatch")
 	})
 
 	t.Run("handles invalid storage provider DID", func(t *testing.T) {
@@ -179,7 +119,6 @@ func TestRetrieve(t *testing.T) {
 
 		location := locator.Location{
 			Commitment: locationCommitment,
-			Digest:     dataHash,
 			Position: blobindex.Position{
 				Offset: 0,
 				Length: uint64(len(testData)),
@@ -235,7 +174,6 @@ func TestRetrieve(t *testing.T) {
 
 		location := locator.Location{
 			Commitment: locationCommitment,
-			Digest:     dataHash,
 			Position: blobindex.Position{
 				Offset: 0,
 				Length: uint64(len(testData)),
