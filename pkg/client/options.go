@@ -2,6 +2,7 @@ package client
 
 import (
 	uclient "github.com/storacha/go-ucanto/client"
+	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/guppy/pkg/agentdata"
@@ -62,6 +63,13 @@ func WithSaveFn(saveFn func(agentdata.AgentData) error) Option {
 func WithAdditionalProofs(proofs ...delegation.Delegation) Option {
 	return func(c *Client) error {
 		c.additionalProofs = append(c.additionalProofs, proofs...)
+		return nil
+	}
+}
+
+func WithRetrievalOptions(retrievalOpts ...rclient.Option) Option {
+	return func(c *Client) error {
+		c.retrievalOpts = append(c.retrievalOpts, retrievalOpts...)
 		return nil
 	}
 }
