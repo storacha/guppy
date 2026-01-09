@@ -7,12 +7,14 @@ import (
 	"io"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -44,28 +46,28 @@ var (
 	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
 	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
 	tabActiveStyle    = lipgloss.NewStyle().
-				Border(activeTabBorder, true).
-				BorderForeground(activeRed).
-				BorderBottom(true).
-				Bold(true)
+		Border(activeTabBorder, true).
+		BorderForeground(activeRed).
+		BorderBottom(true).
+		Bold(true)
 
 	tabInactiveStyle = lipgloss.NewStyle().
-				Border(inactiveTabBorder, true).
-				BorderForeground(inactiveRed)
+		Border(inactiveTabBorder, true).
+		BorderForeground(inactiveRed)
 
 	uploadTabActiveStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(activeRed).
-				Bold(true).
-				Padding(0, 1)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(activeRed).
+		Bold(true).
+		Padding(0, 1)
 	uploadTabInactiveStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(inactiveRed).
-				Padding(0, 1)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(inactiveRed).
+		Padding(0, 1)
 
 	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(inactiveRed)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(inactiveRed)
 
 	shardStates = []string{"Packing", "Queued", "Uploading", "Complete"}
 )
@@ -113,6 +115,8 @@ type uploadModel struct {
 	shardPaginators map[id.UploadID]map[string]paginator.Model
 	shardsByState   map[id.UploadID]map[string][]events.ShardView
 
+	workerStates map[id.UploadID]map[string]*workerStateSpinner
+
 	retry bool
 
 	results map[id.UploadID]cid.Cid
@@ -120,6 +124,11 @@ type uploadModel struct {
 	// Output
 	err              error
 	lastRetriableErr *types.RetriableError
+}
+
+type workerStateSpinner struct {
+	state   events.UploadWorkerEvent
+	spinner spinner.Model
 }
 
 type progressSample struct {
@@ -152,6 +161,7 @@ func (m *uploadModel) Init() tea.Cmd {
 	m.shardTabIndex = make(map[id.UploadID]int, len(m.uploads))
 	m.shardPaginators = make(map[id.UploadID]map[string]paginator.Model, len(m.uploads))
 	m.shardsByState = make(map[id.UploadID]map[string][]events.ShardView, len(m.uploads))
+	m.workerStates = make(map[id.UploadID]map[string]*workerStateSpinner, len(m.uploads))
 	for _, u := range m.uploads {
 		m.shardTabIndex[u.ID()] = 0
 		m.shardPaginators[u.ID()] = make(map[string]paginator.Model)
@@ -221,15 +231,26 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+	case uploadComplete:
+		return m, tea.Quit
+
 	case rootCIDMsg:
+		var cmds []tea.Cmd
 		m.results[msg.id] = msg.cid
+
+		for _, spnr := range m.workerStates[msg.id] {
+			spnr.state.Status = events.Stopped
+		}
+
+		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg { return nil }))
 
 		// Only quit if ALL uploads are finished
 		if len(m.results) == len(m.uploads) {
-			time.Sleep(time.Second)
-			return m, tea.Quit
+			cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+				return uploadComplete{results: m.results}
+			}))
 		}
-		return m, nil
+		return m, tea.Sequence(cmds...)
 
 	case []Observation:
 		var cmds []tea.Cmd
@@ -338,6 +359,29 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				p := m.ensurePaginator(uid, st, len(stateSlices[st]))
 				m.shardPaginators[uid][st] = p
 			}
+
+			for _, state := range obs.WorkerStates {
+				spnrs := m.workerStates[uid]
+				if spnrs == nil {
+					spnrs = make(map[string]*workerStateSpinner)
+					m.workerStates[uid] = spnrs
+				}
+				_, ok := spnrs[state.Name]
+				if !ok {
+					spnrs[state.Name] = &workerStateSpinner{
+						state: state,
+						spinner: spinner.New(spinner.WithSpinner(spinner.Spinner{
+							Frames: []string{"∙∙∙", "●∙∙", "∙●∙", "∙∙●"},
+							FPS:    250 * time.Millisecond,
+						})),
+					}
+					m.workerStates[uid] = spnrs
+				}
+				sp := spnrs[state.Name].spinner
+				cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return sp.Tick()
+				}))
+			}
 		}
 
 		cmds = append(cmds, tea.Tick(time.Second, func(t time.Time) tea.Msg {
@@ -385,6 +429,15 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pb = npb.(progress.Model)
 			m.dagProgress[uid] = pb
 			cmds = append(cmds, cmd)
+		}
+		for uid, spnrs := range m.workerStates {
+			for evt, s := range spnrs {
+				var cmd tea.Cmd
+				s.spinner, cmd = s.spinner.Update(msg)
+				s.spinner.Tick()
+				m.workerStates[uid][evt] = s
+				cmds = append(cmds, cmd)
+			}
 		}
 		return m, tea.Sequence(cmds...)
 	}
@@ -483,8 +536,12 @@ func (m *uploadModel) buildUploadLabels() []string {
 					pct = 1
 				}
 			}
-			eta := formatETA(totalBytes, completedBytes, m.progressSamples[upload.ID()])
-			labels[i] = fmt.Sprintf("%s %s %3.0f%% %s", labelBase, renderMiniBar(pct, 8), pct*100, eta)
+			if _, ok := m.results[upload.ID()]; ok {
+				labels[i] = fmt.Sprintf("%s %s", labelBase, "✔")
+			} else {
+				eta := formatETA(totalBytes, completedBytes, m.progressSamples[upload.ID()])
+				labels[i] = fmt.Sprintf("%s %s %3.0f%% %s", labelBase, renderMiniBar(pct, 8), pct*100, eta)
+			}
 		} else {
 			labels[i] = labelBase
 		}
@@ -493,13 +550,20 @@ func (m *uploadModel) buildUploadLabels() []string {
 }
 
 func (m *uploadModel) renderSummary(obs Observation, activeIdx int) string {
+	rootCidStr := "Calculating..."
+	rootCid, uploadDone := m.results[obs.Model.ID()]
+	if uploadDone {
+		rootCidStr = rootCid.String()
+	}
 	completedBytes, totalBytes := m.overallProgress(obs)
 	summaryCols := []table.Column{
-		{Title: "", Width: 16},
+		{Title: "", Width: 20},
 		{Title: "", Width: 80},
 	}
 	summaryRows := []table.Row{
 		{"Upload ID", obs.Model.ID().String()},
+		{"Root CID", rootCidStr},
+		{"", ""},
 		{"Directory", m.tabTitles[activeIdx]},
 		{"Size", humanize.IBytes(uint64(totalBytes))},
 		{"Bytes Uploaded", humanize.IBytes(uint64(completedBytes))},
@@ -510,14 +574,43 @@ func (m *uploadModel) renderSummary(obs Observation, activeIdx int) string {
 			}
 			return obs.TotalDags
 		}())},
+		{"", ""},
 	}
 	if pb, ok := m.dagProgress[obs.Model.ID()]; ok {
 		if pb.Percent() == 1 {
-			summaryRows = append(summaryRows, table.Row{"Scan Progress", "Complete"})
+			summaryRows = append(summaryRows, table.Row{"Scan Progress", "✔"})
 		} else {
 			summaryRows = append(summaryRows, table.Row{"Scan Progress", pb.View()})
 		}
 	}
+
+	if spinners, ok := m.workerStates[obs.Model.ID()]; ok {
+		names := make([]string, 0, len(spinners))
+		for name := range spinners {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			ws := spinners[name]
+			status := ""
+			switch ws.state.Status {
+			case events.Running:
+				status = ws.spinner.View()
+			case events.Stopped:
+				status = "✔"
+			case events.Failed:
+				status = "X"
+			default:
+				status = string(ws.state.Status)
+			}
+			summaryRows = append(summaryRows, table.Row{
+				fmt.Sprintf("%s Worker", name),
+				status,
+			})
+		}
+	}
+
 	summaryStyles := table.DefaultStyles()
 	summaryStyles.Header = lipgloss.NewStyle().UnsetPadding().UnsetBorderStyle().Height(0)
 	summaryStyles.Cell = lipgloss.NewStyle().UnsetPadding()
@@ -527,7 +620,7 @@ func (m *uploadModel) renderSummary(obs Observation, activeIdx int) string {
 		table.WithColumns(summaryCols),
 		table.WithRows(summaryRows),
 		table.WithStyles(summaryStyles),
-		table.WithHeight(9),
+		table.WithHeight(len(summaryRows)),
 		table.WithFocused(false),
 	)
 	return summaryTable.View()
@@ -814,6 +907,10 @@ type rootCIDMsg struct {
 type uploadErrMsg struct {
 	id  id.UploadID
 	err error
+}
+
+type uploadComplete struct {
+	results map[id.UploadID]cid.Cid
 }
 
 func executeUpload(ctx context.Context, api preparation.API, upload *uploadsmodel.Upload) tea.Cmd {

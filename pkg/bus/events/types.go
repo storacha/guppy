@@ -17,6 +17,7 @@ const (
 	dagScanTopic   = "event.dagscan"
 	shardTopic     = "event.shard"
 	clientPutTopic = "event.client-put"
+	workerTopic    = "event.worker"
 )
 
 func TopicFsEntry(sid id.SourceID) string {
@@ -33,6 +34,10 @@ func TopicShard(uid id.UploadID) string {
 
 func TopicClientPut(uid id.UploadID) string {
 	return fmt.Sprintf("%s:%s", clientPutTopic, uid)
+}
+
+func TopicWorker(uid id.UploadID) string {
+	return fmt.Sprintf("%s:%s", workerTopic, uid)
 }
 
 type ShardView struct {
@@ -65,4 +70,18 @@ type PutProgress struct {
 	BlobID   id.ID
 	Uploaded int64
 	Total    uint64
+}
+
+type UploadWorkerEventType string
+
+const (
+	Running UploadWorkerEventType = "Running"
+	Stopped UploadWorkerEventType = "Stopped"
+	Failed  UploadWorkerEventType = "Failed"
+)
+
+type UploadWorkerEvent struct {
+	Name   string
+	Status UploadWorkerEventType
+	Error  error
 }

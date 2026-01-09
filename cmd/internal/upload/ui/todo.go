@@ -39,6 +39,8 @@ type UploadState struct {
 
 	FsEntries     map[id.FSEntryID]FSEntry
 	FsEntriesSize uint64
+
+	WorkerStates map[string]events.UploadWorkerEvent
 }
 
 type FSEntry struct {
@@ -56,11 +58,12 @@ func NewUploadObserver(sub bus.Subscriber, repo *sqlrepo.Repo, uploads ...*uploa
 	states := make(map[id.UploadID]*UploadState, len(uploads))
 	for _, upload := range uploads {
 		states[upload.ID()] = &UploadState{
-			Model:       upload,
-			PutProgress: make(map[id.ID]PutProgress),
-			Shards:      make(map[id.ShardID]events.ShardView),
-			DagsFsMap:   make(map[id.FSEntryID]cid.Cid),
-			FsEntries:   make(map[id.FSEntryID]FSEntry),
+			Model:        upload,
+			PutProgress:  make(map[id.ID]PutProgress),
+			Shards:       make(map[id.ShardID]events.ShardView),
+			DagsFsMap:    make(map[id.FSEntryID]cid.Cid),
+			FsEntries:    make(map[id.FSEntryID]FSEntry),
+			WorkerStates: make(map[string]events.UploadWorkerEvent),
 		}
 	}
 	return &UploadObserver{
@@ -71,7 +74,9 @@ func NewUploadObserver(sub bus.Subscriber, repo *sqlrepo.Repo, uploads ...*uploa
 }
 
 type Observation struct {
-	Model          *uploadsmodel.Upload
+	Model     *uploadsmodel.Upload
+	SourceDir string
+
 	OpenShards     []events.ShardView
 	ClosedShards   []events.ShardView
 	UploadedShards []events.ShardView
@@ -82,7 +87,7 @@ type Observation struct {
 	ProcessedDags  uint64
 	// ID is a blob ID
 	ClientUploadProgress map[id.ID]PutProgress
-	SourceDir            string
+	WorkerStates         map[string]events.UploadWorkerEvent
 }
 
 func (o *UploadObserver) Observe(ctx context.Context) []Observation {
@@ -100,9 +105,14 @@ func (o *UploadObserver) Observe(ctx context.Context) []Observation {
 		for k, v := range state.PutProgress {
 			progressCopy[k] = v
 		}
+		workerStatesCopy := make(map[string]events.UploadWorkerEvent, len(state.WorkerStates))
+		for k, v := range state.WorkerStates {
+			workerStatesCopy[k] = v
+		}
 
 		out = append(out, Observation{
 			Model:                state.Model,
+			SourceDir:            state.SourceDir,
 			OpenShards:           shardsByState(state.Shards, blobsmodel.BlobStateOpen),
 			ClosedShards:         shardsByState(state.Shards, blobsmodel.BlobStateClosed),
 			UploadedShards:       shardsByState(state.Shards, blobsmodel.BlobStateUploaded),
@@ -112,7 +122,7 @@ func (o *UploadObserver) Observe(ctx context.Context) []Observation {
 			TotalDags:            state.DagsTotal,
 			ProcessedDags:        state.DagsScanned,
 			ClientUploadProgress: progressCopy,
-			SourceDir:            state.SourceDir,
+			WorkerStates:         workerStatesCopy,
 		})
 	}
 
@@ -213,6 +223,14 @@ func (o *UploadObserver) Subscribe() error {
 			}
 			state.FsEntriesSize += evt.Size
 
+		}); err != nil {
+			return err
+		}
+
+		if err := o.sub.Subscribe(events.TopicWorker(state.Model.ID()), func(evt events.UploadWorkerEvent) {
+			o.statesMu.Lock()
+			defer o.statesMu.Unlock()
+			state.WorkerStates[evt.Name] = evt
 		}); err != nil {
 			return err
 		}

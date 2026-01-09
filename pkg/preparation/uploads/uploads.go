@@ -8,6 +8,12 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -15,9 +21,6 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -68,6 +71,9 @@ type API struct {
 
 	// CloseUploadIndexes closes any remaining open index for the upload.
 	CloseUploadIndexes CloseUploadIndexesFunc
+
+	// Publishes events observation
+	Publisher bus.Publisher
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -124,43 +130,133 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 
 	// Start the workers
 	eg, wCtx := bettererrgroup.WithContext(ctx)
-	eg.Go(func() error {
-		err := runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "FSScan",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "FSScan",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runScanWorker(wCtx, a, uploadID, spaceDID, scansAvailable, dagScansAvailable)
 		if err != nil {
 			return fmt.Errorf("scan worker: %w", err)
 		}
 		return nil
 	})
-	eg.Go(func() error {
-		err := runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable, closedIndexesAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "DagScan",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "DagScan",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runDAGScanWorker(wCtx, a, uploadID, spaceDID, dagScansAvailable, closedShardsAvailable, closedIndexesAvailable)
 		if err != nil {
 			return fmt.Errorf("DAG scan worker: %w", err)
 		}
 		return nil
 	})
-	eg.Go(func() error {
-		err := runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable, uploadedShardsAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "Shard",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "Shard",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runShardWorker(wCtx, a, uploadID, spaceDID, closedShardsAvailable, uploadedShardsAvailable)
 		if err != nil {
 			return fmt.Errorf("shard worker: %w", err)
 		}
 		return nil
 	})
-	eg.Go(func() error {
-		err := runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable, uploadedIndexesAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "Index",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "Index",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runIndexWorker(wCtx, a, uploadID, spaceDID, closedIndexesAvailable, uploadedIndexesAvailable)
 		if err != nil {
 			return fmt.Errorf("index worker: %w", err)
 		}
 		return nil
 	})
-	eg.Go(func() error {
-		err := runPostProcessShardWorker(wCtx, a, uploadID, spaceDID, uploadedShardsAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "ProcessShard",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "ProcessShard",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runPostProcessShardWorker(wCtx, a, uploadID, spaceDID, uploadedShardsAvailable)
 		if err != nil {
 			return fmt.Errorf("post-process worker: %w", err)
 		}
 		return nil
 	})
-	eg.Go(func() error {
-		err := runPostProcessIndexWorker(wCtx, a, uploadID, spaceDID, uploadedIndexesAvailable)
+	eg.Go(func() (err error) {
+		a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+			Name:   "ProcessIndex",
+			Status: events.Running,
+		})
+		defer func() {
+			status := events.Stopped
+			if err != nil {
+				status = events.Failed
+			}
+			a.Publisher.Publish(events.TopicWorker(uploadID), events.UploadWorkerEvent{
+				Name:   "ProcessIndex",
+				Status: status,
+				Error:  err,
+			})
+		}()
+		err = runPostProcessIndexWorker(wCtx, a, uploadID, spaceDID, uploadedIndexesAvailable)
 		if err != nil {
 			return fmt.Errorf("post-process worker: %w", err)
 		}

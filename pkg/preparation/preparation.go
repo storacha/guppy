@@ -167,6 +167,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
 		RemoveShard:                blobsAPI.RemoveShard,
+		Publisher:                  cfg.bus,
 	}
 
 	return API{
