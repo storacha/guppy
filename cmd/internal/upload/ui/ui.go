@@ -44,28 +44,28 @@ var (
 	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
 	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
 	tabActiveStyle    = lipgloss.NewStyle().
-		Border(activeTabBorder, true).
-		BorderForeground(activeRed).
-		BorderBottom(true).
-		Bold(true)
+				Border(activeTabBorder, true).
+				BorderForeground(activeRed).
+				BorderBottom(true).
+				Bold(true)
 
 	tabInactiveStyle = lipgloss.NewStyle().
-		Border(inactiveTabBorder, true).
-		BorderForeground(inactiveRed)
+				Border(inactiveTabBorder, true).
+				BorderForeground(inactiveRed)
 
 	uploadTabActiveStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(activeRed).
-		Bold(true).
-		Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(activeRed).
+				Bold(true).
+				Padding(0, 1)
 	uploadTabInactiveStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(inactiveRed).
-		Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(inactiveRed).
+				Padding(0, 1)
 
 	panelStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(inactiveRed)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(inactiveRed)
 
 	shardStates = []string{"Packing", "Queued", "Uploading", "Complete"}
 )
@@ -390,84 +390,6 @@ func (m *uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func formatETA(total, uploaded float64, sample progressSample) string {
-	if total <= 0 {
-		return ""
-	}
-	remaining := total - uploaded
-	if remaining <= 0 {
-		return ""
-	}
-	if sample.rate <= 0 {
-		return ""
-	}
-	eta := time.Duration(remaining/sample.rate) * time.Second
-	if eta < time.Second {
-		return "<1s"
-	}
-	etaStr := eta.Round(time.Second).String()
-
-	// Convert bytes/sec -> bits/sec and display Mbps or Gbps.
-	bps := sample.rate * 8
-	throughput := ""
-	switch {
-	case bps >= 1_000_000_000:
-		throughput = fmt.Sprintf(" @ %.2f Gbps", bps/1_000_000_000)
-	case bps > 0:
-		throughput = fmt.Sprintf(" @ %.2f Mbps", bps/1_000_000)
-	}
-
-	bytesFrac := fmt.Sprintf(" [%s of %s]", humanize.IBytes(uint64(uploaded)), humanize.IBytes(uint64(total)))
-
-	return etaStr + throughput + bytesFrac
-}
-
-func renderMiniBar(pct float64, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 1 {
-		pct = 1
-	}
-	filled := int(math.Round(pct * float64(width)))
-	if filled > width {
-		filled = width
-	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-}
-
-func renderUploadTabs(titles []string, active int) string {
-	if len(titles) == 0 {
-		return ""
-	}
-
-	var renderedTabs []string
-	for i, t := range titles {
-		label := fmt.Sprintf("[%d] %s", i+1, t)
-		isFirst, isLast, isActive := i == 0, i == len(titles)-1, i == active
-		style := uploadTabInactiveStyle
-		if isActive {
-			style = uploadTabActiveStyle
-		}
-		border, _, _, _, _ := style.GetBorder()
-		if isFirst && isActive {
-			border.BottomLeft = "│"
-		} else if isFirst && !isActive {
-			border.BottomLeft = "├"
-		} else if isLast && isActive {
-			border.BottomRight = "│"
-		} else if isLast && !isActive {
-			border.BottomRight = "┤"
-		}
-		style = style.Border(border)
-		renderedTabs = append(renderedTabs, style.Render(label))
-	}
-	return lipgloss.JoinVertical(lipgloss.Top, renderedTabs...)
-}
-
 func (m *uploadModel) activeUploadID() *id.UploadID {
 	if len(m.uploads) == 0 {
 		return nil
@@ -548,19 +470,7 @@ func (m *uploadModel) overallProgress(obs Observation) (completedBytes float64, 
 	return
 }
 
-func (m *uploadModel) View() string {
-	var body strings.Builder
-	style := lipgloss.NewStyle()
-
-	if m.retry {
-		body.WriteString(style.Bold(true).Render("Uploading with auto-retry enabled...\n\n"))
-	}
-
-	if len(m.currentObservations) == 0 {
-		return body.String()
-	}
-
-	// Build tab labels with progress bars and ETA.
+func (m *uploadModel) buildUploadLabels() []string {
 	labels := make([]string, len(m.tabTitles))
 	for i, upload := range m.uploads {
 		labelBase := m.tabTitles[i]
@@ -574,56 +484,34 @@ func (m *uploadModel) View() string {
 				}
 			}
 			eta := formatETA(totalBytes, completedBytes, m.progressSamples[upload.ID()])
-
 			labels[i] = fmt.Sprintf("%s %s %3.0f%% %s", labelBase, renderMiniBar(pct, 8), pct*100, eta)
 		} else {
 			labels[i] = labelBase
 		}
 	}
+	return labels
+}
 
-	active := m.tabIndex
-	if active >= len(m.tabTitles) {
-		active = len(m.tabTitles) - 1
-	}
-	if active < 0 {
-		active = 0
-	}
-	tabsRendered := renderUploadTabs(labels, active)
-
-	activeID := m.uploads[active].ID()
-	u, ok := m.observationsByID[activeID]
-	if !ok {
-		body.WriteString("No data yet for this upload...\n")
-		return lipgloss.JoinVertical(lipgloss.Top, tabsRendered, panelStyle.Render(body.String()))
-	}
-
-	// Summary table
-	completedBytes, totalBytes := m.overallProgress(u)
-	overallPercent := 0.0
-	if totalBytes > 0 {
-		overallPercent = completedBytes / totalBytes
-		if overallPercent > 1 {
-			overallPercent = 1
-		}
-	}
+func (m *uploadModel) renderSummary(obs Observation, activeIdx int) string {
+	completedBytes, totalBytes := m.overallProgress(obs)
 	summaryCols := []table.Column{
 		{Title: "", Width: 16},
 		{Title: "", Width: 80},
 	}
 	summaryRows := []table.Row{
-		{"Upload ID", u.Model.ID().String()},
-		{"Directory", m.tabTitles[active]},
+		{"Upload ID", obs.Model.ID().String()},
+		{"Directory", m.tabTitles[activeIdx]},
 		{"Size", humanize.IBytes(uint64(totalBytes))},
 		{"Bytes Uploaded", humanize.IBytes(uint64(completedBytes))},
-		{"Files Found", fmt.Sprintf("%d", u.TotalDags)},
+		{"Files Found", fmt.Sprintf("%d", obs.TotalDags)},
 		{"DAGs Created", fmt.Sprintf("%d", func() uint64 {
-			if u.ProcessedDags != 0 {
-				return u.ProcessedDags
+			if obs.ProcessedDags != 0 {
+				return obs.ProcessedDags
 			}
-			return u.TotalDags
+			return obs.TotalDags
 		}())},
 	}
-	if pb, ok := m.dagProgress[u.Model.ID()]; ok {
+	if pb, ok := m.dagProgress[obs.Model.ID()]; ok {
 		if pb.Percent() == 1 {
 			summaryRows = append(summaryRows, table.Row{"Scan Progress", "Complete"})
 		} else {
@@ -634,15 +522,124 @@ func (m *uploadModel) View() string {
 	summaryStyles.Header = lipgloss.NewStyle().UnsetPadding().UnsetBorderStyle().Height(0)
 	summaryStyles.Cell = lipgloss.NewStyle().UnsetPadding()
 	summaryStyles.Selected = summaryStyles.Cell
+
 	summaryTable := table.New(
 		table.WithColumns(summaryCols),
 		table.WithRows(summaryRows),
 		table.WithStyles(summaryStyles),
-		table.WithFocused(false),
 		table.WithHeight(9),
+		table.WithFocused(false),
 	)
-	summaryTable.Blur()
-	body.WriteString(summaryTable.View())
+	return summaryTable.View()
+}
+
+func (m *uploadModel) renderShardTable(state string, shards []events.ShardView, blobBars map[id.ID]progress.Model) string {
+	var cols []table.Column
+	var rowsData []table.Row
+
+	switch state {
+	case "Packing":
+		cols = []table.Column{
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+		}
+		for _, sv := range shards {
+			rowsData = append(rowsData, table.Row{
+				sv.ID.String(),
+				humanize.IBytes(sv.Size),
+			})
+		}
+
+	case "Queued":
+		cols = []table.Column{
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
+		}
+		for _, sv := range shards {
+			rowsData = append(rowsData, table.Row{
+				sv.ID.String(),
+				humanize.IBytes(sv.Size),
+				digestutil.Format(sv.Digest),
+			})
+		}
+
+	case "Uploading":
+		cols = []table.Column{
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
+			{Title: "Put Progress", Width: 40},
+		}
+		for _, sv := range shards {
+			pbStr := "--"
+			if pb, ok := blobBars[sv.ID]; ok {
+				pbStr = fmt.Sprintf("%s", pb.View())
+			}
+			rowsData = append(rowsData, table.Row{
+				sv.ID.String(),
+				humanize.IBytes(sv.Size),
+				digestutil.Format(sv.Digest),
+				pbStr,
+			})
+		}
+
+	case "Complete":
+		cols = []table.Column{
+			{Title: "ID", Width: 37},
+			{Title: "Size", Width: 9},
+			{Title: "Digest", Width: 52},
+			{Title: "PieceCID", Width: 72},
+		}
+		for _, sv := range shards {
+			rowsData = append(rowsData, table.Row{
+				sv.ID.String(),
+				humanize.IBytes(sv.Size),
+				digestutil.Format(sv.Digest),
+				sv.PieceCID.String(),
+			})
+		}
+	}
+
+	t := table.New(
+		table.WithColumns(cols),
+		table.WithRows(rowsData),
+		table.WithStyles(tableStyle),
+		table.WithFocused(false),
+	)
+	return t.View()
+}
+
+func (m *uploadModel) View() string {
+	var body strings.Builder
+	style := lipgloss.NewStyle()
+
+	if m.retry {
+		body.WriteString(style.Bold(true).Render("Uploading with auto-retry enabled...\n\n"))
+	}
+
+	if len(m.currentObservations) == 0 {
+		return body.String()
+	}
+
+	active := m.tabIndex
+	if active >= len(m.tabTitles) {
+		active = len(m.tabTitles) - 1
+	}
+	if active < 0 {
+		active = 0
+	}
+
+	tabsRendered := renderUploadTabs(m.buildUploadLabels(), active)
+
+	activeID := m.uploads[active].ID()
+	u, ok := m.observationsByID[activeID]
+	if !ok {
+		body.WriteString("No data yet for this upload...\n")
+		return lipgloss.JoinVertical(lipgloss.Top, tabsRendered, panelStyle.Render(body.String()))
+	}
+
+	body.WriteString(m.renderSummary(u, active))
 
 	// Aggregate shard totals and build rows.
 	type shardRow struct {
@@ -705,81 +702,7 @@ func (m *uploadModel) View() string {
 	start, end := p.GetSliceBounds(len(activeShards))
 	pageShards := activeShards[start:end]
 
-	var cols []table.Column
-	var rowsData []table.Row
-
-	switch activeState {
-	case "Packing":
-		cols = []table.Column{
-			{Title: "ID", Width: 37},
-			{Title: "Size", Width: 9},
-		}
-		for _, sv := range pageShards {
-			rowsData = append(rowsData, table.Row{
-				sv.ID.String(),
-				humanize.IBytes(sv.Size),
-			})
-		}
-
-	case "Queued":
-		cols = []table.Column{
-			{Title: "ID", Width: 37},
-			{Title: "Size", Width: 9},
-			{Title: "Digest", Width: 52},
-		}
-		for _, sv := range pageShards {
-			rowsData = append(rowsData, table.Row{
-				sv.ID.String(),
-				humanize.IBytes(sv.Size),
-				digestutil.Format(sv.Digest),
-			})
-		}
-
-	case "Uploading":
-		cols = []table.Column{
-			{Title: "ID", Width: 37},
-			{Title: "Size", Width: 9},
-			{Title: "Digest", Width: 52},
-			{Title: "Put Progress", Width: 40},
-		}
-		for _, sv := range pageShards {
-			pbStr := "--"
-			if pb, ok := blobBars[sv.ID]; ok {
-				pbStr = fmt.Sprintf("%s", pb.View())
-			}
-			rowsData = append(rowsData, table.Row{
-				sv.ID.String(),
-				humanize.IBytes(sv.Size),
-				digestutil.Format(sv.Digest),
-				pbStr,
-			})
-		}
-
-	case "Complete":
-		cols = []table.Column{
-			{Title: "ID", Width: 37},
-			{Title: "Size", Width: 9},
-			{Title: "Digest", Width: 52},
-			{Title: "PieceCID", Width: 72},
-		}
-		for _, sv := range pageShards {
-			rowsData = append(rowsData, table.Row{
-				sv.ID.String(),
-				humanize.IBytes(sv.Size),
-				digestutil.Format(sv.Digest),
-				sv.PieceCID.String(),
-			})
-		}
-	}
-
-	t := table.New(
-		table.WithColumns(cols),
-		table.WithRows(rowsData),
-		table.WithStyles(tableStyle),
-		table.WithFocused(false),
-	)
-	body.WriteString(t.View())
-	body.WriteString("\n")
+	body.WriteString(m.renderShardTable(activeState, pageShards, blobBars))
 	body.WriteString(fmt.Sprintf("Page %d/%d\n", p.Page+1, p.TotalPages))
 
 	if m.lastRetriableErr != nil {
@@ -803,6 +726,84 @@ func (m *uploadModel) View() string {
 	body.WriteString("Press q to quit.\n")
 
 	return lipgloss.JoinVertical(lipgloss.Top, tabsRendered, panelStyle.Render(body.String()))
+}
+
+func formatETA(total, uploaded float64, sample progressSample) string {
+	if total <= 0 {
+		return ""
+	}
+	remaining := total - uploaded
+	if remaining <= 0 {
+		return ""
+	}
+	if sample.rate <= 0 {
+		return ""
+	}
+	eta := time.Duration(remaining/sample.rate) * time.Second
+	if eta < time.Second {
+		return "<1s"
+	}
+	etaStr := eta.Round(time.Second).String()
+
+	// Convert bytes/sec -> bits/sec and display Mbps or Gbps.
+	bps := sample.rate * 8
+	throughput := ""
+	switch {
+	case bps >= 1_000_000_000:
+		throughput = fmt.Sprintf(" @ %.2f Gbps", bps/1_000_000_000)
+	case bps > 0:
+		throughput = fmt.Sprintf(" @ %.2f Mbps", bps/1_000_000)
+	}
+
+	bytesFrac := fmt.Sprintf(" [%s of %s]", humanize.IBytes(uint64(uploaded)), humanize.IBytes(uint64(total)))
+
+	return etaStr + throughput + bytesFrac
+}
+
+func renderMiniBar(pct float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	filled := int(math.Round(pct * float64(width)))
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+func renderUploadTabs(titles []string, active int) string {
+	if len(titles) == 0 {
+		return ""
+	}
+
+	var renderedTabs []string
+	for i, t := range titles {
+		label := fmt.Sprintf("[%d] %s", i+1, t)
+		isFirst, isLast, isActive := i == 0, i == len(titles)-1, i == active
+		style := uploadTabInactiveStyle
+		if isActive {
+			style = uploadTabActiveStyle
+		}
+		border, _, _, _, _ := style.GetBorder()
+		if isFirst && isActive {
+			border.BottomLeft = "│"
+		} else if isFirst && !isActive {
+			border.BottomLeft = "├"
+		} else if isLast && isActive {
+			border.BottomRight = "│"
+		} else if isLast && !isActive {
+			border.BottomRight = "┤"
+		}
+		style = style.Border(border)
+		renderedTabs = append(renderedTabs, style.Render(label))
+	}
+	return lipgloss.JoinVertical(lipgloss.Top, renderedTabs...)
 }
 
 type rootCIDMsg struct {
