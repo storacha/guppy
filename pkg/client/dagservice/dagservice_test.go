@@ -1,8 +1,10 @@
 package dagservice_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"testing"
 
 	dag "github.com/ipfs/boxo/ipld/merkledag"
@@ -79,7 +81,7 @@ func TestDAGService(t *testing.T) {
 				},
 			}
 
-			lctr := newStubLocatorWithCommitment()
+			lctr := newStubLocator()
 			lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
 
 			retriever := stubRetriever{data: make(map[string][]byte)}
@@ -100,7 +102,7 @@ func TestDAGService(t *testing.T) {
 	}
 }
 
-func newStubLocatorWithCommitment() stubLocator {
+func newStubLocator() stubLocator {
 	return stubLocator{
 		locations: blobindex.NewMultihashMap[[]locator.Location](-1),
 	}
@@ -130,7 +132,7 @@ func commitmentKey(commitment ucan.Capability[assertcap.LocationCaveats]) (strin
 	return string(json), err
 }
 
-func (r stubRetriever) Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+func (r stubRetriever) Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) (io.ReadCloser, error) {
 	location := locations[0]
 
 	key, err := commitmentKey(location.Commitment)
@@ -138,7 +140,7 @@ func (r stubRetriever) Retrieve(ctx context.Context, locations []locator.Locatio
 		return nil, err
 	}
 	if data, ok := r.data[key]; ok {
-		return data[location.Position.Offset : location.Position.Offset+location.Position.Length], nil
+		return io.NopCloser(bytes.NewReader(data[location.Position.Offset : location.Position.Offset+location.Position.Length])), nil
 	}
 	return nil, fmt.Errorf("no data for location %s", key)
 }
