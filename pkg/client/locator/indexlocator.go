@@ -122,7 +122,6 @@ func (s *indexLocator) getCached(spaceDID did.DID, hash mh.Multihash) ([]Locatio
 			for _, commitment := range shardCommitments {
 				locations = append(locations, Location{
 					Commitment: commitment,
-					Digest:     hash,
 					Position:   inclusion.position,
 				})
 			}

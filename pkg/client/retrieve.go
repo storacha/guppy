@@ -1,16 +1,13 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"math/rand"
 
-	mh "github.com/multiformats/go-multihash"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
-	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/failure"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
@@ -21,7 +18,7 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
-func (c *Client) Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error) {
+func (c *Client) Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) (io.ReadCloser, error) {
 	// Randomly pick one of the available locations
 	location := locations[rand.Intn(len(locations))]
 
@@ -106,29 +103,5 @@ func (c *Client) Retrieve(ctx context.Context, locations []locator.Location, ret
 		return nil, fmt.Errorf("execution failure: %w", err)
 	}
 
-	body := hres.Body()
-	defer body.Close()
-
-	expectedHash := location.Digest
-
-	decHash, err := mh.Decode(expectedHash)
-	if err != nil {
-		return nil, fmt.Errorf("decoding content multihash %s: %w", expectedHash, err)
-	}
-
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return nil, fmt.Errorf("reading content %s: %w", expectedHash, err)
-	}
-
-	dataDigest, err := mh.Sum(data, decHash.Code, -1)
-	if err != nil {
-		return nil, fmt.Errorf("hashing content %s: %w", expectedHash, err)
-	}
-
-	if !bytes.Equal(expectedHash, dataDigest) {
-		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedHash), digestutil.Format(dataDigest))
-	}
-
-	return data, nil
+	return hres.Body(), nil
 }
