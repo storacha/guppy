@@ -2,6 +2,7 @@ package dagservice
 
 import (
 	"context"
+	"io"
 
 	"github.com/ipfs/boxo/blockservice"
 	"github.com/ipfs/boxo/blockstore"
@@ -16,7 +17,7 @@ import (
 )
 
 type Retriever interface {
-	Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) ([]byte, error)
+	Retrieve(ctx context.Context, locations []locator.Location, retrievalOpts ...rclient.Option) (io.ReadCloser, error)
 }
 
 var _ Retriever = (*client.Client)(nil)
