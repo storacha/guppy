@@ -97,6 +97,7 @@ var serveCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		ipfsHandler := gateway.NewHandler(gwConf, backend)
+		ipfsHandler = gateway.NewHeaders(nil).ApplyCors().Wrap(ipfsHandler)
 
 		e := echo.New()
 		e.HideBanner = true
