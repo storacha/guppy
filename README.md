@@ -124,4 +124,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for technical and logistical details ab
 
 ## License
 
-Dual-licensed under [MIT + Apache 2.0](LICENSE.md)
+Dual-licensed under [MIT OR Apache 2.0](LICENSE.md)
