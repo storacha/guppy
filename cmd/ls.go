@@ -6,14 +6,14 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
-	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var lsFlags struct {
-	proofsPath string
 	showShards bool
 }
 
@@ -35,13 +35,20 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		proofs := []delegation.Delegation{}
-		if lsFlags.proofsPath != "" {
-			proof := cmdutil.MustGetProof(lsFlags.proofsPath)
-			proofs = append(proofs, proof)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
 		}
 
-		c := cmdutil.MustGetClient(storePath, client.WithAdditionalProofs(proofs...))
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 
 		var cursor *string
 		for {
@@ -75,6 +82,5 @@ var lsCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(lsCmd)
 
-	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
 	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }

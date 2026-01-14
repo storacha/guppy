@@ -6,7 +6,10 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var listFlags struct {
@@ -21,7 +24,19 @@ var listCmd = &cobra.Command{
 		"Lists all Storacha accounts currently logged in.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 
 		accounts := c.Accounts()
 

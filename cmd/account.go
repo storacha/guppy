@@ -5,6 +5,5 @@ import (
 )
 
 func init() {
-	account.StorePathP = &storePath
 	rootCmd.AddCommand(account.AccountCmd)
 }

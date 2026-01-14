@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
-	"github.com/storacha/guppy/internal/cmdutil"
+
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var whoamiCmd = &cobra.Command{
@@ -12,9 +12,22 @@ var whoamiCmd = &cobra.Command{
 	Short: "Print information about the local agent",
 	Long:  "Prints information about the local agent.",
 
-	Run: func(cmd *cobra.Command, args []string) {
-		c := cmdutil.MustGetClient(storePath)
-		fmt.Println(c.DID())
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		s, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+		principal, err := s.Principal()
+		if err != nil {
+			return err
+		}
+
+		cmd.Println(principal.DID().String())
+		return nil
 	},
 }
 

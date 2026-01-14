@@ -6,7 +6,10 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -36,7 +39,19 @@ var provisionCmd = &cobra.Command{
 			return fmt.Errorf("invalid customer email: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("Provisioning space %s with customer %s...\n", spaceDID, customerEmail)
 

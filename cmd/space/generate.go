@@ -14,7 +14,9 @@ import (
 	"github.com/storacha/go-ucanto/ucan"
 
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -52,7 +54,20 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("generating signer for space: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 		accounts := c.Accounts()
 
 		var provisionAccount did.DID
@@ -185,7 +200,9 @@ func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, 
 		return nil, fmt.Errorf("creating delegation: %w", err)
 	}
 
-	c.AddProofs(delToStore, delToKeep)
+	if err := c.AddProofs(delToStore, delToKeep); err != nil {
+		return nil, err
+	}
 
 	// Store the delegation via access/delegate
 	_, err = c.AccessDelegate(ctx, spaceSigner.DID(), delToStore)

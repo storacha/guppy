@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -19,17 +21,12 @@ var (
 	tracer = otel.Tracer("cmd")
 )
 
-var guppyDirPath string
-var storePath string
-
 var rootCmd = &cobra.Command{
 	Use:   "guppy",
 	Short: "Interact with the Storacha Network",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
-
-		storePath = filepath.Join(guppyDirPath, "store.json")
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
@@ -41,6 +38,12 @@ func init() {
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
+	cobra.OnInitialize(initRootFlags, initConfig)
+}
+
+var cfgFilePath string
+
+func initRootFlags() {
 	// default storacha dir: ~/.storacha/guppy
 	homedir, err := os.UserHomeDir()
 	if err != nil {
@@ -48,13 +51,90 @@ func init() {
 	}
 
 	rootCmd.PersistentFlags().StringVar(
-		&guppyDirPath,
+		&cfgFilePath,
+		"config",
+		"",
+		"Path to the config file",
+	)
+
+	// this flag is hidden and deprecated in favor of "data-dir", though it will continue to work with a warning.
+	rootCmd.PersistentFlags().String(
 		"guppy-dir",
 		filepath.Join(homedir, ".storacha/guppy"),
 		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
+	cobra.CheckErr(rootCmd.PersistentFlags().MarkDeprecated("guppy-dir",
+		"guppy-dir is deprecated please use data-dir instead"))
+	cobra.CheckErr(rootCmd.PersistentFlags().MarkHidden("guppy-dir"))
+	cobra.CheckErr(viper.BindPFlag("repo.data_dir", rootCmd.PersistentFlags().Lookup("guppy-dir")))
 
-	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
+	rootCmd.PersistentFlags().String(
+		"data-dir",
+		filepath.Join(homedir, ".storacha/guppy"),
+		"Directory containing the config and data store (default: ~/.storacha/guppy)",
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.data_dir", rootCmd.PersistentFlags().Lookup("data-dir")))
+	// ensure only the data-dir or (deprecate) guppy-dir are used, never both
+	rootCmd.MarkFlagsMutuallyExclusive("guppy-dir", "data-dir")
+
+	rootCmd.PersistentFlags().String(
+		"upload-service-url",
+		"https://up.forge.storacha.network",
+		"URL of upload service",
+	)
+	cobra.CheckErr(viper.BindPFlag("client.upload_service.url", rootCmd.PersistentFlags().Lookup("upload-service-url")))
+	cobra.CheckErr(viper.BindEnv("client.upload_service.url", "STORACHA_SERVICE_URL"))
+
+	rootCmd.PersistentFlags().String(
+		"upload-service-did",
+		"did:web:up.forge.storacha.network",
+		"DID of upload service",
+	)
+	cobra.CheckErr(viper.BindPFlag("client.upload_service.did", rootCmd.PersistentFlags().Lookup("upload-service-did")))
+	cobra.CheckErr(viper.BindEnv("client.upload_service.url", "STORACHA_SERVICE_DID"))
+
+	rootCmd.PersistentFlags().String(
+		"indexer-service-url",
+		"https://indexer.forge.storacha.network",
+		"URL of indexer service",
+	)
+	cobra.CheckErr(viper.BindPFlag("indexer.url", rootCmd.PersistentFlags().Lookup("indexer-service-url")))
+	cobra.CheckErr(viper.BindEnv("indexer.url", "STORACHA_INDEXING_SERVICE_URL"))
+
+	rootCmd.PersistentFlags().String(
+		"indexer-service-did",
+		"did:web:indexer.forge.storacha.network",
+		"DID of indexer service",
+	)
+	cobra.CheckErr(viper.BindPFlag("indexer.did", rootCmd.PersistentFlags().Lookup("indexer-service-did")))
+	cobra.CheckErr(viper.BindEnv("indexer.url", "STORACHA_INDEXING_SERVICE_DID"))
+}
+
+func initConfig() {
+	// check if environment variables match any of the existing keys
+	// as an example a key is 'repo.data_dir'
+	viper.AutomaticEnv()
+	// when checking for env vars, rename keys searched for from 'repo.data_dir' to 'repo_data_dir'
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	// when checking for env vars, search for keys prefixed with GUPPY
+	viper.SetEnvPrefix("GUPPY")
+
+	// when searching for a config file look for files names "guppy-config.yaml"
+	viper.SetConfigName("guppy-config")
+	viper.SetConfigType("yaml")
+
+	// if no config file was provided, first look in the current directory _then_ look in
+	// $XDG_CONFIG_HOME/guppy/
+	if cfgFilePath == "" {
+		viper.AddConfigPath(".")
+		if configDir, err := os.UserConfigDir(); err == nil {
+			defaultCfgFile := filepath.Join(configDir, "guppy")
+			viper.AddConfigPath(defaultCfgFile)
+		}
+	} else {
+		// else a config was provided over the cli via a flag, read it in directly
+		viper.SetConfigFile(cfgFilePath)
+	}
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.

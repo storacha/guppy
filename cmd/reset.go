@@ -3,7 +3,9 @@ package cmd
 import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
-	"github.com/storacha/guppy/internal/cmdutil"
+
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var resetCmd = &cobra.Command{
@@ -15,8 +17,15 @@ var resetCmd = &cobra.Command{
 		80),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(storePath)
-		return c.Reset()
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		s, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+		return s.Reset()
 	},
 }
 
