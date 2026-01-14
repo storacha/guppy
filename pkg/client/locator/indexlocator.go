@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/capabilities/assert"
@@ -19,6 +20,8 @@ import (
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
+
+var log = logging.Logger("client/dagservice")
 
 // AuthorizeRetrievalFunc creates a content retrieval authorization for the
 // provided space.
@@ -70,6 +73,7 @@ func (e NotFoundError) Error() string {
 // Locate retrieves locations for the data identified by the given digest, in
 // the given space.
 func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error) {
+	log.Infof("Locating block %s in space %s", digestutil.Format(digest), spaceDID.String())
 	locations, err := s.LocateMany(ctx, spaceDID, []mh.Multihash{digest})
 	if err != nil {
 		return nil, err
@@ -83,6 +87,7 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.M
 }
 
 func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error) {
+	log.Infof("Locating %d blocks in space %s", len(digests), spaceDID.String())
 	locations := blobindex.NewMultihashMap[[]Location](len(digests))
 	needInclusions := make([]mh.Multihash, 0, len(digests))
 	needLocations := make([]mh.Multihash, 0, len(digests))
