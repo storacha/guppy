@@ -21,22 +21,48 @@ import (
 
 var log = logging.Logger("client/dagservice")
 
+// DefaultMaxGap is the default maximum gap (in bytes) between blocks that can
+// still be coalesced into a single request. This value accommodates the typical
+// overhead between adjacent blocks in a CAR file, which consists of a varint
+// length prefix (1-10 bytes) and a CID (34-37 bytes for CIDv0/CIDv1 with
+// SHA2-256).
+const DefaultMaxGap = 64
+
 type storachaExchange struct {
 	locator   locator.Locator
 	retriever Retriever
 	space     did.DID
 	shards    blobindex.MultihashMap[[]byte]
+	maxGap    uint64
 }
 
 var _ exchange.Interface = (*storachaExchange)(nil)
 
-func NewExchange(locator locator.Locator, retriever Retriever, space did.DID) exchange.Interface {
-	return &storachaExchange{
+// ExchangeOption configures a storachaExchange.
+type ExchangeOption func(*storachaExchange)
+
+// WithMaxGap sets the maximum gap (in bytes) between blocks that can still be
+// coalesced into a single request. A maxGap of 0 means blocks must be exactly
+// contiguous to be coalesced. The default is DefaultMaxGap.
+func WithMaxGap(maxGap uint64) ExchangeOption {
+	return func(se *storachaExchange) {
+		se.maxGap = maxGap
+	}
+}
+
+// NewExchange creates a new exchange for retrieving blocks from Storacha.
+func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, opts ...ExchangeOption) exchange.Interface {
+	se := &storachaExchange{
 		locator:   locator,
 		retriever: retriever,
 		space:     space,
 		shards:    blobindex.NewMultihashMap[[]byte](-1),
+		maxGap:    DefaultMaxGap,
 	}
+	for _, opt := range opts {
+		opt(se)
+	}
+	return se
 }
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
@@ -112,12 +138,22 @@ func sameShard(a, b locator.Location) bool {
 	return bytes.Equal(a.Commitment.Nb().Content.Hash(), b.Commitment.Nb().Content.Hash())
 }
 
-func contiguous(a, b locator.Location) bool {
+// withinGap checks if location b is within maxGap bytes after the end of
+// location a, in the same shard. A maxGap of 0 means they must be exactly
+// contiguous.
+func withinGap(a, b locator.Location, maxGap uint64) bool {
 	if !sameShard(a, b) {
 		return false
 	}
 
-	return a.Position.Offset+a.Position.Length == b.Position.Offset
+	endOfA := a.Position.Offset + a.Position.Length
+
+	if b.Position.Offset >= endOfA && b.Position.Offset <= endOfA+maxGap {
+		return true
+	} else {
+		log.Infof("Locations not within gap: a ends at %d, b starts at %d; gap is %d, maxGap is %d", endOfA, b.Position.Offset, b.Position.Offset-endOfA, maxGap)
+		return false
+	}
 }
 
 // GetBlocks will attempt to fetch multiple contiguous blocks in a single
@@ -160,13 +196,14 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				},
 			}
 		} else {
-			// See if any of the locations for this block are contiguous with the
-			// current location.
+			// See if any of the locations for this block are within the max gap of
+			// the current location.
 			found := false
 			if !currentLocation.isEmpty() {
 				for _, loc := range locs {
-					if contiguous(currentLocation.location, loc) {
-						currentLocation.location.Position.Length += loc.Position.Length
+					if withinGap(currentLocation.location, loc, se.maxGap) {
+						// Extend the coalesced location to include the gap and this block
+						currentLocation.location.Position.Length = loc.Position.Offset + loc.Position.Length - currentLocation.location.Position.Offset
 						currentLocation.slices = append(currentLocation.slices, slice{
 							cid: cid,
 							position: blobindex.Position{

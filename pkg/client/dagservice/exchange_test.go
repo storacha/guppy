@@ -253,7 +253,7 @@ func TestStorachaExchange(t *testing.T) {
 			require.Equal(t, uint64(15), retriever.requests[0].Position.Length)
 		})
 
-		t.Run("does not coalesce non-contiguous blocks", func(t *testing.T) {
+		t.Run("does not coalesce non-contiguous blocks when maxGap is 0", func(t *testing.T) {
 			space := stestutil.RandomDID(t)
 			shardData := []byte("AAAAAXXXXXBBBBB")
 			shardHash, err := mh.Sum(shardData, mh.SHA2_256, -1)
@@ -301,7 +301,8 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			// With maxGap=0, blocks must be exactly contiguous
+			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(0))
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -486,6 +487,225 @@ func TestStorachaExchange(t *testing.T) {
 			}
 
 			require.Len(t, receivedBlocks, 0)
+		})
+
+		t.Run("coalesces blocks within maxGap", func(t *testing.T) {
+			space := stestutil.RandomDID(t)
+			// Layout: "AAAAAXXXXXBBBBB" where XXXXX is a 5-byte gap
+			shardData := []byte("AAAAAXXXXXBBBBB")
+			shardHash, err := mh.Sum(shardData, mh.SHA2_256, -1)
+			require.NoError(t, err)
+
+			// Block 1: "AAAAA" (offset 0, length 5)
+			block1Data := shardData[0:5]
+			block1Hash, err := mh.Sum(block1Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block1CID := cid.NewCidV1(cid.Raw, block1Hash)
+
+			// Block 2: "BBBBB" (offset 10, length 5) - 5 bytes gap from block 1
+			block2Data := shardData[10:15]
+			block2Hash, err := mh.Sum(block2Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block2CID := cid.NewCidV1(cid.Raw, block2Hash)
+
+			shardCommitment := ucan.NewCapability(
+				assertcap.Location.Can(),
+				space.String(),
+				assertcap.LocationCaveats{
+					Space:   space.DID(),
+					Content: captypes.FromHash(shardHash),
+					Location: ctestutil.Urls(
+						"https://storage1.example.com/shard",
+					),
+				},
+			)
+
+			location1 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 0, Length: 5},
+			}
+			location2 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 10, Length: 5},
+			}
+
+			lctr := newStubLocator()
+			lctr.locations.Set(block1CID.Hash(), []locator.Location{location1})
+			lctr.locations.Set(block2CID.Hash(), []locator.Location{location2})
+
+			retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+				shardCommitment: shardData,
+			})
+			require.NoError(t, err)
+
+			// maxGap of 5 should coalesce the blocks (gap is exactly 5 bytes)
+			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(5))
+			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
+			require.NoError(t, err)
+
+			blocks := make(map[string][]byte)
+			for blk := range blocksCh {
+				blocks[blk.Cid().String()] = blk.RawData()
+			}
+
+			require.Len(t, blocks, 2)
+			require.Equal(t, block1Data, blocks[block1CID.String()])
+			require.Equal(t, block2Data, blocks[block2CID.String()])
+
+			// Should have made only 1 request due to maxGap
+			require.Len(t, retriever.requests, 1)
+			// The coalesced request should span from offset 0 to 15
+			require.Equal(t, uint64(0), retriever.requests[0].Position.Offset)
+			require.Equal(t, uint64(15), retriever.requests[0].Position.Length)
+		})
+
+		t.Run("does not coalesce blocks beyond maxGap", func(t *testing.T) {
+			space := stestutil.RandomDID(t)
+			// Layout: "AAAAAXXXXXBBBBB" where XXXXX is a 5-byte gap
+			shardData := []byte("AAAAAXXXXXBBBBB")
+			shardHash, err := mh.Sum(shardData, mh.SHA2_256, -1)
+			require.NoError(t, err)
+
+			// Block 1: "AAAAA" (offset 0, length 5)
+			block1Data := shardData[0:5]
+			block1Hash, err := mh.Sum(block1Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block1CID := cid.NewCidV1(cid.Raw, block1Hash)
+
+			// Block 2: "BBBBB" (offset 10, length 5) - 5 bytes gap from block 1
+			block2Data := shardData[10:15]
+			block2Hash, err := mh.Sum(block2Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block2CID := cid.NewCidV1(cid.Raw, block2Hash)
+
+			shardCommitment := ucan.NewCapability(
+				assertcap.Location.Can(),
+				space.String(),
+				assertcap.LocationCaveats{
+					Space:   space.DID(),
+					Content: captypes.FromHash(shardHash),
+					Location: ctestutil.Urls(
+						"https://storage1.example.com/shard",
+					),
+				},
+			)
+
+			location1 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 0, Length: 5},
+			}
+			location2 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 10, Length: 5},
+			}
+
+			lctr := newStubLocator()
+			lctr.locations.Set(block1CID.Hash(), []locator.Location{location1})
+			lctr.locations.Set(block2CID.Hash(), []locator.Location{location2})
+
+			retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+				shardCommitment: shardData,
+			})
+			require.NoError(t, err)
+
+			// maxGap of 4 should NOT coalesce the blocks (gap is 5 bytes)
+			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(4))
+			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
+			require.NoError(t, err)
+
+			blocks := make(map[string][]byte)
+			for blk := range blocksCh {
+				blocks[blk.Cid().String()] = blk.RawData()
+			}
+
+			require.Len(t, blocks, 2)
+			require.Equal(t, block1Data, blocks[block1CID.String()])
+			require.Equal(t, block2Data, blocks[block2CID.String()])
+
+			// Should have made 2 separate requests
+			require.Len(t, retriever.requests, 2)
+		})
+
+		t.Run("coalesces multiple blocks with gaps", func(t *testing.T) {
+			space := stestutil.RandomDID(t)
+			// Layout: "AAAAA__BBBBB__CCCCC" (2-byte gaps)
+			shardData := []byte("AAAAA..BBBBB..CCCCC")
+			shardHash, err := mh.Sum(shardData, mh.SHA2_256, -1)
+			require.NoError(t, err)
+
+			// Block 1: "AAAAA" (offset 0, length 5)
+			block1Data := shardData[0:5]
+			block1Hash, err := mh.Sum(block1Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block1CID := cid.NewCidV1(cid.Raw, block1Hash)
+
+			// Block 2: "BBBBB" (offset 7, length 5) - 2 bytes gap
+			block2Data := shardData[7:12]
+			block2Hash, err := mh.Sum(block2Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block2CID := cid.NewCidV1(cid.Raw, block2Hash)
+
+			// Block 3: "CCCCC" (offset 14, length 5) - 2 bytes gap
+			block3Data := shardData[14:19]
+			block3Hash, err := mh.Sum(block3Data, mh.SHA2_256, -1)
+			require.NoError(t, err)
+			block3CID := cid.NewCidV1(cid.Raw, block3Hash)
+
+			shardCommitment := ucan.NewCapability(
+				assertcap.Location.Can(),
+				space.String(),
+				assertcap.LocationCaveats{
+					Space:   space.DID(),
+					Content: captypes.FromHash(shardHash),
+					Location: ctestutil.Urls(
+						"https://storage1.example.com/shard",
+					),
+				},
+			)
+
+			location1 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 0, Length: 5},
+			}
+			location2 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 7, Length: 5},
+			}
+			location3 := locator.Location{
+				Commitment: shardCommitment,
+				Position:   blobindex.Position{Offset: 14, Length: 5},
+			}
+
+			lctr := newStubLocator()
+			lctr.locations.Set(block1CID.Hash(), []locator.Location{location1})
+			lctr.locations.Set(block2CID.Hash(), []locator.Location{location2})
+			lctr.locations.Set(block3CID.Hash(), []locator.Location{location3})
+
+			retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+				shardCommitment: shardData,
+			})
+			require.NoError(t, err)
+
+			// maxGap of 2 should coalesce all 3 blocks
+			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(2))
+			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID, block3CID})
+			require.NoError(t, err)
+
+			blocks := make(map[string][]byte)
+			for blk := range blocksCh {
+				blocks[blk.Cid().String()] = blk.RawData()
+			}
+
+			require.Len(t, blocks, 3)
+			require.Equal(t, block1Data, blocks[block1CID.String()])
+			require.Equal(t, block2Data, blocks[block2CID.String()])
+			require.Equal(t, block3Data, blocks[block3CID.String()])
+
+			// Should have made only 1 request
+			require.Len(t, retriever.requests, 1)
+			// The coalesced request should span from offset 0 to 19
+			require.Equal(t, uint64(0), retriever.requests[0].Position.Offset)
+			require.Equal(t, uint64(19), retriever.requests[0].Position.Length)
 		})
 	})
 }
