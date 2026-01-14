@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/ipfs/go-cid"
-	"github.com/multiformats/go-multihash"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
@@ -52,10 +51,10 @@ func TestStorachaExchange(t *testing.T) {
 
 		lctr := newStubLocator()
 		lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
-		retriever := stubRetriever{data: make(map[string][]byte)}
-		key, err := commitmentKey(location.Commitment)
+		retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+			location.Commitment: shardData,
+		})
 		require.NoError(t, err)
-		retriever.data[key] = shardData
 
 		exchange := dagservice.NewExchange(lctr, retriever, space)
 		blk, err := exchange.GetBlock(t.Context(), blockCID)
@@ -68,7 +67,7 @@ func TestStorachaExchange(t *testing.T) {
 		space := stestutil.RandomDID(t)
 		wrongData := []byte("This is the !WRONG! data returned by server")
 		correctData := []byte("This is the correct data.")
-		correctHash, err := multihash.Sum(correctData, multihash.SHA2_256, -1)
+		correctHash, err := mh.Sum(correctData, mh.SHA2_256, -1)
 		require.NoError(t, err)
 
 		location := locator.Location{
@@ -99,10 +98,10 @@ func TestStorachaExchange(t *testing.T) {
 
 		lctr := newStubLocator()
 		lctr.locations.Set(blockCID.Hash(), []locator.Location{location})
-		retriever := stubRetriever{data: make(map[string][]byte)}
-		key, err := commitmentKey(location.Commitment)
+		retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+			location.Commitment: wrongData,
+		})
 		require.NoError(t, err)
-		retriever.data[key] = wrongData
 
 		exchange := dagservice.NewExchange(lctr, retriever, space)
 		_, err = exchange.GetBlock(t.Context(), blockCID)
