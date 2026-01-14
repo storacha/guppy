@@ -40,6 +40,7 @@ func NewExchange(locator locator.Locator, retriever Retriever, space did.DID) ex
 }
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	log.Infof("Getting block %s in space %s", c.String(), se.space.String())
 	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
@@ -123,6 +124,7 @@ func contiguous(a, b locator.Location) bool {
 // request where possible. Note that the contiguous blocks must be provided in
 // `cids` in order, or they will not be coalesced.
 func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
 	out := make(chan blocks.Block)
 
 	digests := make([]mh.Multihash, 0, len(cids))
@@ -204,6 +206,7 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 
 	var wg sync.WaitGroup
 	for _, cloc := range coalescedLocations {
+		log.Infof("Fetching %d coalesced blocks at offset %d with length %d", len(cloc.slices), cloc.location.Position.Offset, cloc.location.Position.Length)
 		wg.Add(1)
 		go func(cloc coalescedLocation) {
 			defer wg.Done()

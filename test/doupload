@@ -97,12 +97,8 @@ main () {
 	rm -rf "$sandbox"
 	mkdir -p "$sandbox"
 
-	mkdir -p "$dataDir/subdir"
-	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/file1"
-	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/file2"
-	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/subdir/file1"
-	dd if=/dev/urandom bs=1 count=10240 status=none > "$dataDir/subdir/file2"
-
+	go run github.com/storacha/randdir@latest --output "$dataDir/large-files" --size 50MB --min-file-size 10MB
+	go run github.com/storacha/randdir@latest --output "$dataDir/small-files" --size 5MB --min-file-size 100KB --max-file-size 1MB
 
 	# Generate a random maildrop email address
 	local random_id=$(head -c 10 < /dev/urandom | base32 | tr "[:upper:]" "[:lower:]")
@@ -130,8 +126,8 @@ main () {
 	guppy retrieve "$space" "$rootCID" "$outDir1"
 
 	echo
-	echo "📥 Retrieving data from only /subdir with root CID $rootCID to $outDir2"
-	guppy retrieve "$space" "$rootCID"/subdir "$outDir2"
+	echo "📥 Retrieving data from only subdir with root CID $rootCID to $outDir2"
+	guppy retrieve "$space" "$rootCID/small-files" "$outDir2"
 
 
 	echo
@@ -151,7 +147,7 @@ main () {
 
 	echo "↔️ Verifying retrieved data matches original"
 	diff -r "$dataDir" "$outDir1"
-	diff -r "$dataDir/subdir" "$outDir2"
+	diff -r "$dataDir/small-files" "$outDir2"
 	diff -r "$dataDir" "$outDir3"
 	echo "✅ Data verified!"
 }
