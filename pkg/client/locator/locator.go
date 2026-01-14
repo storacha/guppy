@@ -11,7 +11,8 @@ import (
 )
 
 type Locator interface {
-	Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) ([]Location, error)
+	Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error)
+	LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error)
 }
 
 type Location struct {
