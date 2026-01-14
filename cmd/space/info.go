@@ -7,7 +7,10 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var infoFlags struct {
@@ -32,7 +35,19 @@ var infoCmd = &cobra.Command{
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 
 		result, err := c.SpaceInfo(cmd.Context(), spaceDID)
 		if err != nil {

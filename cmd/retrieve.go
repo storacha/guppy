@@ -13,11 +13,15 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+
 	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
+	"github.com/storacha/guppy/pkg/preparation"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -39,13 +43,25 @@ var retrieveCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
-		repo, err := makeRepo(ctx)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
 		if err != nil {
 			return err
 		}
 		defer repo.Close()
 
-		c := cmdutil.MustGetClient(storePath)
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 		space, err := did.Parse(args[0])
 		if err != nil {
 			cmd.SilenceUsage = false
@@ -63,7 +79,10 @@ var retrieveCmd = &cobra.Command{
 
 		outputPath := args[2]
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal, err := cmdutil.GetIndexClient(cfg)
+		if err != nil {
+			return err
+		}
 
 		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
 			attribute.String("retrieval.space", space.DID().String()),
@@ -81,10 +100,14 @@ var retrieveCmd = &cobra.Command{
 
 		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
 			var pfs []delegation.Proof
-			for _, del := range c.Proofs(client.CapabilityQuery{
+			query, err := store.Query(agentstore.CapabilityQuery{
 				Can:  contentcap.Retrieve.Can(),
 				With: space.String(),
-			}) {
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, del := range query {
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 

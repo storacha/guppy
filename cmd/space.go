@@ -5,6 +5,5 @@ import (
 )
 
 func init() {
-	space.StorePathP = &storePath
 	rootCmd.AddCommand(space.SpaceCmd)
 }

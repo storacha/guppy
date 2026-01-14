@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -15,7 +14,9 @@ import (
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
@@ -24,7 +25,6 @@ import (
 )
 
 var uploadFlags struct {
-	dbPath      string
 	proofPath   string
 	all         bool
 	retry       bool
@@ -41,13 +41,6 @@ var uploadCmd = &cobra.Command{
 			"or names to upload only those specific sources.",
 		80),
 	Args: cobra.MinimumNArgs(1),
-
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if uploadFlags.dbPath == "" {
-			uploadFlags.dbPath = filepath.Join(guppyDirPath, "preparation.db")
-		}
-	},
-
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		space := args[0]
@@ -61,7 +54,7 @@ var uploadCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		useUI, err := cmd.Parent().PersistentFlags().GetBool("ui")
+		useUI, err := cmd.PersistentFlags().GetBool("ui")
 		if err != nil {
 			return fmt.Errorf("getting 'ui' flag: %w", err)
 		}
@@ -72,19 +65,36 @@ var uploadCmd = &cobra.Command{
 		// to see the usage.
 		cmd.SilenceUsage = true
 
-		eb := bus.New()
-		repo, err := makeRepo(ctx, sqlrepo.WithEventBus(eb))
+		cfg, err := config.Load()
 		if err != nil {
 			return err
 		}
+
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
+
+		eventBus := bus.New()
+
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath(), sqlrepo.WithEventBus(eventBus))
+		if err != nil {
+			return err
+		}
+		// TODO: FIX ME!
 		// Currently leads to a race condition with the app still running delayed DB
 		// queries. We can deal with this issue later, since the process ends at the
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath),
+		api := preparation.NewAPI(repo, c,
 			preparation.WithBlobUploadParallelism(int(uploadFlags.parallelism)),
-			preparation.WithEventBus(eb),
+			preparation.WithEventBus(eventBus),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
@@ -131,7 +141,7 @@ var uploadCmd = &cobra.Command{
 		}
 
 		if useUI {
-			return ui.RunUploadUI(ctx, repo, api, uploadsToRun, uploadFlags.retry, eb)
+			return ui.RunUploadUI(ctx, repo, api, uploadsToRun, uploadFlags.retry, eventBus)
 		}
 		// UI disabled, log at info level
 		logging.SetAllLoggers(logging.LevelInfo)
@@ -221,12 +231,6 @@ var uploadCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(uploadCmd)
 
-	uploadCmd.PersistentFlags().StringVar(
-		&uploadFlags.dbPath,
-		"db",
-		"",
-		"Path to the preparation database file (default: <guppyDir>/preparation.db)",
-	)
 	uploadCmd.Flags().StringVar(&uploadFlags.proofPath, "proof", "", "Path to a UCAN proof file")
 	uploadCmd.Flags().BoolVar(&uploadFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	uploadCmd.Flags().BoolVar(&uploadFlags.retry, "retry", false, "Auto-retry failed uploads")
@@ -261,12 +265,6 @@ var uploadSourcesAddCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, err := makeRepo(ctx)
-		if err != nil {
-			return err
-		}
-		defer repo.Close()
-
 		space := cmd.Flags().Arg(0)
 		if space == "" {
 			cmd.SilenceUsage = false
@@ -279,7 +277,7 @@ var uploadSourcesAddCmd = &cobra.Command{
 			return errors.New("path cannot be empty")
 		}
 
-		path, err = filepath.Abs(path)
+		path, err := filepath.Abs(path)
 		if err != nil {
 			return fmt.Errorf("resolving absolute path: %w", err)
 		}
@@ -290,7 +288,30 @@ var uploadSourcesAddCmd = &cobra.Command{
 			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(storePath))
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
+
+		eventBus := bus.New()
+
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath(), sqlrepo.WithEventBus(eventBus))
+		if err != nil {
+			return err
+		}
+		defer repo.Close()
+
+		api := preparation.NewAPI(repo, c)
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption
@@ -342,7 +363,11 @@ var uploadSourcesListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, err := makeRepo(ctx)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
 		if err != nil {
 			return err
 		}
@@ -386,9 +411,6 @@ var uploadSourcesListCmd = &cobra.Command{
 }
 
 func init() {
+	uploadCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
 	uploadSourceCmd.AddCommand(uploadSourcesListCmd)
-}
-
-func makeRepo(ctx context.Context, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
-	return preparation.OpenRepo(ctx, uploadFlags.dbPath, opts...)
 }

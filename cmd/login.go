@@ -13,6 +13,8 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -43,7 +45,20 @@ var loginCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient(storePath)
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+
+		store, err := agentstore.NewFs(cfg.Repo.Dir)
+		if err != nil {
+			return err
+		}
+
+		c, err := cmdutil.GetClient(store, cfg.Client)
+		if err != nil {
+			return err
+		}
 
 		authOk, err := c.RequestAccess(ctx, accountDid.String())
 		if err != nil {
@@ -68,7 +83,7 @@ var loginCmd = &cobra.Command{
 		}
 
 		fmt.Printf("\nSuccessfully logged in as %s!\n", email)
-		if err := c.AddProofs(claimedDels...); err != nil {
+		if err := store.AddDelegations(claimedDels...); err != nil {
 			return fmt.Errorf("adding proofs: %w", err)
 		}
 

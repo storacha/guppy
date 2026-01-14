@@ -20,9 +20,11 @@ import (
 	"github.com/storacha/go-ucanto/server"
 	uhelpers "github.com/storacha/go-ucanto/testing/helpers"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/stretchr/testify/require"
+
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSpaceBlobReplicate(t *testing.T) {
@@ -70,7 +72,10 @@ func TestSpaceBlobReplicate(t *testing.T) {
 		)
 
 		// Act as the space itself for auth simplicity
-		c := uhelpers.Must(client.NewClient(client.WithConnection(connection), client.WithPrincipal(space)))
+		agentStore, err := agentstore.NewMemory()
+		require.NoError(t, err)
+		require.NoError(t, agentStore.SetPrincipal(space))
+		c := uhelpers.Must(client.NewClient(client.WithConnection(connection), client.WithAgentStore(agentStore)))
 
 		digest, err := multihash.Encode([]byte("test-digest"), multihash.IDENTITY)
 		require.NoError(t, err)

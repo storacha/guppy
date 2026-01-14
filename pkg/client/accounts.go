@@ -6,18 +6,20 @@ import (
 	"slices"
 
 	"github.com/storacha/go-ucanto/did"
+
+	"github.com/storacha/guppy/pkg/agentstore"
 )
 
 func (c *Client) Accounts() []did.DID {
 	accounts := make(map[did.DID]struct{})
-	for _, p := range c.Proofs(CapabilityQuery{
+	for _, p := range c.Proofs(agentstore.CapabilityQuery{
 		Can:  "*",
 		With: "ucan:*",
 	}) {
 		if p.Audience().DID() == c.Issuer().DID() {
-			for _, cap := range p.Capabilities() {
+			for _, c := range p.Capabilities() {
 				// `Proofs()` also gives us attestations, so filter those out.
-				if cap.Can() != "ucan/attest" {
+				if c.Can() != "ucan/attest" {
 					accounts[p.Issuer().DID()] = struct{}{}
 					break
 				}
