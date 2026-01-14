@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"slices"
 	"sync"
 
 	"github.com/ipfs/boxo/exchange"
@@ -157,8 +158,7 @@ func withinGap(a, b locator.Location, maxGap uint64) bool {
 }
 
 // GetBlocks will attempt to fetch multiple contiguous blocks in a single
-// request where possible. Note that the contiguous blocks must be provided in
-// `cids` in order, or they will not be coalesced.
+// request where possible.
 func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
 	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
 	out := make(chan blocks.Block)
@@ -172,6 +172,27 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 	if err != nil {
 		return nil, fmt.Errorf("locating blocks: %w", err)
 	}
+
+	// Sort the CIDs by the offset of their first location. This is a best effort
+	// to ensure that contiguous blocks are adjacent in the list. It can fail if a
+	// block is available in multiple shards, and thus at multiple offsets; the
+	// offset we sort by may not be the one that allows coalescing with the
+	// running batch of blocks when we get to it. But the most common case is that
+	// a block is found in a single shard (which may be replicated to multiple
+	// locations), so the first location's offset is a reasonable heuristic.
+	slices.SortFunc(cids, func(cidA, cidB cid.Cid) int {
+		locsA := locations.Get(cidA.Hash())
+		if len(locsA) == 0 {
+			panic(fmt.Errorf("no locations found for block %s", cidA.String()))
+		}
+
+		locsB := locations.Get(cidB.Hash())
+		if len(locsB) == 0 {
+			panic(fmt.Errorf("no locations found for block %s", cidB.String()))
+		}
+
+		return int(locsA[0].Position.Offset - locsB[0].Position.Offset)
+	})
 
 	var coalescedLocations []coalescedLocation
 	var currentLocation coalescedLocation
