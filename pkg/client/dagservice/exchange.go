@@ -12,15 +12,14 @@ import (
 	"github.com/ipfs/boxo/exchange"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
-
-var log = logging.Logger("client/dagservice")
 
 // DefaultMaxGap is the default maximum gap (in bytes) between blocks that can
 // still be coalesced into a single request. This value accommodates the typical
@@ -68,6 +67,13 @@ func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, op
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
 	log.Infof("Getting block %s in space %s", c.String(), se.space.String())
+
+	ctx, span := tracer.Start(ctx, "get-block", trace.WithAttributes(
+		attribute.String("get-block.space", se.space.DID().String()),
+		attribute.String("get-block.cid", c.String()),
+	))
+	defer span.End()
+
 	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
@@ -161,6 +167,11 @@ func withinGap(a, b locator.Location, maxGap uint64) bool {
 // request where possible.
 func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
 	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
+	ctx, span := tracer.Start(ctx, "get-blocks", trace.WithAttributes(
+		attribute.String("get-blocks.space", se.space.DID().String()),
+		attribute.Int("get-blocks.block-count", len(cids)),
+	))
+	defer span.End()
 	out := make(chan blocks.Block)
 
 	digests := make([]mh.Multihash, 0, len(cids))
@@ -268,6 +279,15 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 		wg.Add(1)
 		go func(cloc coalescedLocation) {
 			defer wg.Done()
+
+			ctx, span := tracer.Start(ctx, "get-blocks-batch", trace.WithAttributes(
+				attribute.String("get-blocks.batch.shard.digest", digestutil.Format(cloc.location.Commitment.Nb().Content.Hash())),
+				attribute.Int("get-blocks.batch.block-count", len(cloc.slices)),
+				attribute.Int64("get-blocks.batch.offset", int64(cloc.location.Position.Offset)),
+				attribute.Int64("get-blocks.batch.length", int64(cloc.location.Position.Length)),
+			))
+			defer span.End()
+
 			blockReader, err := se.retriever.Retrieve(ctx, cloc.location)
 			if err != nil {
 				log.Errorf("retrieving blocks starting at offset %d: %v", cloc.location.Position.Offset, err)
