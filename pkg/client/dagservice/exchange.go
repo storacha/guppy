@@ -275,17 +275,31 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 			}
 			defer blockReader.Close()
 
-			readBytes, err := io.ReadAll(blockReader)
-			if err != nil {
-				log.Errorf("reading blocks starting at offset %d data: %v", cloc.location.Position.Offset, err)
-				return
-			}
-
+			// Slices appear in order, and cannot overlap, so we can slice up the data
+			// as we read it.
+			pos := cloc.location.Position.Offset
 			for _, slice := range cloc.slices {
-				offset := slice.position.Offset - cloc.location.Position.Offset
-				blk, err := makeBlock(readBytes[offset:offset+slice.position.Length], slice.cid)
+				// Skip to slice offset
+				skipped, err := io.CopyN(io.Discard, blockReader, int64(slice.position.Offset-pos))
+				pos += uint64(skipped)
 				if err != nil {
-					log.Errorf("creating block %s at offset %d: %v", slice.cid.String(), slice.position.Offset, err)
+					log.Errorf("skipping to block %s at %d-%d: expected to skip %d bytes, skipped %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Offset-pos, skipped, err)
+					return
+				}
+
+				// Read slice data
+				sliceBytes := make([]byte, slice.position.Length)
+				read, err := io.ReadFull(blockReader, sliceBytes)
+				pos += uint64(read)
+				if err != nil {
+					log.Errorf("reading block %s at %d-%d: expected %d bytes, got %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Length, read, err)
+					return
+				}
+
+				// Create block
+				blk, err := makeBlock(sliceBytes, slice.cid)
+				if err != nil {
+					log.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
 					return
 				}
 
