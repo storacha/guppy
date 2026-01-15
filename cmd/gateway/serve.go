@@ -2,10 +2,12 @@ package gateway
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ipfs/boxo/blockservice"
@@ -36,6 +38,9 @@ const (
 	// e.g. capacity for 1,000 blocks ~= 1GB of memory.
 	blockCacheCapacity = 1000
 )
+
+//go:embed static/index.html
+var indexHTML []byte
 
 var log = logging.Logger("cmd/gateway")
 
@@ -97,6 +102,7 @@ var serveCmd = &cobra.Command{
 		cobra.CheckErr(err)
 
 		ipfsHandler := gateway.NewHandler(gwConf, backend)
+		ipfsHandler = gateway.NewHostnameHandler(gwConf, backend, ipfsHandler)
 		ipfsHandler = gateway.NewHeaders(nil).ApplyCors().Wrap(ipfsHandler)
 
 		e := echo.New()
@@ -106,6 +112,9 @@ var serveCmd = &cobra.Command{
 		e.Use(requestLogger(log))
 		e.Use(middleware.Recover())
 
+		e.GET("/", func(c echo.Context) error {
+			return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+		})
 		e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
 
 		// print banner after short delay to ensure it only appears if no errors
@@ -141,6 +150,7 @@ func init() {
 	serveCmd.Flags().IntVarP(&serveFlags.port, "port", "p", port, "Port to run the HTTP server on")
 	serveCmd.Flags().IntVarP(&serveFlags.blockCacheCapacity, "block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
 	GatewayCmd.AddCommand(serveCmd)
+	indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
 }
 
 func banner(version string, port int, id did.DID, space did.DID) string {
