@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -17,10 +20,15 @@ import (
 var (
 	log    = logging.Logger("cmd")
 	tracer = otel.Tracer("cmd")
+	// path to guppy config file relative to user config directory
+	configFilePath = path.Join("guppy", "config.toml")
 )
 
-var guppyDirPath string
-var storePath string
+var (
+	guppyDirPath string
+	storePath    string
+	cfgFile      string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "guppy",
@@ -37,6 +45,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	cobra.OnInitialize(initConfig)
 	cobra.EnableTraverseRunHooks = true
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
@@ -54,7 +63,37 @@ func init() {
 		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
 
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+configFilePath)
+
 	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
+}
+
+func initConfig() {
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetEnvPrefix("GUPPY")
+
+	if cfgFile == "" {
+		if configDir, err := os.UserConfigDir(); err == nil {
+			defaultCfgFile := path.Join(configDir, configFilePath)
+			if inf, err := os.Stat(defaultCfgFile); err == nil && !inf.IsDir() {
+				log.Infof("loading config automatically from: %s", defaultCfgFile)
+				cfgFile = defaultCfgFile
+			}
+		}
+	}
+
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+		cobra.CheckErr(viper.ReadInConfig())
+	} else {
+		// otherwise look for config.toml in current directory
+		viper.SetConfigName("config")
+		viper.SetConfigType("toml")
+		viper.AddConfigPath(".")
+		// Don't error if config file is not found - it's optional
+		_ = viper.ReadInConfig()
+	}
 }
 
 // ExecuteContext adds all child commands to the root command and sets flags appropriately.

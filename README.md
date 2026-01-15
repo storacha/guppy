@@ -90,7 +90,7 @@ The uploader will pick up where it left off, quickly scanning to make sure it's 
 Guppy can then be used to retrieve content from the network. 
 
 ```sh
-$ retrieve <space> <content-path> <output-path>
+$ guppy retrieve <space> <content-path> <output-path>
 ```
 
 The `<content-path>` can take any of these forms:
@@ -103,6 +103,40 @@ The `<content-path>` can take any of these forms:
 
 The named content will be written to `<output-path>`.
 
+#### IPFS Gateway
+
+Guppy can be used to retrieve content from the network via an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/). Start an IPFS Gateway that serves content from a specific space with the following command:
+
+```sh
+$ guppy gateway serve <space> [flags...]
+```
+
+Flags:
+
+* `--block-cache-capacity, -c` - Specify the number of blocks to retain in the in-memory cache. Blocks are typically <1MB due to IPFS chunking, so an upper bound for how much memory the cache will utilize is approximately the number specified here * 1MB. e.g. capacity for 1,000 blocks ~= 1GB of memory. Default: `1000`.
+* `--port, -p` - Specify the port to run the gateway on. Default: `3000`.
+* `--trustless, -t` - Run a trustless gateway ONLY. Note: running _without_ this flag exposes a trustless AND trusted gateway. See [Trusted vs. Trustless Gateways](https://docs.ipfs.tech/reference/http/gateway/#trusted-vs-trustless) for more information. Default: `false`.
+
+##### Advanced Configuration
+
+The gateway can be configured via a TOML file. Place the config file in your config directory e.g. `~/.config/guppy/config.toml`.
+
+Defaults shown in the following template:
+
+```toml
+[gateway]
+  # Number of blocks to retain in the in-memory cache. Blocks are typically <1MB
+  # due to IPFS chunking, so an upper bound for how much memory the cache will
+  # utilize is approximately the number specified here * 1MB. e.g. capacity for
+  # 1,000 blocks ~= 1GB of memory.
+  block-cache-capacity=1000
+  # The port to run the gateway on.
+  port=3000
+  # Run a trustless gateway ONLY. Note: setting to true exposes both a trustless
+  # AND trusted gateway. See Trusted vs. Trustless Gateways for more info:
+  # https://docs.ipfs.tech/reference/http/gateway/#trusted-vs-trustless
+  trustless=false
+```
 
 ## Client library
 

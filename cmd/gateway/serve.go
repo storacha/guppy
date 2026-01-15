@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/color"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	arc "github.com/storacha/go-ds-arc"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -27,6 +28,7 @@ import (
 	"github.com/storacha/guppy/pkg/build"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
 	"go.uber.org/zap"
 )
 
@@ -44,16 +46,16 @@ var indexHTML []byte
 
 var log = logging.Logger("cmd/gateway")
 
-var serveFlags struct {
-	port               int
-	blockCacheCapacity int
-}
-
 var serveCmd = &cobra.Command{
 	Use:   "serve <space-did>",
 	Short: "Start a Storacha Network gateway",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
 		guppyDirPath, _ := cmd.Flags().GetString("guppy-dir")
 		storePath := filepath.Join(guppyDirPath, "store.json")
 
@@ -85,7 +87,7 @@ var serveCmd = &cobra.Command{
 		exchange := dagservice.NewExchange(locator, client, space)
 
 		gwConf := gateway.Config{
-			DeserializedResponses: true,
+			DeserializedResponses: !cfg.Gateway.Trustless,
 			NoDNSLink:             true,
 			Menu: []assets.MenuItem{
 				{
@@ -95,7 +97,7 @@ var serveCmd = &cobra.Command{
 			},
 		}
 
-		blockStore := blockstore.NewBlockstore(arc.New(serveFlags.blockCacheCapacity))
+		blockStore := blockstore.NewBlockstore(arc.New(cfg.Gateway.BlockCacheCapacity))
 		blockService := blockservice.New(blockStore, exchange)
 
 		backend, err := gateway.NewBlocksBackend(blockService)
@@ -123,7 +125,7 @@ var serveCmd = &cobra.Command{
 		defer timer.Stop()
 		go func() {
 			<-timer.C
-			cmd.Println(banner(build.Version, serveFlags.port, client.DID(), space))
+			cmd.Println(banner(build.Version, cfg.Gateway.Port, client.DID(), space))
 		}()
 
 		// shut down the server gracefully on context cancellation
@@ -137,7 +139,7 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		addr := fmt.Sprintf(":%d", serveFlags.port)
+		addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
 		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("closing server: %w", err)
 		}
@@ -147,9 +149,18 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	logging.SetLogLevel("cmd/gateway", "info")
-	serveCmd.Flags().IntVarP(&serveFlags.port, "port", "p", port, "Port to run the HTTP server on")
-	serveCmd.Flags().IntVarP(&serveFlags.blockCacheCapacity, "block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
+
+	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
+	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
+
+	serveCmd.Flags().IntP("block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
+	cobra.CheckErr(viper.BindPFlag("gateway.block-cache-capacity", serveCmd.Flags().Lookup("block-cache-capacity")))
+
+	serveCmd.Flags().BoolP("trustless", "t", false, "Enable trustless ONLY mode")
+	cobra.CheckErr(viper.BindPFlag("gateway.trustless", serveCmd.Flags().Lookup("trustless")))
+
 	GatewayCmd.AddCommand(serveCmd)
+
 	indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
 }
 
