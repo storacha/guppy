@@ -10,9 +10,16 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	dssync "github.com/ipfs/go-datastore/sync"
 	ipldfmt "github.com/ipfs/go-ipld-format"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"go.opentelemetry.io/otel"
+)
+
+var (
+	log    = logging.Logger("client/dagservice")
+	tracer = otel.Tracer("client/dagservice")
 )
 
 // Retriever can fetch content from a given [locator.Location]. `Retrieve` does

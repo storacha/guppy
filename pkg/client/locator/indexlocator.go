@@ -19,9 +19,15 @@ import (
 	"github.com/storacha/go-ucanto/ucan"
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-var log = logging.Logger("client/dagservice")
+var (
+	log    = logging.Logger("client/locator")
+	tracer = otel.Tracer("client/locator")
+)
 
 // AuthorizeRetrievalFunc creates a content retrieval authorization for the
 // provided space.
@@ -74,6 +80,13 @@ func (e NotFoundError) Error() string {
 // the given space.
 func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error) {
 	log.Infof("Locating block %s in space %s", digestutil.Format(digest), spaceDID.String())
+
+	ctx, span := tracer.Start(ctx, "locate", trace.WithAttributes(
+		attribute.String("locate.space", spaceDID.String()),
+		attribute.String("locate.digest", digestutil.Format(digest)),
+	))
+	defer span.End()
+
 	locations, err := s.LocateMany(ctx, spaceDID, []mh.Multihash{digest})
 	if err != nil {
 		return nil, err
@@ -88,6 +101,13 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.M
 
 func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error) {
 	log.Infof("Locating %d blocks in space %s", len(digests), spaceDID.String())
+
+	ctx, span := tracer.Start(ctx, "locate-many", trace.WithAttributes(
+		attribute.String("locate-many.space", spaceDID.String()),
+		attribute.Int("locate-many.digest-count", len(digests)),
+	))
+	defer span.End()
+
 	locations := blobindex.NewMultihashMap[[]Location](len(digests))
 	needInclusions := make([]mh.Multihash, 0, len(digests))
 	needLocations := make([]mh.Multihash, 0, len(digests))
@@ -107,6 +127,11 @@ func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests
 			}
 		}
 	}
+
+	span.SetAttributes(
+		attribute.Int("locate-many.need-inclusions", len(needInclusions)),
+		attribute.Int("locate-many.need-locations", len(needLocations)),
+	)
 
 	if err := s.query(ctx, spaceDID, needInclusions, false); err != nil {
 		return nil, err
@@ -159,6 +184,12 @@ func (s *indexLocator) getCached(spaceDID did.DID, digest mh.Multihash) ([]Locat
 }
 
 func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh.Multihash, omitIndexes bool) error {
+	ctx, span := tracer.Start(ctx, "locate-query", trace.WithAttributes(
+		attribute.String("locate-query.space", spaceDID.String()),
+		attribute.Int("locate-query.digest-count", len(digests)),
+	))
+	defer span.End()
+
 	if len(digests) == 0 {
 		return nil
 	}
