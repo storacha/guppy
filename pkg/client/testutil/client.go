@@ -67,3 +67,8 @@ var _ storacha.Client = (*ClientWithCustomPut)(nil)
 func (c *ClientWithCustomPut) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.DID, options ...client.SpaceBlobAddOption) (client.AddedBlob, error) {
 	return c.Client.SpaceBlobAdd(ctx, content, space, append(options, client.WithPutClient(c.PutClient))...)
 }
+
+// Ptr returns a pointer to the given value.
+func Ptr[T any](v T) *T {
+	return &v
+}
