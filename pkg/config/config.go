@@ -7,7 +7,11 @@ type Config struct {
 }
 
 func (c Config) Validate() error {
-	return validateConfig(c)
+	err := validateConfig(c)
+	if err != nil {
+		return err
+	}
+	return c.Gateway.Validate()
 }
 
 func Load[T Validatable]() (T, error) {

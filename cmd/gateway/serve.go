@@ -33,12 +33,19 @@ import (
 )
 
 const (
+	// port is the default port to run the gateway on.
 	port = 3000
-	// blockCacheCapacity defines the number of blocks to cache in memory. Blocks
-	// are typically <1MB due to IPFS chunking, so an upper bound for how much
-	// memory the cache will utilize is approximately [blockCacheCapacity] MB.
-	// e.g. capacity for 1,000 blocks ~= 1GB of memory.
+	// blockCacheCapacity defines the default number of blocks to cache in memory.
+	// Blocks are typically <1MB due to IPFS chunking, so an upper bound for how
+	// much memory the cache will utilize is approximately this number multiplied
+	// by 1MB. e.g. capacity for 1,000 blocks ~= 1GB of memory.
 	blockCacheCapacity = 1000
+	// subdomainEnabled indicates whether to enable subdomain gateway mode, which
+	// is disabled by default.
+	subdomainEnabled = false
+	// trustedEnabled indicates whether to enable trusted gateway mode, which
+	// allows deserialized responses. It is enabled by default.
+	trustedEnabled = true
 )
 
 //go:embed static/index.html
@@ -74,7 +81,6 @@ var serveCmd = &cobra.Command{
 		}
 
 		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
-			// Allow the indexing service to retrieve indexes
 			return contentcap.Retrieve.Delegate(
 				client.Issuer(),
 				indexerPrincipal,
@@ -86,15 +92,33 @@ var serveCmd = &cobra.Command{
 		})
 		exchange := dagservice.NewExchange(locator, client, space)
 
+		pubGws := map[string]*gateway.PublicGateway{}
+		if cfg.Gateway.Subdomain.Enabled {
+			log.Infow("subdomain gateway enabled", "hosts", cfg.Gateway.Subdomain.Hosts)
+			for _, host := range cfg.Gateway.Subdomain.Hosts {
+				pubGws[host] = &gateway.PublicGateway{
+					Paths:                 []string{"/ipfs"},
+					UseSubdomains:         true,
+					NoDNSLink:             true,
+					DeserializedResponses: cfg.Gateway.Trusted,
+				}
+			}
+		}
+
+		if cfg.Gateway.Trusted {
+			log.Info("trusted gateway enabled")
+		}
+
 		gwConf := gateway.Config{
-			DeserializedResponses: !cfg.Gateway.Trustless,
-			NoDNSLink:             true,
+			DeserializedResponses: cfg.Gateway.Trusted,
 			Menu: []assets.MenuItem{
 				{
 					Title: "Storacha Network",
 					URL:   "https://storacha.network",
 				},
 			},
+			NoDNSLink:      true,
+			PublicGateways: pubGws,
 		}
 
 		blockStore := blockstore.NewBlockstore(arc.New(cfg.Gateway.BlockCacheCapacity))
@@ -114,10 +138,23 @@ var serveCmd = &cobra.Command{
 		e.Use(requestLogger(log))
 		e.Use(middleware.Recover())
 
-		e.GET("/", func(c echo.Context) error {
-			return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
-		})
-		e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
+		if cfg.Gateway.Subdomain.Enabled {
+			echoHandler := echo.WrapHandler(ipfsHandler)
+			e.GET("/*", func(c echo.Context) error {
+				r := c.Request()
+				host := r.Host
+				if xHost := r.Header.Get("X-Forwarded-Host"); xHost != "" {
+					host = xHost // support X-Forwarded-Host if added by a reverse proxy
+				}
+				if r.URL.Path == "/" && !strings.Contains(host, ".ipfs.") {
+					return rootHandler(c)
+				}
+				return echoHandler(c)
+			})
+		} else {
+			e.GET("/", rootHandler)
+			e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
+		}
 
 		// print banner after short delay to ensure it only appears if no errors
 		// occurred during startup
@@ -150,14 +187,20 @@ var serveCmd = &cobra.Command{
 func init() {
 	logging.SetLogLevel("cmd/gateway", "info")
 
-	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
-	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
-
 	serveCmd.Flags().IntP("block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
 	cobra.CheckErr(viper.BindPFlag("gateway.block-cache-capacity", serveCmd.Flags().Lookup("block-cache-capacity")))
 
-	serveCmd.Flags().BoolP("trustless", "t", false, "Enable trustless ONLY mode")
-	cobra.CheckErr(viper.BindPFlag("gateway.trustless", serveCmd.Flags().Lookup("trustless")))
+	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
+	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
+
+	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
+	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
+
+	serveCmd.Flags().StringSlice("host", []string{}, "Gateway host(s) for subdomain mode (required if subdomain mode is enabled)")
+	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.hosts", serveCmd.Flags().Lookup("host")))
+
+	serveCmd.Flags().BoolP("trusted", "t", trustedEnabled, "Enable trusted gateway mode (allows deserialized responses)")
+	cobra.CheckErr(viper.BindPFlag("gateway.trusted", serveCmd.Flags().Lookup("trusted")))
 
 	GatewayCmd.AddCommand(serveCmd)
 
@@ -228,4 +271,8 @@ func requestLogger(logger *logging.ZapEventLogger) echo.MiddlewareFunc {
 			return nil
 		},
 	})
+}
+
+func rootHandler(c echo.Context) error {
+	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 }
