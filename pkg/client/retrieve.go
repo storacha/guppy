@@ -18,10 +18,11 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.ReadCloser, error) {
+func (c *Client) Retrieve(ctx context.Context, location locator.Location) (retReadCloser io.ReadCloser, retErr error) {
 	space := location.Commitment.Nb().Space
 
 	nodeID, err := did.Parse(location.Commitment.With())
@@ -36,14 +37,20 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 	shardDigest := location.Commitment.Nb().Content.Hash()
 
 	ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
-		attribute.String("retrieve.space", space.DID().String()),
-		attribute.String("retrieve.storage-provider", nodeID.String()),
-		attribute.String("retrieve.url", url.String()),
-		attribute.String("retrieve.shard.digest", digestutil.Format(shardDigest)),
-		attribute.Int64("retrieve.offset", int64(location.Position.Offset)),
-		attribute.Int64("retrieve.length", int64(location.Position.Length)),
+		attribute.String("space", space.DID().String()),
+		attribute.String("storage-provider", nodeID.String()),
+		attribute.String("url", url.String()),
+		attribute.String("shard.digest", digestutil.Format(shardDigest)),
+		attribute.Int64("offset", int64(location.Position.Offset)),
+		attribute.Int64("length", int64(location.Position.Length)),
 	))
-	defer span.End()
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+			span.RecordError(retErr)
+		}
+		span.End()
+	}()
 
 	storageProvider, err := did.Parse(location.Commitment.With())
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -65,14 +66,20 @@ func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, op
 	return se
 }
 
-func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (retBlock blocks.Block, retErr error) {
 	log.Infof("Getting block %s in space %s", c.String(), se.space.String())
 
 	ctx, span := tracer.Start(ctx, "get-block", trace.WithAttributes(
-		attribute.String("get-block.space", se.space.DID().String()),
-		attribute.String("get-block.cid", c.String()),
+		attribute.String("space", se.space.DID().String()),
+		attribute.String("cid", c.String()),
 	))
-	defer span.End()
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+			span.RecordError(retErr)
+		}
+		span.End()
+	}()
 
 	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
 	if err != nil {
@@ -165,13 +172,20 @@ func withinGap(a, b locator.Location, maxGap uint64) bool {
 
 // GetBlocks will attempt to fetch multiple contiguous blocks in a single
 // request where possible.
-func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (retChan <-chan blocks.Block, retErr error) {
 	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
 	ctx, span := tracer.Start(ctx, "get-blocks", trace.WithAttributes(
-		attribute.String("get-blocks.space", se.space.DID().String()),
-		attribute.Int("get-blocks.block-count", len(cids)),
+		attribute.String("space", se.space.DID().String()),
+		attribute.Int("block-count", len(cids)),
 	))
-	defer span.End()
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+			span.RecordError(retErr)
+		}
+		span.End()
+	}()
+
 	out := make(chan blocks.Block)
 
 	digests := make([]mh.Multihash, 0, len(cids))
@@ -279,18 +293,26 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 		wg.Add(1)
 		go func(cloc coalescedLocation) {
 			defer wg.Done()
+			var outErr error
 
 			ctx, span := tracer.Start(ctx, "get-blocks-batch", trace.WithAttributes(
-				attribute.String("get-blocks.batch.shard.digest", digestutil.Format(cloc.location.Commitment.Nb().Content.Hash())),
-				attribute.Int("get-blocks.batch.block-count", len(cloc.slices)),
-				attribute.Int64("get-blocks.batch.offset", int64(cloc.location.Position.Offset)),
-				attribute.Int64("get-blocks.batch.length", int64(cloc.location.Position.Length)),
+				attribute.String("shard.digest", digestutil.Format(cloc.location.Commitment.Nb().Content.Hash())),
+				attribute.Int("block-count", len(cloc.slices)),
+				attribute.Int64("offset", int64(cloc.location.Position.Offset)),
+				attribute.Int64("length", int64(cloc.location.Position.Length)),
 			))
-			defer span.End()
+			defer func() {
+				if outErr != nil {
+					span.SetStatus(codes.Error, outErr.Error())
+					span.RecordError(outErr)
+				}
+				span.End()
+			}()
 
 			blockReader, err := se.retriever.Retrieve(ctx, cloc.location)
 			if err != nil {
-				log.Errorf("retrieving blocks starting at offset %d: %v", cloc.location.Position.Offset, err)
+				outErr = fmt.Errorf("retrieving blocks starting at offset %d: %v", cloc.location.Position.Offset, err)
+				log.Error(outErr)
 				return
 			}
 			defer blockReader.Close()
@@ -303,7 +325,8 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				skipped, err := io.CopyN(io.Discard, blockReader, int64(slice.position.Offset-pos))
 				pos += uint64(skipped)
 				if err != nil {
-					log.Errorf("skipping to block %s at %d-%d: expected to skip %d bytes, skipped %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Offset-pos, skipped, err)
+					outErr = fmt.Errorf("skipping to block %s at %d-%d: expected to skip %d bytes, skipped %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Offset-pos, skipped, err)
+					log.Error(outErr)
 					return
 				}
 
@@ -312,14 +335,16 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				read, err := io.ReadFull(blockReader, sliceBytes)
 				pos += uint64(read)
 				if err != nil {
-					log.Errorf("reading block %s at %d-%d: expected %d bytes, got %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Length, read, err)
+					outErr = fmt.Errorf("reading block %s at %d-%d: expected %d bytes, got %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Length, read, err)
+					log.Error(outErr)
 					return
 				}
 
 				// Create block
 				blk, err := makeBlock(sliceBytes, slice.cid)
 				if err != nil {
-					log.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
+					outErr = fmt.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
+					log.Error(outErr)
 					return
 				}
 
