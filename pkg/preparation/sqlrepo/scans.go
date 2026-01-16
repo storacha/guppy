@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/bus/events"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 
@@ -27,6 +28,12 @@ func (r *Repo) FindOrCreateFile(ctx context.Context, path string, lastModified t
 		return nil, false, fmt.Errorf("failed to find or create file entry: %w", err)
 	}
 	if file, ok := entry.(*scanmodel.File); ok {
+		r.bus.Publish(events.TopicFsEntry(sourceID), events.FSScanView{
+			Path:      file.Path(),
+			IsDir:     false,
+			Size:      file.Size(),
+			FSEntryID: file.ID(),
+		})
 		return file, created, nil
 	}
 	return nil, false, errors.New("found entry is not a file")
@@ -48,6 +55,12 @@ func (r *Repo) FindOrCreateDirectory(ctx context.Context, path string, lastModif
 		if created {
 			log.Debugf("Created new directory %s: %s", path, dir.ID())
 		}
+		r.bus.Publish(events.TopicFsEntry(sourceID), events.FSScanView{
+			Path:      dir.Path(),
+			IsDir:     true,
+			Size:      0,
+			FSEntryID: dir.ID(),
+		})
 		return dir, created, nil
 	}
 	return nil, false, errors.New("found entry is not a directory")

@@ -25,6 +25,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
@@ -60,6 +62,7 @@ type API struct {
 	ReaderForShard        ReaderForShardFunc
 	ReaderForIndex        ReaderForIndexFunc
 	BlobUploadParallelism int
+	Bus                   bus.Publisher
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -274,6 +277,13 @@ func (a API) addBlob(ctx context.Context, blob model.Blob, spaceDID did.DID) err
 		if blob.Digest() != nil && blob.Size() != 0 {
 			opts = append(opts, client.WithPrecomputedDigest(blob.Digest(), blob.Size()))
 		}
+		opts = append(opts, client.WithPutProgress(func(uploaded int64) {
+			a.Bus.Publish(events.TopicClientPut(blob.UploadID()), events.PutProgress{
+				BlobID:   blob.ID(),
+				Uploaded: uploaded,
+				Total:    blob.Size(),
+			})
+		}))
 		addedBlob, err := a.spaceBlobAdd(ctx, addReader, spaceDID, opts...)
 		if err != nil {
 			return gtypes.NewBlobUploadError(blob.ID(), fmt.Errorf("failed to add blob %s to space %s: %w", blob, spaceDID, err))
@@ -289,7 +299,10 @@ func (a API) addBlob(ctx context.Context, blob model.Blob, spaceDID did.DID) err
 	} else {
 		// this is a just a legacy case where the blob was added to the space but didn't record the state change
 		log.Infof("blob %s already has location and PDP accept, skipping `space/blob/add`", blob.ID())
-		blob.SpaceBlobAdded(client.AddedBlob{Location: blob.Location(), PDPAccept: blob.PDPAccept(), Digest: blob.Digest(), Size: blob.Size()})
+		if err := blob.SpaceBlobAdded(client.AddedBlob{Location: blob.Location(), PDPAccept: blob.PDPAccept(),
+			Digest: blob.Digest(), Size: blob.Size()}); err != nil {
+			return fmt.Errorf("failed to record `space/blob/add` for blob %s: %w", blob, err)
+		}
 	}
 	return nil
 }
