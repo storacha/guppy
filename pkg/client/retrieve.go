@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"time"
 
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/failure"
 	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
@@ -16,24 +18,60 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.ReadCloser, error) {
-	locationCommitment := location.Commitment
+var retrieveThroughput, _ = meter.Float64Histogram(
+	"retrieve.throughput",
+	metric.WithDescription("Throughput of Retrieve operations"),
+	metric.WithUnit("By/s"),
+)
 
-	space := locationCommitment.Nb().Space
+func (c *Client) Retrieve(ctx context.Context, location locator.Location) (retReadCloser io.ReadCloser, retErr error) {
+	space := location.Commitment.Nb().Space
 
-	nodeID, err := did.Parse(locationCommitment.With())
+	nodeID, err := did.Parse(location.Commitment.With())
 	if err != nil {
-		return nil, fmt.Errorf("parsing DID of storage provider node `%s`: %w", locationCommitment.With(), err)
+		return nil, fmt.Errorf("parsing DID of storage provider node `%s`: %w", location.Commitment.With(), err)
 	}
 
-	urls := locationCommitment.Nb().Location
+	// Select a random URL from the list of available URLs
+	urls := location.Commitment.Nb().Location
 	url := urls[rand.Intn(len(urls))]
 
-	storageProvider, err := did.Parse(locationCommitment.With())
+	shardDigest := location.Commitment.Nb().Content.Hash()
+
+	ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
+		attribute.String("space", space.DID().String()),
+		attribute.String("storage-provider", nodeID.String()),
+		attribute.String("url", url.String()),
+		attribute.String("shard.digest", digestutil.Format(shardDigest)),
+		attribute.Int64("offset", int64(location.Position.Offset)),
+		attribute.Int64("length", int64(location.Position.Length)),
+	))
+	startTime := time.Now()
+	defer func() {
+		status := "success"
+		if retErr != nil {
+			status = "error"
+			span.SetStatus(codes.Error, retErr.Error())
+			span.RecordError(retErr)
+		}
+		elapsed := time.Since(startTime).Seconds()
+		if elapsed > 0 {
+			retrieveThroughput.Record(ctx, float64(location.Position.Length)/elapsed,
+				metric.WithAttributes(attribute.String("status", status)),
+			)
+		}
+		span.End()
+	}()
+
+	storageProvider, err := did.Parse(location.Commitment.With())
 	if err != nil {
-		return nil, fmt.Errorf("parsing DID of storage provider `%s`: %w", locationCommitment.With(), err)
+		return nil, fmt.Errorf("parsing DID of storage provider `%s`: %w", location.Commitment.With(), err)
 	}
 
 	delegations := c.Proofs(CapabilityQuery{
@@ -53,7 +91,7 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 		storageProvider,
 		space.String(),
 		contentcap.RetrieveCaveats{
-			Blob: contentcap.BlobDigest{Digest: locationCommitment.Nb().Content.Hash()},
+			Blob: contentcap.BlobDigest{Digest: location.Commitment.Nb().Content.Hash()},
 			Range: contentcap.Range{
 				Start: start,
 				End:   end,
