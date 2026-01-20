@@ -114,7 +114,7 @@ main () {
 
 	echo
 	echo "🎁 Generating new space"
-	space=$(guppy space generate | tee /dev/fd/3 | tail -n 1)
+	space=$(guppy space generate | tee /dev/fd/3)
 
 	echo
 	echo "📜 Listing space info"
