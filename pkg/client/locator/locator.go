@@ -11,7 +11,9 @@ import (
 )
 
 type Locator interface {
-	Locate(ctx context.Context, spaceDID did.DID, hash mh.Multihash) ([]Location, error)
+	// Locate the given digest in the provided spaces, returning a list of
+	// locations where the content can be found.
+	Locate(ctx context.Context, spaces []did.DID, digest mh.Multihash) ([]Location, error)
 }
 
 type Location struct {

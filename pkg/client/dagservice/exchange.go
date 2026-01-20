@@ -19,23 +19,25 @@ var log = logging.Logger("client/dagservice")
 type storachaExchange struct {
 	locator   locator.Locator
 	retriever Retriever
-	space     did.DID
+	spaces    []did.DID
 	shards    blobindex.MultihashMap[[]byte]
 }
 
 var _ exchange.Interface = (*storachaExchange)(nil)
 
-func NewExchange(locator locator.Locator, retriever Retriever, space did.DID) exchange.Interface {
+// NewExchange creates a new Storacha exchange that uses the provided locator
+// and retriever to fetch blocks in any of the given spaces.
+func NewExchange(locator locator.Locator, retriever Retriever, spaces []did.DID) exchange.Interface {
 	return &storachaExchange{
 		locator:   locator,
 		retriever: retriever,
-		space:     space,
+		spaces:    spaces,
 		shards:    blobindex.NewMultihashMap[[]byte](-1),
 	}
 }
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
+	locations, err := se.locator.Locate(ctx, se.spaces, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
@@ -43,7 +45,7 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	// Randomly pick one of the available locations
 	location := locations[rand.Intn(len(locations))]
 
-	blockBytes, err := se.retriever.Retrieve(ctx, se.space, location)
+	blockBytes, err := se.retriever.Retrieve(ctx, location.Commitment.Nb().Space, location)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}

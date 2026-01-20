@@ -21,11 +21,11 @@ type Retriever interface {
 
 var _ Retriever = (*client.Client)(nil)
 
-func NewDAGService(locator locator.Locator, retriever Retriever, space did.DID) ipldfmt.DAGService {
+func NewDAGService(locator locator.Locator, retriever Retriever, spaces []did.DID) ipldfmt.DAGService {
 	return merkledag.NewReadOnlyDagService(
 		merkledag.NewDAGService(blockservice.New(
 			blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())),
-			NewExchange(locator, retriever, space),
+			NewExchange(locator, retriever, spaces),
 		)),
 	)
 }

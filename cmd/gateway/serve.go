@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,8 +25,10 @@ import (
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/build"
+	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/config"
@@ -54,9 +57,10 @@ var indexHTML []byte
 var log = logging.Logger("cmd/gateway")
 
 var serveCmd = &cobra.Command{
-	Use:   "serve <space-did>",
+	Use:   "serve <space-did> [...space-did]",
 	Short: "Start a Storacha Network gateway",
-	Args:  cobra.ExactArgs(1),
+	Long:  "Start an IPFS Gateway that operates on the Storacha Network and serves data from one or more spaces.",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
@@ -66,31 +70,54 @@ var serveCmd = &cobra.Command{
 		guppyDirPath, _ := cmd.Flags().GetString("guppy-dir")
 		storePath := filepath.Join(guppyDirPath, "store.json")
 
-		client := cmdutil.MustGetClient(storePath)
-		space, err := did.Parse(args[0])
+		c := cmdutil.MustGetClient(storePath)
+		allSpaces, err := c.Spaces()
 		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("invalid space DID: %w", err)
+			return fmt.Errorf("getting client spaces: %w", err)
+		}
+
+		spaces := make([]did.DID, 0, len(args))
+		for _, arg := range args {
+			space, err := did.Parse(arg)
+			if err != nil {
+				cmd.SilenceUsage = false
+				return fmt.Errorf("invalid space DID: %w", err)
+			}
+			if !slices.Contains(allSpaces, space) {
+				return fmt.Errorf("space %q not found in client store", space)
+			}
+			spaces = append(spaces, space)
 		}
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
+			queries := make([]client.CapabilityQuery, 0, len(spaces))
+			for _, space := range spaces {
+				queries = append(queries, client.CapabilityQuery{
+					Can:  contentcap.Retrieve.Can(),
+					With: space.String(),
+				})
+			}
 
-		pfs := make([]delegation.Proof, 0, len(client.Proofs()))
-		for _, del := range client.Proofs() {
-			pfs = append(pfs, delegation.FromDelegation(del))
-		}
+			var pfs []delegation.Proof
+			for _, del := range c.Proofs(queries...) {
+				pfs = append(pfs, delegation.FromDelegation(del))
+			}
 
-		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
-			return contentcap.Retrieve.Delegate(
-				client.Issuer(),
+			caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaces))
+			for _, space := range spaces {
+				caps = append(caps, ucan.NewCapability(contentcap.Retrieve.Can(), space.String(), ucan.NoCaveats{}))
+			}
+
+			return delegation.Delegate(
+				c.Issuer(),
 				indexerPrincipal,
-				space.DID().String(),
-				contentcap.RetrieveCaveats{},
+				caps,
 				delegation.WithProof(pfs...),
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
-		exchange := dagservice.NewExchange(locator, client, space)
+		exchange := dagservice.NewExchange(locator, c, spaces)
 
 		pubGws := map[string]*gateway.PublicGateway{}
 		if cfg.Gateway.Subdomain.Enabled {
@@ -162,7 +189,7 @@ var serveCmd = &cobra.Command{
 		defer timer.Stop()
 		go func() {
 			<-timer.C
-			cmd.Println(banner(build.Version, cfg.Gateway.Port, client.DID(), space))
+			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces))
 		}()
 
 		// shut down the server gracefully on context cancellation
@@ -207,7 +234,19 @@ func init() {
 	indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
 }
 
-func banner(version string, port int, id did.DID, space did.DID) string {
+func banner(version string, port int, id did.DID, spaces []did.DID) string {
+	var sb strings.Builder
+	if len(spaces) > 1 {
+		sb.WriteString("Spaces\n")
+		for _, space := range spaces {
+			sb.WriteString("  ")
+			sb.WriteString(color.Grey(space.String()))
+			sb.WriteString("\n")
+		}
+	} else {
+		sb.WriteString("Space  ")
+		sb.WriteString(color.Grey(spaces[0].String()))
+	}
 	return fmt.Sprintf(
 		`
 %s ▄▖           
@@ -219,14 +258,14 @@ High performance IPFS Gateway
 %s
 ------------------------------
 Server %s
-Space  %s
+%s
 ------------------------------
 ⇨ HTTP server started on %s`,
 		color.Cyan("⬢"),
 		color.Red(version),
 		color.Blue("https://storacha.network"),
 		color.Grey(id.String()),
-		color.Grey(space.String()),
+		sb.String(),
 		color.Green(fmt.Sprintf("http://localhost:%d", port)),
 	)
 }

@@ -79,12 +79,17 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
-		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
+		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
+			queries := make([]client.CapabilityQuery, 0, len(spaces))
+			for _, space := range spaces {
+				queries = append(queries, client.CapabilityQuery{
+					Can:  contentcap.Retrieve.Can(),
+					With: space.String(),
+				})
+			}
+
 			var pfs []delegation.Proof
-			for _, del := range c.Proofs(client.CapabilityQuery{
-				Can:  contentcap.Retrieve.Can(),
-				With: space.String(),
-			}) {
+			for _, del := range c.Proofs(queries...) {
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
@@ -99,7 +104,7 @@ var retrieveCmd = &cobra.Command{
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
-		ds := dagservice.NewDAGService(locator, c, space)
+		ds := dagservice.NewDAGService(locator, c, []did.DID{space})
 		retrievedFs := dagfs.New(ctx, ds, pathCID)
 
 		file, err := retrievedFs.Open(subpath)
