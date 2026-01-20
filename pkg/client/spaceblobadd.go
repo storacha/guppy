@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multiformats/go-multihash"
+	"github.com/quic-go/quic-go/http3"
 	blobcap "github.com/storacha/go-libstoracha/capabilities/blob"
 	httpcap "github.com/storacha/go-libstoracha/capabilities/http"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
@@ -59,11 +60,31 @@ func (s *SpaceBlobAddConfig) PrecomputedSizePtr() *uint64 {
 	return s.precomputedSizePtr
 }
 
+type http3ClientWithFallback struct {
+	h3       http.RoundTripper
+	fallback http.RoundTripper
+}
+
+func (p *http3ClientWithFallback) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme == "https" {
+		resp, err := p.h3.RoundTrip(req)
+		if err == nil {
+			log.Infow("server supports http3", "url", req.URL.String())
+			return resp, nil
+		}
+		log.Warnw("server doesn't support http3, using fallback (http2/1)", "error", err, "url", req.URL.String())
+	}
+	return p.fallback.RoundTrip(req)
+}
+
 // NewSpaceBlobAddConfig creates a new SpaceBlobAddConfig with the given options.
 func NewSpaceBlobAddConfig(options ...SpaceBlobAddOption) *SpaceBlobAddConfig {
 	cfg := &SpaceBlobAddConfig{
 		putClient: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: otelhttp.NewTransport(&http3ClientWithFallback{
+				h3:       &http3.Transport{},
+				fallback: http.DefaultTransport,
+			}),
 		},
 	}
 	for _, opt := range options {
