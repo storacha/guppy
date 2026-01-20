@@ -17,6 +17,12 @@
 set -e
 set -o pipefail
 
+export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
+export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
+export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
+
 # Check for dependencies
 if ! command -v jq &> /dev/null; then
 		echo "jq could not be found, please install it to run this script."
@@ -72,6 +78,21 @@ cleanup() {
 # Set up trap to cleanup on EXIT, INT, TERM
 trap cleanup EXIT INT TERM
 
+# Track the last command for error reporting
+last_command=""
+trap 'last_command=$ZSH_DEBUG_CMD' DEBUG
+
+# Error handler
+handle_error() {
+	local exit_code=$1
+	local failed_command=$2
+	echo
+	echo "❌ Command failed with exit code $exit_code: $failed_command"
+}
+
+# Handle errors with some printed output
+trap 'handle_error $? "$last_command"' ERR
+
 main () {
 	rm -rf "$sandbox"
 	mkdir -p "$sandbox"
@@ -93,8 +114,7 @@ main () {
 
 	echo
 	echo "🎁 Generating new space"
-	output=$(guppy space generate | tee /dev/fd/3)
-	space=$(echo "$output" | grep 'Generated space:' | awk '{print $3}')
+	space=$(guppy space generate | tee /dev/fd/3)
 
 	echo
 	echo "📜 Listing space info"
@@ -103,8 +123,7 @@ main () {
 	echo
 	echo "📤 Uploading data from $dataDir to space $space"
 	guppy upload source add "$space" "$dataDir"
-	output=$(guppy upload "$space" | tee /dev/fd/3)
-	rootCID=$(echo "$output" | grep 'Root CID:' | awk '{print $3}')
+	rootCID=$(guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
 
 	echo
 	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
