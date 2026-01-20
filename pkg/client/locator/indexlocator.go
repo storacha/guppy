@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
@@ -22,12 +23,25 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var (
 	log    = logging.Logger("client/locator")
 	tracer = otel.Tracer("client/locator")
+	meter  = otel.Meter("client/locator")
+
+	locateDuration, _ = meter.Float64Histogram(
+		"locate.duration",
+		metric.WithDescription("Duration of Locate operations"),
+		metric.WithUnit("s"),
+	)
+
+	locateCacheResult, _ = meter.Int64Counter(
+		"locate.cache",
+		metric.WithDescription("Cache hits and misses for Locate operations"),
+	)
 )
 
 // AuthorizeRetrievalFunc creates a content retrieval authorization for the
@@ -101,11 +115,17 @@ func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests
 		attribute.String("space", spaceDID.String()),
 		attribute.Int("count", len(digests)),
 	))
+	startTime := time.Now()
 	defer func() {
+		status := "success"
 		if retErr != nil {
+			status = "error"
 			span.SetStatus(codes.Error, retErr.Error())
 			span.RecordError(retErr)
 		}
+		locateDuration.Record(ctx, time.Since(startTime).Seconds(),
+			metric.WithAttributes(attribute.String("status", status)),
+		)
 		span.End()
 	}()
 
@@ -116,16 +136,18 @@ func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests
 	for _, digest := range digests {
 		cachedLocations, cachedInclusions := s.getCached(spaceDID, digest)
 
-		if len(cachedLocations) == 0 {
-			if len(cachedInclusions) == 0 {
-				needInclusions = append(needInclusions, digest)
-			} else {
-				// If we have an inclusion but no locations, query the indexer for the
-				// location of the shard.
-				for _, inclusion := range cachedInclusions {
-					needLocations = append(needLocations, inclusion.shard)
-				}
+		if len(cachedLocations) > 0 {
+			locateCacheResult.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "hit")))
+		} else if len(cachedInclusions) > 0 {
+			locateCacheResult.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "partial")))
+			// If we have an inclusion but no locations, query the indexer for the
+			// location of the shard.
+			for _, inclusion := range cachedInclusions {
+				needLocations = append(needLocations, inclusion.shard)
 			}
+		} else {
+			locateCacheResult.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "miss")))
+			needInclusions = append(needInclusions, digest)
 		}
 	}
 

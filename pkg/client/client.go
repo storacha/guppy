@@ -35,6 +35,7 @@ import (
 var (
 	log    = logging.Logger("github.com/storacha/guppy/pkg/client")
 	tracer = otel.Tracer("github.com/storacha/guppy/pkg/client")
+	meter  = otel.Meter("github.com/storacha/guppy/pkg/client")
 )
 
 type Client struct {

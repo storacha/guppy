@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"time"
 
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
@@ -19,7 +20,14 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+)
+
+var retrieveThroughput, _ = meter.Float64Histogram(
+	"retrieve.throughput",
+	metric.WithDescription("Throughput of Retrieve operations"),
+	metric.WithUnit("By/s"),
 )
 
 func (c *Client) Retrieve(ctx context.Context, location locator.Location) (retReadCloser io.ReadCloser, retErr error) {
@@ -44,10 +52,19 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (retRe
 		attribute.Int64("offset", int64(location.Position.Offset)),
 		attribute.Int64("length", int64(location.Position.Length)),
 	))
+	startTime := time.Now()
 	defer func() {
+		status := "success"
 		if retErr != nil {
+			status = "error"
 			span.SetStatus(codes.Error, retErr.Error())
 			span.RecordError(retErr)
+		}
+		elapsed := time.Since(startTime).Seconds()
+		if elapsed > 0 {
+			retrieveThroughput.Record(ctx, float64(location.Position.Length)/elapsed,
+				metric.WithAttributes(attribute.String("status", status)),
+			)
 		}
 		span.End()
 	}()
