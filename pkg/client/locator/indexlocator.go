@@ -62,14 +62,6 @@ type IndexerClient interface {
 	QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error)
 }
 
-type NotFoundError struct {
-	Hash mh.Multihash
-}
-
-func (e NotFoundError) Error() string {
-	return fmt.Sprintf("no locations found for block: %s", digestutil.Format(e.Hash))
-}
-
 // Locate retrieves locations for the data identified by the given digest, in
 // the given space.
 func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error) {

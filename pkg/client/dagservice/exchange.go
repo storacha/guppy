@@ -2,6 +2,7 @@ package dagservice
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ type ExchangeOption func(*storachaExchange)
 
 // WithMaxGap sets the maximum gap (in bytes) between blocks that can still be
 // coalesced into a single request. A maxGap of 0 means blocks must be exactly
-// contiguous to be coalesced. The default is DefaultMaxGap.
+// contiguous to be coalesced. The default is [DefaultMaxGap].
 func WithMaxGap(maxGap uint64) ExchangeOption {
 	return func(se *storachaExchange) {
 		se.maxGap = maxGap
@@ -104,13 +105,13 @@ func makeBlock(data []byte, c cid.Cid) (blocks.Block, error) {
 		return nil, fmt.Errorf("decoding content multihash %s: %w", expectedDigest, err)
 	}
 
-	receivedDigest, err := mh.Sum(data, decHash.Code, -1)
+	actualDigest, err := mh.Sum(data, decHash.Code, -1)
 	if err != nil {
 		return nil, fmt.Errorf("hashing content %s: %w", expectedDigest, err)
 	}
 
-	if !bytes.Equal(expectedDigest, receivedDigest) {
-		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedDigest), digestutil.Format(receivedDigest))
+	if !bytes.Equal(expectedDigest, actualDigest) {
+		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedDigest), digestutil.Format(actualDigest))
 	}
 
 	block, err := blocks.NewBlockWithCid(data, c)
@@ -152,7 +153,7 @@ func withinGap(a, b locator.Location, maxGap uint64) bool {
 	if b.Position.Offset >= endOfA && b.Position.Offset <= endOfA+maxGap {
 		return true
 	} else {
-		log.Infof("Locations not within gap: a ends at %d, b starts at %d; gap is %d, maxGap is %d", endOfA, b.Position.Offset, b.Position.Offset-endOfA, maxGap)
+		log.Debugf("Locations not within gap: a ends at %d, b starts at %d; gap is %d, maxGap is %d", endOfA, b.Position.Offset, b.Position.Offset-endOfA, maxGap)
 		return false
 	}
 }
@@ -182,16 +183,13 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 	// locations), so the first location's offset is a reasonable heuristic.
 	slices.SortFunc(cids, func(cidA, cidB cid.Cid) int {
 		locsA := locations.Get(cidA.Hash())
-		if len(locsA) == 0 {
-			panic(fmt.Errorf("no locations found for block %s", cidA.String()))
-		}
-
 		locsB := locations.Get(cidB.Hash())
-		if len(locsB) == 0 {
-			panic(fmt.Errorf("no locations found for block %s", cidB.String()))
+
+		if len(locsA) == 0 || len(locsB) == 0 {
+			return 0
 		}
 
-		return int(locsA[0].Position.Offset - locsB[0].Position.Offset)
+		return cmp.Compare(locsA[0].Position.Offset, locsB[0].Position.Offset)
 	})
 
 	var coalescedLocations []coalescedLocation
@@ -204,14 +202,15 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 
 		// If we don't have a current location, make one
 		if currentLocation.isEmpty() {
+			loc := locs[rand.Intn(len(locs))]
 			currentLocation = coalescedLocation{
-				location: locs[rand.Intn(len(locs))],
+				location: loc,
 				slices: []slice{
 					{
 						cid: cid,
 						position: blobindex.Position{
-							Offset: locs[0].Position.Offset,
-							Length: locs[0].Position.Length,
+							Offset: loc.Position.Offset,
+							Length: loc.Position.Length,
 						},
 					},
 				},
@@ -242,14 +241,15 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 			// current location, emit, then make a new one.
 			if !found {
 				coalescedLocations = append(coalescedLocations, currentLocation)
+				loc := locs[rand.Intn(len(locs))]
 				currentLocation = coalescedLocation{
-					location: locs[rand.Intn(len(locs))],
+					location: loc,
 					slices: []slice{
 						{
 							cid: cid,
 							position: blobindex.Position{
-								Offset: locs[0].Position.Offset,
-								Length: locs[0].Position.Length,
+								Offset: loc.Position.Offset,
+								Length: loc.Position.Length,
 							},
 						},
 					},
