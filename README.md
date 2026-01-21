@@ -122,7 +122,9 @@ Defaults shown in the following configuration TOML template:
   # due to IPFS chunking, so an upper bound for how much memory the cache will
   # utilize is approximately the number specified here * 1MB. e.g. capacity for
   # 1,000 blocks ~= 1GB of memory.
-  block-cache-capacity = 1000
+  block_cache_capacity = 1000
+  # Logging level for the gateway server (debug, info, warn, error).
+  log_level = "warn"
   # The port to run the gateway on.
   port = 3000
   # Run a trusted gateway. See Trusted vs. Trustless Gateways for more info:

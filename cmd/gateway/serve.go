@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -18,7 +19,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/labstack/gommon/color"
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	arc "github.com/storacha/go-ds-arc"
@@ -26,13 +27,13 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/build"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/config"
-	"go.uber.org/zap"
 )
 
 const (
@@ -57,24 +58,38 @@ var indexHTML []byte
 var log = logging.Logger("cmd/gateway")
 
 var serveCmd = &cobra.Command{
-	Use:   "serve <space-did> [...space-did]",
+	Use:   "serve [space-did...]",
 	Short: "Start a Storacha Network gateway",
-	Long:  "Start an IPFS Gateway that operates on the Storacha Network and serves data from one or more spaces.",
-	Args:  cobra.MinimumNArgs(1),
+	Long: wordwrap.WrapString(
+		"Start an IPFS Gateway that operates on the Storacha Network. By default "+
+			"it serves data from all authorized spaces. One or more space DIDs can "+
+			"be specified to restrict content served to those spaces only.",
+		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
+		cobra.CheckErr(logging.SetLogLevel("cmd/gateway", cfg.Gateway.LogLevel))
 
+		indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
 		guppyDirPath, _ := cmd.Flags().GetString("guppy-dir")
 		storePath := filepath.Join(guppyDirPath, "store.json")
 
 		c := cmdutil.MustGetClient(storePath)
-		allSpaces, err := c.Spaces()
-		if err != nil {
-			return fmt.Errorf("getting client spaces: %w", err)
+		allProofs := c.Proofs(client.CapabilityQuery{Can: contentcap.RetrieveAbility})
+		authdSpaces := map[did.DID]struct{}{}
+		for _, proof := range allProofs {
+			for _, cap := range proof.Capabilities() {
+				if validator.ResolveAbility(cap.Can(), contentcap.RetrieveAbility) != "" {
+					spaceDID, err := did.Parse(cap.With())
+					if err == nil {
+						authdSpaces[spaceDID] = struct{}{}
+					}
+				}
+			}
 		}
+		log.Debugw("found authorizations in proofs", "spaces", slices.Collect(maps.Keys(authdSpaces)))
 
 		spaces := make([]did.DID, 0, len(args))
 		for _, arg := range args {
@@ -83,10 +98,13 @@ var serveCmd = &cobra.Command{
 				cmd.SilenceUsage = false
 				return fmt.Errorf("invalid space DID: %w", err)
 			}
-			if !slices.Contains(allSpaces, space) {
-				return fmt.Errorf("space %q not found in client store", space)
+			if _, ok := authdSpaces[space]; !ok {
+				return fmt.Errorf("missing %q proof for space: %s", contentcap.RetrieveAbility, space)
 			}
 			spaces = append(spaces, space)
+		}
+		if len(spaces) == 0 {
+			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
@@ -94,7 +112,7 @@ var serveCmd = &cobra.Command{
 			queries := make([]client.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
 				queries = append(queries, client.CapabilityQuery{
-					Can:  contentcap.Retrieve.Can(),
+					Can:  contentcap.RetrieveAbility,
 					With: space.String(),
 				})
 			}
@@ -106,16 +124,15 @@ var serveCmd = &cobra.Command{
 
 			caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaces))
 			for _, space := range spaces {
-				caps = append(caps, ucan.NewCapability(contentcap.Retrieve.Can(), space.String(), ucan.NoCaveats{}))
+				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), ucan.NoCaveats{}))
 			}
 
-			return delegation.Delegate(
-				c.Issuer(),
-				indexerPrincipal,
-				caps,
+			opts := []delegation.Option{
 				delegation.WithProof(pfs...),
-				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
-			)
+				delegation.WithExpiration(int(time.Now().Add(30 * time.Second).Unix())),
+			}
+
+			return delegation.Delegate(c.Issuer(), indexerPrincipal, caps, opts...)
 		})
 		exchange := dagservice.NewExchange(locator, c, spaces)
 
@@ -150,7 +167,6 @@ var serveCmd = &cobra.Command{
 
 		blockStore := blockstore.NewBlockstore(arc.New(cfg.Gateway.BlockCacheCapacity))
 		blockService := blockservice.New(blockStore, exchange)
-
 		backend, err := gateway.NewBlocksBackend(blockService)
 		cobra.CheckErr(err)
 
@@ -189,7 +205,11 @@ var serveCmd = &cobra.Command{
 		defer timer.Stop()
 		go func() {
 			<-timer.C
-			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces))
+			var hosts []string
+			if cfg.Gateway.Subdomain.Enabled {
+				hosts = cfg.Gateway.Subdomain.Hosts
+			}
+			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
 		}()
 
 		// shut down the server gracefully on context cancellation
@@ -212,10 +232,8 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
-	logging.SetLogLevel("cmd/gateway", "info")
-
 	serveCmd.Flags().IntP("block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
-	cobra.CheckErr(viper.BindPFlag("gateway.block-cache-capacity", serveCmd.Flags().Lookup("block-cache-capacity")))
+	cobra.CheckErr(viper.BindPFlag("gateway.block_cache_capacity", serveCmd.Flags().Lookup("block-cache-capacity")))
 
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
 	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
@@ -229,87 +247,10 @@ func init() {
 	serveCmd.Flags().BoolP("trusted", "t", trustedEnabled, "Enable trusted gateway mode (allows deserialized responses)")
 	cobra.CheckErr(viper.BindPFlag("gateway.trusted", serveCmd.Flags().Lookup("trusted")))
 
+	serveCmd.Flags().String("log-level", "warn", "Logging level for the gateway server (debug, info, warn, error)")
+	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
+
 	GatewayCmd.AddCommand(serveCmd)
-
-	indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
-}
-
-func banner(version string, port int, id did.DID, spaces []did.DID) string {
-	var sb strings.Builder
-	if len(spaces) > 1 {
-		sb.WriteString("Spaces\n")
-		for _, space := range spaces {
-			sb.WriteString("  ")
-			sb.WriteString(color.Grey(space.String()))
-			sb.WriteString("\n")
-		}
-	} else {
-		sb.WriteString("Space  ")
-		sb.WriteString(color.Grey(spaces[0].String()))
-	}
-	return fmt.Sprintf(
-		`
-%s ▄▖           
-  ▌ ▌▌▛▌▌▌▌▀▌▌▌
-  ▙▌▙▌▙▌▚▚▘█▌▙▌
-      ▌      ▄▌ %s
-
-High performance IPFS Gateway
-%s
-------------------------------
-Server %s
-%s
-------------------------------
-⇨ HTTP server started on %s`,
-		color.Cyan("⬢"),
-		color.Red(version),
-		color.Blue("https://storacha.network"),
-		color.Grey(id.String()),
-		sb.String(),
-		color.Green(fmt.Sprintf("http://localhost:%d", port)),
-	)
-}
-
-func requestLogger(logger *logging.ZapEventLogger) echo.MiddlewareFunc {
-	return middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		LogMethod:        true,
-		LogLatency:       true,
-		LogRemoteIP:      true,
-		LogHost:          true,
-		LogURI:           true,
-		LogUserAgent:     true,
-		LogStatus:        true,
-		LogContentLength: true,
-		LogResponseSize:  true,
-		LogHeaders:       []string{},
-		LogError:         true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			fields := []zap.Field{
-				zap.Int("status", v.Status),
-				zap.String("method", v.Method),
-				zap.String("uri", v.URI),
-				zap.String("host", v.Host),
-				zap.String("remote_ip", v.RemoteIP),
-				zap.Duration("latency", v.Latency),
-				zap.String("user_agent", v.UserAgent),
-				zap.String("content_length", v.ContentLength),
-				zap.Int64("response_size", v.ResponseSize),
-				zap.Reflect("headers", v.Headers),
-			}
-			if v.Error != nil {
-				fields = append(fields, zap.Error(v.Error))
-			}
-			switch {
-			case v.Status >= http.StatusInternalServerError:
-				logger.WithOptions(zap.Fields(fields...)).Error("server error")
-			case v.Status >= http.StatusBadRequest:
-				logger.WithOptions(zap.Fields(fields...)).Warn("client error")
-			default:
-				logger.WithOptions(zap.Fields(fields...)).Info("request")
-			}
-			return nil
-		},
-	})
 }
 
 func rootHandler(c echo.Context) error {
