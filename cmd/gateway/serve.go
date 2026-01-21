@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/viper"
 	arc "github.com/storacha/go-ds-arc"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
+	ucan_bs "github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
@@ -82,12 +83,10 @@ var serveCmd = &cobra.Command{
 		allProofs := c.Proofs(client.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		authdSpaces := map[did.DID]struct{}{}
 		for _, proof := range allProofs {
-			for _, cap := range proof.Capabilities() {
-				if validator.ResolveAbility(cap.Can(), contentcap.RetrieveAbility) != "" {
-					spaceDID, err := did.Parse(cap.With())
-					if err == nil {
-						authdSpaces[spaceDID] = struct{}{}
-					}
+			if r, ok := proofResource(proof, contentcap.RetrieveAbility); ok {
+				spaceDID, err := did.Parse(r)
+				if err == nil {
+					authdSpaces[spaceDID] = struct{}{}
 				}
 			}
 		}
@@ -257,4 +256,36 @@ func init() {
 
 func rootHandler(c echo.Context) error {
 	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+}
+
+// proofResource finds the resource for a proof, handling the case where the
+// delegated resource is "ucan:*" by recursively checking its proofs to find a
+// delegation for the specific resource.
+func proofResource(proof delegation.Delegation, ability ucan.Ability) (ucan.Resource, bool) {
+	for _, cap := range proof.Capabilities() {
+		if validator.ResolveAbility(cap.Can(), ability) == "" {
+			continue
+		}
+		if cap.With() != "ucan:*" {
+			return cap.With(), true
+		}
+		proofs := proof.Proofs()
+		if len(proofs) == 0 {
+			continue
+		}
+		bs, err := ucan_bs.NewBlockReader(ucan_bs.WithBlocksIterator(proof.Blocks()))
+		if err != nil {
+			return "", false
+		}
+		for _, plink := range proofs {
+			p, err := delegation.NewDelegationView(plink, bs)
+			if err != nil {
+				return "", false
+			}
+			if r, ok := proofResource(p, ability); ok {
+				return r, true
+			}
+		}
+	}
+	return "", false
 }
