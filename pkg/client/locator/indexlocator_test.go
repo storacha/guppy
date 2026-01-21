@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -354,6 +355,115 @@ func TestLocator(t *testing.T) {
 		// Verify both queries were made (cache didn't incorrectly return space1's result for space2)
 		require.Equal(t, 2, mockIndexer.queryCount, "Cache should be space-scoped, requiring separate queries for each space")
 	})
+
+	t.Run("supports multi space locating", func(t *testing.T) {
+		blockDigest1 := testutil.RandomMultihash(t)
+		blockDigest2 := testutil.RandomMultihash(t)
+		rootLink1 := testutil.RandomCID(t)
+		rootLink2 := testutil.RandomCID(t)
+		shardDigest1 := testutil.RandomMultihash(t)
+		shardDigest2 := testutil.RandomMultihash(t)
+
+		space1 := testutil.RandomSigner(t)
+		space2 := testutil.RandomSigner(t)
+		provider1 := testutil.RandomSigner(t)
+		provider2 := testutil.RandomSigner(t)
+
+		claim1, err := assertcap.Location.Delegate(
+			provider1,
+			provider1.DID(),
+			provider1.DID().String(),
+			assertcap.LocationCaveats{
+				Space:   space1.DID(),
+				Content: captypes.FromHash(shardDigest1),
+				Location: ctestutil.Urls(
+					"https://storage1.example.com/block/abc123",
+					"https://storage2.example.com/block/abc123",
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		claim2, err := assertcap.Location.Delegate(
+			provider2,
+			provider2.DID(),
+			provider2.DID().String(),
+			assertcap.LocationCaveats{
+				Space:   space2.DID(),
+				Content: captypes.FromHash(shardDigest2),
+				Location: ctestutil.Urls(
+					"https://storage3.example.com/block/abc123",
+				),
+			},
+		)
+		require.NoError(t, err)
+
+		index1 := blobindex.NewShardedDagIndexView(rootLink1, -1)
+		index1.SetSlice(shardDigest1, blockDigest1, blobindex.Position{
+			Offset: 10,
+			Length: 2048,
+		})
+
+		index2 := blobindex.NewShardedDagIndexView(rootLink2, -1)
+		index2.SetSlice(shardDigest2, blockDigest2, blobindex.Position{
+			Offset: 57,
+			Length: 1024,
+		})
+
+		// These could be any kind of delegations; we just need to see that they get
+		// sent to the indexer, whatever they are.
+		requiredDelegations := []delegation.Delegation{
+			testutil.RandomLocationDelegation(t),
+		}
+
+		mockIndexer := newMockIndexerClient([]delegation.Delegation{claim1, claim2}, []blobindex.ShardedDagIndexView{index1, index2})
+		locator := locator.NewIndexLocator(mockIndexer, func(spaces []did.DID) (delegation.Delegation, error) {
+			return requiredDelegations[0], nil
+		})
+
+		locations, err := locator.Locate(t.Context(), []did.DID{space1.DID(), space2.DID()}, blockDigest1)
+		require.NoError(t, err)
+
+		require.Len(t, locations, 1)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage1.example.com/block/abc123",
+			"https://storage2.example.com/block/abc123",
+		), locations[0].Commitment.Nb().Location)
+		require.Equal(t, blobindex.Position{
+			Offset: 10,
+			Length: 2048,
+		}, locations[0].Position)
+
+		require.Len(t, mockIndexer.Queries, 1)
+		require.Equal(t, types.Query{
+			Hashes:      []multihash.Multihash{blockDigest1},
+			Delegations: requiredDelegations,
+			Match: types.Match{
+				Subject: []did.DID{space1.DID(), space2.DID()},
+			},
+		}, mockIndexer.Queries[0])
+
+		locations, err = locator.Locate(t.Context(), []did.DID{space1.DID(), space2.DID()}, blockDigest2)
+		require.NoError(t, err)
+
+		require.Len(t, locations, 1)
+		require.ElementsMatch(t, ctestutil.Urls(
+			"https://storage3.example.com/block/abc123",
+		), locations[0].Commitment.Nb().Location)
+		require.Equal(t, blobindex.Position{
+			Offset: 57,
+			Length: 1024,
+		}, locations[0].Position)
+
+		require.Len(t, mockIndexer.Queries, 2)
+		require.Equal(t, types.Query{
+			Hashes:      []multihash.Multihash{blockDigest2},
+			Delegations: requiredDelegations,
+			Match: types.Match{
+				Subject: []did.DID{space1.DID(), space2.DID()},
+			},
+		}, mockIndexer.Queries[1])
+	})
 }
 
 // source is a helper type for matching capabilities
@@ -443,8 +553,22 @@ var _ locator.IndexerClient = (*mockIndexerClient)(nil)
 func (m *mockIndexerClient) QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error) {
 	m.Queries = append(m.Queries, query)
 
-	var indexBlocks []block.Block
+	indexes := []blobindex.ShardedDagIndexView{}
+	shards := []multihash.Multihash{}
+
+	// only return indexes that contain the query digest
 	for _, index := range m.indexes {
+		for _, queryDigest := range query.Hashes {
+			if shard, ok := indexContains(index, queryDigest); ok {
+				indexes = append(indexes, index)
+				shards = append(shards, shard)
+				break
+			}
+		}
+	}
+
+	var indexBlocks []block.Block
+	for _, index := range indexes {
 		indexReader, err := blobindex.Archive(index)
 		if err != nil {
 			return nil, fmt.Errorf("archiving index: %w", err)
@@ -464,10 +588,46 @@ func (m *mockIndexerClient) QueryClaims(ctx context.Context, query types.Query) 
 		indexBlocks = append(indexBlocks, indexBlock)
 	}
 
+	// only return claims that match the query space(s)
+	claims := []delegation.Delegation{}
+	for _, claim := range m.claims {
+		match, err := assertcap.Location.Match(source{
+			capability: claim.Capabilities()[0],
+			delegation: claim,
+		})
+		if err != nil {
+			continue
+		}
+		for _, shard := range shards {
+			digest := match.Value().Nb().Content.Hash()
+			space := match.Value().Nb().Space
+			if digest.String() == shard.String() && slices.Contains(query.Match.Subject, space) {
+				claims = append(claims, claim)
+				break
+			}
+		}
+	}
+
 	return &mockQueryResult{
-		claims:      m.claims,
+		claims:      claims,
 		indexBlocks: indexBlocks,
 	}, nil
+}
+
+// indexContains checks if the given digest is present in the index's shards or
+// slices. It returns the shard containing the digest and true if found.
+func indexContains(index blobindex.ShardedDagIndexView, digest multihash.Multihash) (multihash.Multihash, bool) {
+	for shard, slices := range index.Shards().Iterator() {
+		if shard.String() == digest.String() {
+			return shard, true
+		}
+		for slice, _ := range slices.Iterator() {
+			if slice.String() == digest.String() {
+				return shard, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // locationQueryMockIndexer returns indexes on standard queries, but only claims on location queries
