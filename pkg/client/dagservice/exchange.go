@@ -1,40 +1,74 @@
 package dagservice
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"slices"
+	"sync"
 
 	"github.com/ipfs/boxo/exchange"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
 var log = logging.Logger("client/dagservice")
 
+// DefaultMaxGap is the default maximum gap (in bytes) between blocks that can
+// still be coalesced into a single request. This value accommodates the typical
+// overhead between adjacent blocks in a CAR file, which consists of a varint
+// length prefix (1-10 bytes) and a CID (34-37 bytes for CIDv0/CIDv1 with
+// SHA2-256).
+const DefaultMaxGap = 64
+
 type storachaExchange struct {
 	locator   locator.Locator
 	retriever Retriever
 	space     did.DID
 	shards    blobindex.MultihashMap[[]byte]
+	maxGap    uint64
 }
 
 var _ exchange.Interface = (*storachaExchange)(nil)
 
-func NewExchange(locator locator.Locator, retriever Retriever, space did.DID) exchange.Interface {
-	return &storachaExchange{
+// ExchangeOption configures a storachaExchange.
+type ExchangeOption func(*storachaExchange)
+
+// WithMaxGap sets the maximum gap (in bytes) between blocks that can still be
+// coalesced into a single request. A maxGap of 0 means blocks must be exactly
+// contiguous to be coalesced. The default is [DefaultMaxGap].
+func WithMaxGap(maxGap uint64) ExchangeOption {
+	return func(se *storachaExchange) {
+		se.maxGap = maxGap
+	}
+}
+
+// NewExchange creates a new exchange for retrieving blocks from Storacha.
+func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, opts ...ExchangeOption) exchange.Interface {
+	se := &storachaExchange{
 		locator:   locator,
 		retriever: retriever,
 		space:     space,
 		shards:    blobindex.NewMultihashMap[[]byte](-1),
+		maxGap:    DefaultMaxGap,
 	}
+	for _, opt := range opts {
+		opt(se)
+	}
+	return se
 }
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	log.Infof("Getting block %s in space %s", c.String(), se.space.String())
 	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
@@ -43,14 +77,18 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	// Randomly pick one of the available locations
 	location := locations[rand.Intn(len(locations))]
 
-	blockBytes, err := se.retriever.Retrieve(ctx, se.space, location)
+	blockReader, err := se.retriever.Retrieve(ctx, location)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
 	}
+	defer blockReader.Close()
 
-	// Create a block from the data and CID
-	// This will verify that the data hashes to the expected CID
-	block, err := blocks.NewBlockWithCid(blockBytes, c)
+	blockBytes, err := io.ReadAll(blockReader)
+	if err != nil {
+		return nil, fmt.Errorf("reading block %s data: %w", c.String(), err)
+	}
+
+	block, err := makeBlock(blockBytes, c)
 	if err != nil {
 		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
 	}
@@ -58,20 +96,207 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	return block, nil
 }
 
+// makeBlock creates a block from the given data and CID, verifying that the
+// data matches the expected hash in the CID.
+func makeBlock(data []byte, c cid.Cid) (blocks.Block, error) {
+	expectedDigest := c.Hash()
+	decHash, err := mh.Decode(expectedDigest)
+	if err != nil {
+		return nil, fmt.Errorf("decoding content multihash %s: %w", expectedDigest, err)
+	}
+
+	actualDigest, err := mh.Sum(data, decHash.Code, -1)
+	if err != nil {
+		return nil, fmt.Errorf("hashing content %s: %w", expectedDigest, err)
+	}
+
+	if !bytes.Equal(expectedDigest, actualDigest) {
+		return nil, fmt.Errorf("content hash mismatch for content %s; got %s", digestutil.Format(expectedDigest), digestutil.Format(actualDigest))
+	}
+
+	block, err := blocks.NewBlockWithCid(data, c)
+	if err != nil {
+		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(data), err)
+	}
+
+	return block, nil
+}
+
+type coalescedLocation struct {
+	location locator.Location
+	slices   []slice
+}
+
+func (cl coalescedLocation) isEmpty() bool {
+	return cl.location == (locator.Location{})
+}
+
+type slice struct {
+	cid      cid.Cid
+	position blobindex.Position
+}
+
+func sameShard(a, b locator.Location) bool {
+	return bytes.Equal(a.Commitment.Nb().Content.Hash(), b.Commitment.Nb().Content.Hash())
+}
+
+// withinGap checks if location b is within maxGap bytes after the end of
+// location a, in the same shard. A maxGap of 0 means they must be exactly
+// contiguous.
+func withinGap(a, b locator.Location, maxGap uint64) bool {
+	if !sameShard(a, b) {
+		return false
+	}
+
+	endOfA := a.Position.Offset + a.Position.Length
+
+	if b.Position.Offset >= endOfA && b.Position.Offset <= endOfA+maxGap {
+		return true
+	} else {
+		log.Debugf("Locations not within gap: a ends at %d, b starts at %d; gap is %d, maxGap is %d", endOfA, b.Position.Offset, b.Position.Offset-endOfA, maxGap)
+		return false
+	}
+}
+
+// GetBlocks will attempt to fetch multiple contiguous blocks in a single
+// request where possible.
 func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
 	out := make(chan blocks.Block)
 
-	// Just fetch each block sequentially for now
-	go func() {
-		defer close(out)
-		for _, c := range cids {
-			blk, err := se.GetBlock(ctx, c)
+	digests := make([]mh.Multihash, 0, len(cids))
+	for _, c := range cids {
+		digests = append(digests, c.Hash())
+	}
+
+	locations, err := se.locator.LocateMany(ctx, se.space, digests)
+	if err != nil {
+		return nil, fmt.Errorf("locating blocks: %w", err)
+	}
+
+	// Sort the CIDs by the offset of their first location. This is a best effort
+	// to ensure that contiguous blocks are adjacent in the list. It can fail if a
+	// block is available in multiple shards, and thus at multiple offsets; the
+	// offset we sort by may not be the one that allows coalescing with the
+	// running batch of blocks when we get to it. But the most common case is that
+	// a block is found in a single shard (which may be replicated to multiple
+	// locations), so the first location's offset is a reasonable heuristic.
+	slices.SortFunc(cids, func(cidA, cidB cid.Cid) int {
+		locsA := locations.Get(cidA.Hash())
+		locsB := locations.Get(cidB.Hash())
+
+		if len(locsA) == 0 || len(locsB) == 0 {
+			return 0
+		}
+
+		return cmp.Compare(locsA[0].Position.Offset, locsB[0].Position.Offset)
+	})
+
+	var coalescedLocations []coalescedLocation
+	var currentLocation coalescedLocation
+	for _, cid := range cids {
+		locs := locations.Get(cid.Hash())
+		if len(locs) == 0 {
+			return nil, fmt.Errorf("no locations found for block %s", cid.String())
+		}
+
+		// If we don't have a current location, make one
+		if currentLocation.isEmpty() {
+			loc := locs[rand.Intn(len(locs))]
+			currentLocation = coalescedLocation{
+				location: loc,
+				slices: []slice{
+					{
+						cid: cid,
+						position: blobindex.Position{
+							Offset: loc.Position.Offset,
+							Length: loc.Position.Length,
+						},
+					},
+				},
+			}
+		} else {
+			// See if any of the locations for this block are within the max gap of
+			// the current location.
+			found := false
+			if !currentLocation.isEmpty() {
+				for _, loc := range locs {
+					if withinGap(currentLocation.location, loc, se.maxGap) {
+						// Extend the coalesced location to include the gap and this block
+						currentLocation.location.Position.Length = loc.Position.Offset + loc.Position.Length - currentLocation.location.Position.Offset
+						currentLocation.slices = append(currentLocation.slices, slice{
+							cid: cid,
+							position: blobindex.Position{
+								Offset: loc.Position.Offset,
+								Length: loc.Position.Length,
+							},
+						})
+						found = true
+						break
+					}
+				}
+			}
+
+			// If none of the locations for this block are contiguous with the
+			// current location, emit, then make a new one.
+			if !found {
+				coalescedLocations = append(coalescedLocations, currentLocation)
+				loc := locs[rand.Intn(len(locs))]
+				currentLocation = coalescedLocation{
+					location: loc,
+					slices: []slice{
+						{
+							cid: cid,
+							position: blobindex.Position{
+								Offset: loc.Position.Offset,
+								Length: loc.Position.Length,
+							},
+						},
+					},
+				}
+			}
+		}
+	}
+
+	if !currentLocation.isEmpty() {
+		coalescedLocations = append(coalescedLocations, currentLocation)
+	}
+
+	var wg sync.WaitGroup
+	for _, cloc := range coalescedLocations {
+		log.Infof("Fetching %d coalesced blocks at offset %d with length %d", len(cloc.slices), cloc.location.Position.Offset, cloc.location.Position.Length)
+		wg.Add(1)
+		go func(cloc coalescedLocation) {
+			defer wg.Done()
+			blockReader, err := se.retriever.Retrieve(ctx, cloc.location)
 			if err != nil {
-				log.Errorf("error getting block %s: %v", c, err)
+				log.Errorf("retrieving blocks starting at offset %d: %v", cloc.location.Position.Offset, err)
 				return
 			}
-			out <- blk
-		}
+			defer blockReader.Close()
+
+			readBytes, err := io.ReadAll(blockReader)
+			if err != nil {
+				log.Errorf("reading blocks starting at offset %d data: %v", cloc.location.Position.Offset, err)
+				return
+			}
+
+			for _, slice := range cloc.slices {
+				offset := slice.position.Offset - cloc.location.Position.Offset
+				blk, err := makeBlock(readBytes[offset:offset+slice.position.Length], slice.cid)
+				if err != nil {
+					log.Errorf("creating block %s at offset %d: %v", slice.cid.String(), slice.position.Offset, err)
+					return
+				}
+
+				out <- blk
+			}
+		}(cloc)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
 	}()
 
 	return out, nil
