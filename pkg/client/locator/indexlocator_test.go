@@ -621,7 +621,7 @@ func indexContains(index blobindex.ShardedDagIndexView, digest multihash.Multiha
 		if shard.String() == digest.String() {
 			return shard, true
 		}
-		for slice, _ := range slices.Iterator() {
+		for slice := range slices.Iterator() {
 			if slice.String() == digest.String() {
 				return shard, true
 			}
