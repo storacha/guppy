@@ -63,5 +63,5 @@ var infoCmd = &cobra.Command{
 
 func init() {
 	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
-	SpaceCmd.AddCommand(infoCmd)
+	Cmd.AddCommand(infoCmd)
 }

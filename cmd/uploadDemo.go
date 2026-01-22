@@ -7,6 +7,7 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/cmd/internal/upload/demo"
 	"github.com/storacha/guppy/pkg/preparation"
 )

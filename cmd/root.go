@@ -10,11 +10,15 @@ import (
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/cmd/account"
+	"github.com/storacha/guppy/cmd/delegation"
+	"github.com/storacha/guppy/cmd/gateway"
+	"github.com/storacha/guppy/cmd/proof"
+	"github.com/storacha/guppy/cmd/space"
 )
 
 var (
@@ -66,6 +70,22 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+configFilePath)
 
 	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
+
+	// Add Commands
+	rootCmd.AddCommand(
+		whoamiCmd,
+		versionCmd,
+		uploadCmd,
+		retrieveCmd,
+		resetCmd,
+		lsCmd,
+		loginCmd,
+		space.Cmd,
+		proof.Cmd,
+		gateway.Cmd,
+		delegation.Cmd,
+		account.Cmd,
+	)
 }
 
 func initConfig() {
@@ -103,84 +123,4 @@ func ExecuteContext(ctx context.Context) error {
 	defer span.End()
 
 	return rootCmd.ExecuteContext(ctx)
-}
-
-// commandPath returns the command path for a `cobra.Command`. Where
-// `cmd.CommandPath()` returns a concatenated string, this returns a slice of
-// the individual commands in the path.
-func commandPath(c *cobra.Command) []string {
-	var path []string
-	if c.HasParent() {
-		path = commandPath(c.Parent())
-	}
-	path = append(path, c.Name())
-	return path
-}
-
-// setSpanAttributes sets attributes on the provided span based on the command
-// and its flags. It will set:
-//   - command.path: the full path of the command as a string slice
-//   - command.flag.<flag-name>: the value of each flag, as the appropriate type
-func setSpanAttributes(cmd *cobra.Command, span trace.Span) {
-	attrs := []attribute.KeyValue{
-		attribute.StringSlice("command.path", commandPath(cmd)),
-	}
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		var err error
-		k := "command.flag." + f.Name
-
-		var attr attribute.KeyValue
-		switch f.Value.Type() {
-		case "bool":
-			var v bool
-			v, err = cmd.Flags().GetBool(f.Name)
-			attr = attribute.Bool(k, v)
-		case "boolSlice":
-			var v []bool
-			v, err = cmd.Flags().GetBoolSlice(f.Name)
-			attr = attribute.BoolSlice(k, v)
-		case "int":
-			var v int
-			v, err = cmd.Flags().GetInt(f.Name)
-			attr = attribute.Int(k, v)
-		case "intSlice":
-			var v []int
-			v, err = cmd.Flags().GetIntSlice(f.Name)
-			attr = attribute.IntSlice(k, v)
-		case "int64":
-			var v int64
-			v, err = cmd.Flags().GetInt64(f.Name)
-			attr = attribute.Int64(k, v)
-		case "int64Slice":
-			var v []int64
-			v, err = cmd.Flags().GetInt64Slice(f.Name)
-			attr = attribute.Int64Slice(k, v)
-		case "float64":
-			var v float64
-			v, err = cmd.Flags().GetFloat64(f.Name)
-			attr = attribute.Float64(k, v)
-		case "float64Slice":
-			var v []float64
-			v, err = cmd.Flags().GetFloat64Slice(f.Name)
-			attr = attribute.Float64Slice(k, v)
-		case "string":
-			var v string
-			v, err = cmd.Flags().GetString(f.Name)
-			attr = attribute.String(k, v)
-		case "stringSlice":
-			var v []string
-			v, err = cmd.Flags().GetStringSlice(f.Name)
-			attr = attribute.StringSlice(k, v)
-		default:
-			attr = attribute.String(k, f.Value.String())
-		}
-		if err != nil {
-			log.Warnf("getting flag %q value %v for telemetry: %v", f.Name, f.Value, err)
-			return
-		}
-
-		attrs = append(attrs, attr)
-	})
-
-	span.SetAttributes(attrs...)
 }

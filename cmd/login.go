@@ -75,7 +75,3 @@ var loginCmd = &cobra.Command{
 		return nil
 	},
 }
-
-func init() {
-	rootCmd.AddCommand(loginCmd)
-}

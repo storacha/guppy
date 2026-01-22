@@ -97,5 +97,5 @@ func init() {
 	createCmd.Flags().StringArrayVarP(&createFlags.can, "can", "c", nil, "One or more abilities to delegate.")
 	createCmd.Flags().IntVarP(&createFlags.expiration, "expiration", "e", 0, "Unix timestamp when the delegation is no longer valid. Zero indicates no expiration.")
 	createCmd.Flags().StringVarP(&createFlags.output, "output", "o", "", "Path to write the delegation CAR file to. If not specified, outputs to stdout.")
-	DelegationCmd.AddCommand(createCmd)
+	Cmd.AddCommand(createCmd)
 }

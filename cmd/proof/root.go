@@ -6,7 +6,7 @@ import (
 
 var StorePathP *string
 
-var ProofCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "proof",
 	Short: "Manage proofs",
 }
