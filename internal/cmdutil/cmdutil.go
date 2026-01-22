@@ -4,7 +4,6 @@ package cmdutil
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -20,7 +19,7 @@ import (
 	"github.com/storacha/go-ucanto/transport/car"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/pkg/agentdata"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
@@ -47,43 +46,30 @@ var tracedHttpClient = &http.Client{
 }
 
 // MustGetClient creates a new client suitable for the CLI, using stored data,
-// if any. If proofs are provided, they will be added to the client, but the
-// client will not save changes to disk to avoid storing them.
+// if any. The storePath should be a directory path where agent data will be stored.
 func MustGetClient(storePath string, options ...client.Option) *client.Client {
-	data, err := agentdata.ReadFromFile(storePath)
-
+	store, err := agentstore.NewFs(storePath)
 	if err != nil {
-		// If the file doesn't exist yet, that's fine. The config will be empty
-		// until it's written to.
-		if !errors.Is(err, fs.ErrNotExist) {
-			log.Fatalf("reading agent data: %s", err)
-		}
+		log.Fatalf("creating agent store: %s", err)
 	}
 
-	var clientOptions []client.Option
-
-	// Use the principal from the environment if given.
+	// Override principal if env var is set
 	if s, err := envSigner(); err != nil {
 		log.Fatalf("parsing GUPPY_PRIVATE_KEY: %s", err)
 	} else if s != nil {
-		// If a principal is provided, use that, and ignore the saved data.
-		clientOptions = append(clientOptions, client.WithPrincipal(s))
-	} else {
-		// Otherwise, read and write the saved data.
-		clientOptions = append(clientOptions, client.WithData(data))
+		if err := store.SetPrincipal(s); err != nil {
+			log.Fatalf("setting principal: %s", err)
+		}
 	}
-
-	clientOptions = append(clientOptions,
-		client.WithSaveFn(func(data agentdata.AgentData) error {
-			return data.WriteToFile(storePath)
-		}),
-	)
 
 	c, err := client.NewClient(
 		append(
-			clientOptions,
-			client.WithConnection(MustGetConnection()),
-			client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(), receiptclient.WithHTTPClient(tracedHttpClient))),
+			[]client.Option{client.WithStore(store)},
+			append(
+				options,
+				client.WithConnection(MustGetConnection()),
+				client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(), receiptclient.WithHTTPClient(tracedHttpClient))),
+			)...,
 		)...,
 	)
 	if err != nil {

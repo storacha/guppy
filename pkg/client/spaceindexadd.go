@@ -19,8 +19,12 @@ import (
 func (c *Client) SpaceIndexAdd(ctx context.Context, indexCID cid.Cid, indexSize uint64, rootCID cid.Cid, space did.DID) error {
 	indexLink := cidlink.Link{Cid: indexCID}
 	rootLink := cidlink.Link{Cid: rootCID}
-	pfs := make([]delegation.Proof, 0, len(c.Proofs()))
-	for _, del := range c.Proofs() {
+	proofs, err := c.Proofs()
+	if err != nil {
+		return err
+	}
+	pfs := make([]delegation.Proof, 0, len(proofs))
+	for _, del := range proofs {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
 	retrievalAuth, err := contentcap.Retrieve.Delegate(

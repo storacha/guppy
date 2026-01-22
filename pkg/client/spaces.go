@@ -8,11 +8,17 @@ import (
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
+	"github.com/storacha/guppy/pkg/agentstore"
 )
 
 // Spaces returns all spaces we can act as.
 func (c *Client) Spaces() ([]did.DID, error) {
-	return spacesFromDelegations(c.Proofs(CapabilityQuery{Can: "space/*"}))
+	res, err := c.Proofs(agentstore.CapabilityQuery{Can: "space/*"})
+	if err != nil {
+		return nil, err
+	}
+	return spacesFromDelegations(res)
 }
 
 func spacesFromDelegations(dels []delegation.Delegation) ([]did.DID, error) {
