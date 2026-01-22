@@ -7,7 +7,9 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/core/delegation"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var addCmd = &cobra.Command{
@@ -30,7 +32,11 @@ var addCmd = &cobra.Command{
 			}
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 
 		if dlg.Audience().DID() != c.Issuer().DID() {
 			return fmt.Errorf("delegation audience %q does not match agent DID %q", dlg.Audience().DID(), c.Issuer().DID())
