@@ -33,7 +33,7 @@ const DefaultMaxGap = 64
 type storachaExchange struct {
 	locator   locator.Locator
 	retriever Retriever
-	space     did.DID
+	spaces    []did.DID
 	shards    blobindex.MultihashMap[[]byte]
 	maxGap    uint64
 }
@@ -53,11 +53,11 @@ func WithMaxGap(maxGap uint64) ExchangeOption {
 }
 
 // NewExchange creates a new exchange for retrieving blocks from Storacha.
-func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, opts ...ExchangeOption) exchange.Interface {
+func NewExchange(locator locator.Locator, retriever Retriever, spaces []did.DID, opts ...ExchangeOption) exchange.Interface {
 	se := &storachaExchange{
 		locator:   locator,
 		retriever: retriever,
-		space:     space,
+		spaces:    spaces,
 		shards:    blobindex.NewMultihashMap[[]byte](-1),
 		maxGap:    DefaultMaxGap,
 	}
@@ -68,8 +68,8 @@ func NewExchange(locator locator.Locator, retriever Retriever, space did.DID, op
 }
 
 func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	log.Infof("Getting block %s in space %s", c.String(), se.space.String())
-	locations, err := se.locator.Locate(ctx, se.space, c.Hash())
+	log.Debugw("Getting block", "cid", c, "spaces", se.spaces)
+	locations, err := se.locator.Locate(ctx, se.spaces, c.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
@@ -161,7 +161,7 @@ func withinGap(a, b locator.Location, maxGap uint64) bool {
 // GetBlocks will attempt to fetch multiple contiguous blocks in a single
 // request where possible.
 func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	log.Infof("Getting %d blocks in space %s", len(cids), se.space.String())
+	log.Debugw("Getting blocks", "count", len(cids), "spaces", se.spaces)
 	out := make(chan blocks.Block)
 
 	digests := make([]mh.Multihash, 0, len(cids))
@@ -169,7 +169,7 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 		digests = append(digests, c.Hash())
 	}
 
-	locations, err := se.locator.LocateMany(ctx, se.space, digests)
+	locations, err := se.locator.LocateMany(ctx, se.spaces, digests)
 	if err != nil {
 		return nil, fmt.Errorf("locating blocks: %w", err)
 	}

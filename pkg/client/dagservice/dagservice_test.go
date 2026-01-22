@@ -95,7 +95,7 @@ func TestDAGService(t *testing.T) {
 				ds := dagservice.NewDAGService(
 					lctr,
 					retriever,
-					space,
+					[]did.DID{space},
 				)
 
 				node, err := ds.Get(t.Context(), blockCID)
@@ -159,7 +159,7 @@ func TestDAGService(t *testing.T) {
 		ds := dagservice.NewDAGService(
 			lctr,
 			retriever,
-			space,
+			[]did.DID{space},
 		)
 
 		nodesCh := ds.GetMany(t.Context(), []cid.Cid{block1CID, block2CID})
@@ -207,14 +207,14 @@ type stubLocator struct {
 
 var _ locator.Locator = stubLocator{}
 
-func (m stubLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]locator.Location, error) {
+func (m stubLocator) Locate(ctx context.Context, spaces []did.DID, digest mh.Multihash) ([]locator.Location, error) {
 	if m.locations.Has(digest) {
 		return m.locations.Get(digest), nil
 	}
 	return nil, nil
 }
 
-func (m stubLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]locator.Location], error) {
+func (m stubLocator) LocateMany(ctx context.Context, spaces []did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]locator.Location], error) {
 	result := blobindex.NewMultihashMap[[]locator.Location](len(digests))
 	for _, digest := range digests {
 		if m.locations.Has(digest) {

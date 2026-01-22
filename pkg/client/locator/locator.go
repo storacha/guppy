@@ -15,12 +15,12 @@ import (
 type Locator interface {
 	// Locate finds and returns the locations of a single block identified by its
 	// digest. Returns a [NotFoundError] if no locations are found.
-	Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error)
+	Locate(ctx context.Context, spaces []did.DID, digest mh.Multihash) ([]Location, error)
 
 	// LocateMany finds the locations of multiple blocks identified by their
 	// digests, returning a map from digest to locations. Digests with no found
 	// locations will be absent from the returned map.
-	LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error)
+	LocateMany(ctx context.Context, spaces []did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error)
 }
 
 type Location struct {

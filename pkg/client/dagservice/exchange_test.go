@@ -9,6 +9,7 @@ import (
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
 	stestutil "github.com/storacha/go-libstoracha/testutil"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
@@ -57,7 +58,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blk, err := exchange.GetBlock(t.Context(), blockCID)
 			require.NoError(t, err)
 			require.Equal(t, blockCID, blk.Cid())
@@ -104,7 +105,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			_, err = exchange.GetBlock(t.Context(), blockCID)
 			require.ErrorContains(t, err, "content hash mismatch")
 		})
@@ -159,7 +160,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -232,7 +233,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID, block3CID})
 			require.NoError(t, err)
 
@@ -302,7 +303,7 @@ func TestStorachaExchange(t *testing.T) {
 			require.NoError(t, err)
 
 			// With maxGap=0, blocks must be exactly contiguous
-			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(0))
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space}, dagservice.WithMaxGap(0))
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -385,7 +386,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -416,7 +417,7 @@ func TestStorachaExchange(t *testing.T) {
 			retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			_, err = exchange.GetBlocks(t.Context(), []cid.Cid{blockCID})
 			require.ErrorContains(t, err, "no locations found")
 		})
@@ -457,7 +458,7 @@ func TestStorachaExchange(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{blockCID})
 			require.NoError(t, err)
 
@@ -477,7 +478,7 @@ func TestStorachaExchange(t *testing.T) {
 			retriever, err := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{})
 			require.NoError(t, err)
 
-			exchange := dagservice.NewExchange(lctr, retriever, space)
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{})
 			require.NoError(t, err)
 
@@ -539,7 +540,7 @@ func TestStorachaExchange(t *testing.T) {
 			require.NoError(t, err)
 
 			// maxGap of 5 should coalesce the blocks (gap is exactly 5 bytes)
-			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(5))
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space}, dagservice.WithMaxGap(5))
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -609,7 +610,7 @@ func TestStorachaExchange(t *testing.T) {
 			require.NoError(t, err)
 
 			// maxGap of 4 should NOT coalesce the blocks (gap is 5 bytes)
-			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(4))
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space}, dagservice.WithMaxGap(4))
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
 			require.NoError(t, err)
 
@@ -687,7 +688,7 @@ func TestStorachaExchange(t *testing.T) {
 			require.NoError(t, err)
 
 			// maxGap of 2 should coalesce all 3 blocks
-			exchange := dagservice.NewExchange(lctr, retriever, space, dagservice.WithMaxGap(2))
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space}, dagservice.WithMaxGap(2))
 			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID, block3CID})
 			require.NoError(t, err)
 

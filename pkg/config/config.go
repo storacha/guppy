@@ -3,7 +3,7 @@ package config
 import "github.com/spf13/viper"
 
 type Config struct {
-	Gateway GatewayConfig `mapstructure:"gateway" flag:"gateway" toml:"gateway"`
+	Gateway GatewayConfig `mapstructure:"gateway" toml:"gateway"`
 }
 
 func (c Config) Validate() error {

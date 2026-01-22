@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
@@ -24,11 +25,11 @@ import (
 var log = logging.Logger("client/dagservice")
 
 // AuthorizeRetrievalFunc creates a content retrieval authorization for the
-// provided space.
+// provided space(s).
 //
 // It should create a short lived delegation that allows the indexing service
-// to retrieve indexes from the space.
-type AuthorizeRetrievalFunc func(space did.DID) (delegation.Delegation, error)
+// to retrieve indexes from the space(s).
+type AuthorizeRetrievalFunc func(spaces []did.DID) (delegation.Delegation, error)
 
 func NewIndexLocator(indexer IndexerClient, authorizeRetrieval AuthorizeRetrievalFunc) *indexLocator {
 	return &indexLocator{
@@ -64,9 +65,9 @@ type IndexerClient interface {
 
 // Locate retrieves locations for the data identified by the given digest, in
 // the given space.
-func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.Multihash) ([]Location, error) {
-	log.Infof("Locating block %s in space %s", digestutil.Format(digest), spaceDID.String())
-	locations, err := s.LocateMany(ctx, spaceDID, []mh.Multihash{digest})
+func (s *indexLocator) Locate(ctx context.Context, spaces []did.DID, digest mh.Multihash) ([]Location, error) {
+	log.Debugw("Locating block", "digest", digestutil.Format(digest), "spaces", spaces)
+	locations, err := s.LocateMany(ctx, spaces, []mh.Multihash{digest})
 	if err != nil {
 		return nil, err
 	}
@@ -78,14 +79,14 @@ func (s *indexLocator) Locate(ctx context.Context, spaceDID did.DID, digest mh.M
 	return nil, NotFoundError{Hash: digest}
 }
 
-func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error) {
-	log.Infof("Locating %d blocks in space %s", len(digests), spaceDID.String())
+func (s *indexLocator) LocateMany(ctx context.Context, spaces []did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error) {
+	log.Debugw("Locating blocks", "count", len(digests), "spaces", spaces)
 	locations := blobindex.NewMultihashMap[[]Location](len(digests))
 	needInclusions := make([]mh.Multihash, 0, len(digests))
 	needLocations := make([]mh.Multihash, 0, len(digests))
 
 	for _, digest := range digests {
-		cachedLocations, cachedInclusions := s.getCached(spaceDID, digest)
+		cachedLocations, cachedInclusions := s.getCached(spaces, digest)
 
 		if len(cachedLocations) == 0 {
 			if len(cachedInclusions) == 0 {
@@ -100,16 +101,16 @@ func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests
 		}
 	}
 
-	if err := s.query(ctx, spaceDID, needInclusions, false); err != nil {
+	if err := s.query(ctx, spaces, needInclusions, false); err != nil {
 		return nil, err
 	}
 
-	if err := s.query(ctx, spaceDID, needLocations, true); err != nil {
+	if err := s.query(ctx, spaces, needLocations, true); err != nil {
 		return nil, err
 	}
 
 	for _, digest := range digests {
-		foundLocations, _ := s.getCached(spaceDID, digest)
+		foundLocations, _ := s.getCached(spaces, digest)
 		if len(foundLocations) > 0 {
 			locations.Set(digest, foundLocations)
 		}
@@ -118,31 +119,35 @@ func (s *indexLocator) LocateMany(ctx context.Context, spaceDID did.DID, digests
 	return locations, nil
 }
 
-// getCached retrieves cached locations for the given spaceDID and digest. It
+// getCached retrieves cached locations for the given spaces and hash. It
 // returns the locations and a boolean indicating whether we know of at least
 // one shard which includes the block. If the second return value is false, the
 // caller should perform a full query to the indexer to attempt to discover new
 // locations. If true, if the locations slice is empty, the caller can perform a
 // location-only query to fetch the remaining location information (or to
 // confirm that there are no locations).
-func (s *indexLocator) getCached(spaceDID did.DID, digest mh.Multihash) ([]Location, []inclusion) {
+func (s *indexLocator) getCached(spaces []did.DID, digest mh.Multihash) ([]Location, []inclusion) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	inclusions, hasInclusions := s.inclusions[cacheKey(spaceDID, digest)]
-	if !hasInclusions {
-		return nil, nil
-	}
-
 	var locations []Location
-	for _, inclusion := range inclusions {
-		shardCommitments, hasCommitments := s.commitments[cacheKey(spaceDID, inclusion.shard)]
-		if hasCommitments {
-			for _, commitment := range shardCommitments {
-				locations = append(locations, Location{
-					Commitment: commitment,
-					Position:   inclusion.position,
-				})
+	var inclusions []inclusion
+	for _, spaceDID := range spaces {
+		incs, hasInclusions := s.inclusions[cacheKey(spaceDID, digest)]
+		if !hasInclusions {
+			continue
+		}
+		inclusions = append(inclusions, incs...)
+
+		for _, inclusion := range incs {
+			shardCommitments, hasCommitments := s.commitments[cacheKey(spaceDID, inclusion.shard)]
+			if hasCommitments {
+				for _, commitment := range shardCommitments {
+					locations = append(locations, Location{
+						Commitment: commitment,
+						Position:   inclusion.position,
+					})
+				}
 			}
 		}
 	}
@@ -150,7 +155,7 @@ func (s *indexLocator) getCached(spaceDID did.DID, digest mh.Multihash) ([]Locat
 	return locations, inclusions
 }
 
-func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh.Multihash, omitIndexes bool) error {
+func (s *indexLocator) query(ctx context.Context, spaces []did.DID, digests []mh.Multihash, omitIndexes bool) error {
 	if len(digests) == 0 {
 		return nil
 	}
@@ -162,16 +167,16 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh
 		queryType = types.QueryTypeStandard
 	}
 
-	auth, err := s.authorizeRetrieval(spaceDID)
+	auth, err := s.authorizeRetrieval(spaces)
 	if err != nil {
-		return fmt.Errorf("authorizing retrieval for space %s: %w", spaceDID, err)
+		return fmt.Errorf("authorizing retrieval for spaces %v: %w", spaces, err)
 	}
 
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
 		Hashes:      digests,
 		Delegations: []delegation.Delegation{auth},
 		Match: types.Match{
-			Subject: []did.DID{spaceDID},
+			Subject: spaces,
 		},
 		Type: queryType,
 	})
@@ -195,6 +200,9 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// record the space each blob belongs to
+	blobSpace := blobindex.NewMultihashMap[did.DID](-1)
+
 	for _, link := range result.Claims() {
 		d, err := delegation.NewDelegationView(link, bs)
 		if err != nil {
@@ -212,8 +220,9 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh
 		cap := match.Value()
 		claimDigest := cap.Nb().Content.Hash()
 
-		claimKey := cacheKey(spaceDID, claimDigest)
+		claimKey := cacheKey(cap.Nb().Space, claimDigest)
 		s.commitments[claimKey] = append(s.commitments[claimKey], cap)
+		blobSpace.Set(claimDigest, cap.Nb().Space)
 	}
 
 	for _, link := range result.Indexes() {
@@ -228,10 +237,34 @@ func (s *indexLocator) query(ctx context.Context, spaceDID did.DID, digests []mh
 		if err != nil {
 			return fmt.Errorf("extracting index: %w", err)
 		}
+		indexCid, err := cid.Parse(link.String())
+		if err != nil {
+			return fmt.Errorf("parsing index CID: %w", err)
+		}
 
 		for shardDigest, shardMap := range index.Shards().Iterator() {
+			spaceDID := blobSpace.Get(shardDigest)
+			if spaceDID == did.Undef {
+				if len(spaces) == 1 {
+					spaceDID = spaces[0]
+				} else {
+					// if we don't know the space for this shard from our query result,
+					// and we are locating across multiple spaces then assume it is the
+					// same space as the index (it should be).
+					spaceDID = blobSpace.Get(indexCid.Hash())
+					// we expect the indexer to return a location claim for the index though
+					if spaceDID == did.Undef {
+						digestStrs := make([]string, 0, len(digests))
+						for _, d := range digests {
+							digestStrs = append(digestStrs, digestutil.Format(d))
+						}
+						return fmt.Errorf("missing location claim for index %q in query results for: %s", indexCid, strings.Join(digestStrs, ", "))
+					}
+				}
+			}
 			for sliceDigest, position := range shardMap.Iterator() {
-				s.inclusions[cacheKey(spaceDID, sliceDigest)] = append(s.inclusions[cacheKey(spaceDID, sliceDigest)], inclusion{
+				key := cacheKey(spaceDID, sliceDigest)
+				s.inclusions[key] = append(s.inclusions[key], inclusion{
 					shard:    shardDigest,
 					position: position,
 				})

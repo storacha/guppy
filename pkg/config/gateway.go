@@ -9,7 +9,10 @@ type GatewayConfig struct {
 	// are typically <1MB due to IPFS chunking, so an upper bound for how much
 	// memory the cache will utilize is approximately this number multiplied by
 	// 1MB. e.g. capacity for 1,000 blocks ~= 1GB of memory.
-	BlockCacheCapacity int `mapstructure:"block-cache-capacity" flag:"block-cache-capacity" toml:"block-cache-capacity"`
+	BlockCacheCapacity int `mapstructure:"block_cache_capacity" flag:"block-cache-capacity" toml:"block_cache_capacity"`
+	// LogLevel sets the logging level for the gateway server (debug, info, warn
+	// or error).
+	LogLevel string `mapstructure:"log_level" flag:"log-level" toml:"log_level"`
 	// Subdomain configures subdomain gateway mode.
 	Subdomain SubdomainConfig `mapstructure:"subdomain" toml:"subdomain"`
 	// Trusted indicates whether to enable trusted gateway mode, which allows
