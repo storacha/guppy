@@ -8,3 +8,7 @@ var Cmd = &cobra.Command{
 	Use:   "account",
 	Short: "Manage accounts",
 }
+
+func init() {
+	Cmd.AddCommand(listCmd)
+}

@@ -24,6 +24,12 @@ var createFlags struct {
 	output     string
 }
 
+func init() {
+	createCmd.Flags().StringArrayVarP(&createFlags.can, "can", "c", nil, "One or more abilities to delegate.")
+	createCmd.Flags().IntVarP(&createFlags.expiration, "expiration", "e", 0, "Unix timestamp when the delegation is no longer valid. Zero indicates no expiration.")
+	createCmd.Flags().StringVarP(&createFlags.output, "output", "o", "", "Path to write the delegation CAR file to. If not specified, outputs to stdout.")
+}
+
 var createCmd = &cobra.Command{
 	Use:   "create <space-did> <audience-did>",
 	Short: "Delegate capabilities for a space to others.",
@@ -100,11 +106,4 @@ var createCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	createCmd.Flags().StringArrayVarP(&createFlags.can, "can", "c", nil, "One or more abilities to delegate.")
-	createCmd.Flags().IntVarP(&createFlags.expiration, "expiration", "e", 0, "Unix timestamp when the delegation is no longer valid. Zero indicates no expiration.")
-	createCmd.Flags().StringVarP(&createFlags.output, "output", "o", "", "Path to write the delegation CAR file to. If not specified, outputs to stdout.")
-	Cmd.AddCommand(createCmd)
 }
