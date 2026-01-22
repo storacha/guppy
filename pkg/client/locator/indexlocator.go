@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 	mh "github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-libstoracha/capabilities/assert"
@@ -19,6 +21,8 @@ import (
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
+
+var log = logging.Logger("client/dagservice")
 
 // AuthorizeRetrievalFunc creates a content retrieval authorization for the
 // provided space(s).
@@ -59,42 +63,57 @@ type IndexerClient interface {
 	QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error)
 }
 
-type NotFoundError struct {
-	Hash mh.Multihash
+// Locate retrieves locations for the data identified by the given digest, in
+// the given space.
+func (s *indexLocator) Locate(ctx context.Context, spaces []did.DID, digest mh.Multihash) ([]Location, error) {
+	log.Debugw("Locating block", "digest", digestutil.Format(digest), "spaces", spaces)
+	locations, err := s.LocateMany(ctx, spaces, []mh.Multihash{digest})
+	if err != nil {
+		return nil, err
+	}
+
+	if locations.Has(digest) {
+		return locations.Get(digest), nil
+	}
+
+	return nil, NotFoundError{Hash: digest}
 }
 
-func (e NotFoundError) Error() string {
-	return fmt.Sprintf("no locations found for block: %s", digestutil.Format(e.Hash))
-}
+func (s *indexLocator) LocateMany(ctx context.Context, spaces []did.DID, digests []mh.Multihash) (blobindex.MultihashMap[[]Location], error) {
+	log.Debugw("Locating blocks", "count", len(digests), "spaces", spaces)
+	locations := blobindex.NewMultihashMap[[]Location](len(digests))
+	needInclusions := make([]mh.Multihash, 0, len(digests))
+	needLocations := make([]mh.Multihash, 0, len(digests))
 
-func (s *indexLocator) Locate(ctx context.Context, spaces []did.DID, hash mh.Multihash) ([]Location, error) {
-	locations, inclusions := s.getCached(spaces, hash)
+	for _, digest := range digests {
+		cachedLocations, cachedInclusions := s.getCached(spaces, digest)
 
-	if len(locations) == 0 {
-		if len(inclusions) == 0 {
-			if err := s.query(ctx, spaces, hash, false); err != nil {
-				return nil, err
-			}
-			locations, _ = s.getCached(spaces, hash)
-		} else {
-			// If we have an inclusion but no locations, query the indexer for the
-			// location of the shard. Repeat for each inclusion until we find a
-			// location for the block.
-			for _, inclusion := range inclusions {
-				if err := s.query(ctx, spaces, inclusion.shard, true); err != nil {
-					return nil, err
-				}
-				locations, _ = s.getCached(spaces, hash)
-				if len(locations) > 0 {
-					break
+		if len(cachedLocations) == 0 {
+			if len(cachedInclusions) == 0 {
+				needInclusions = append(needInclusions, digest)
+			} else {
+				// If we have an inclusion but no locations, query the indexer for the
+				// location of the shard.
+				for _, inclusion := range cachedInclusions {
+					needLocations = append(needLocations, inclusion.shard)
 				}
 			}
 		}
 	}
 
-	// If we still have no locations then we failed to locate the block.
-	if len(locations) == 0 {
-		return nil, &NotFoundError{Hash: hash}
+	if err := s.query(ctx, spaces, needInclusions, false); err != nil {
+		return nil, err
+	}
+
+	if err := s.query(ctx, spaces, needLocations, true); err != nil {
+		return nil, err
+	}
+
+	for _, digest := range digests {
+		foundLocations, _ := s.getCached(spaces, digest)
+		if len(foundLocations) > 0 {
+			locations.Set(digest, foundLocations)
+		}
 	}
 
 	return locations, nil
@@ -107,14 +126,14 @@ func (s *indexLocator) Locate(ctx context.Context, spaces []did.DID, hash mh.Mul
 // locations. If true, if the locations slice is empty, the caller can perform a
 // location-only query to fetch the remaining location information (or to
 // confirm that there are no locations).
-func (s *indexLocator) getCached(spaces []did.DID, hash mh.Multihash) ([]Location, []inclusion) {
+func (s *indexLocator) getCached(spaces []did.DID, digest mh.Multihash) ([]Location, []inclusion) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var locations []Location
 	var inclusions []inclusion
 	for _, spaceDID := range spaces {
-		incs, hasInclusions := s.inclusions[cacheKey(spaceDID, hash)]
+		incs, hasInclusions := s.inclusions[cacheKey(spaceDID, digest)]
 		if !hasInclusions {
 			continue
 		}
@@ -126,7 +145,6 @@ func (s *indexLocator) getCached(spaces []did.DID, hash mh.Multihash) ([]Locatio
 				for _, commitment := range shardCommitments {
 					locations = append(locations, Location{
 						Commitment: commitment,
-						Digest:     hash,
 						Position:   inclusion.position,
 					})
 				}
@@ -137,7 +155,11 @@ func (s *indexLocator) getCached(spaces []did.DID, hash mh.Multihash) ([]Locatio
 	return locations, inclusions
 }
 
-func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Multihash, omitIndexes bool) error {
+func (s *indexLocator) query(ctx context.Context, spaces []did.DID, digests []mh.Multihash, omitIndexes bool) error {
+	if len(digests) == 0 {
+		return nil
+	}
+
 	var queryType types.QueryType
 	if omitIndexes {
 		queryType = types.QueryTypeLocation
@@ -151,7 +173,7 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Mult
 	}
 
 	result, err := s.indexer.QueryClaims(ctx, types.Query{
-		Hashes:      []mh.Multihash{hash},
+		Hashes:      digests,
 		Delegations: []delegation.Delegation{auth},
 		Match: types.Match{
 			Subject: spaces,
@@ -163,7 +185,11 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Mult
 		if ok := errors.As(err, &failedResponseErr); ok {
 			return fmt.Errorf("indexer responded with status %d: %s", failedResponseErr.StatusCode, failedResponseErr.Body)
 		}
-		return fmt.Errorf("querying claims for %s: %w", digestutil.Format(hash), err)
+		hashStrings := make([]string, len(digests))
+		for i, h := range digests {
+			hashStrings[i] = digestutil.Format(h)
+		}
+		return fmt.Errorf("querying claims for [%s]: %w", strings.Join(hashStrings, ", "), err)
 	}
 
 	bs, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(result.Blocks()))
@@ -192,11 +218,11 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Mult
 		}
 
 		cap := match.Value()
-		claimHash := cap.Nb().Content.Hash()
+		claimDigest := cap.Nb().Content.Hash()
 
-		claimKey := cacheKey(cap.Nb().Space, claimHash)
+		claimKey := cacheKey(cap.Nb().Space, claimDigest)
 		s.commitments[claimKey] = append(s.commitments[claimKey], cap)
-		blobSpace.Set(claimHash, cap.Nb().Space)
+		blobSpace.Set(claimDigest, cap.Nb().Space)
 	}
 
 	for _, link := range result.Indexes() {
@@ -216,8 +242,8 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Mult
 			return fmt.Errorf("parsing index CID: %w", err)
 		}
 
-		for shardHash, shardMap := range index.Shards().Iterator() {
-			spaceDID := blobSpace.Get(shardHash)
+		for shardDigest, shardMap := range index.Shards().Iterator() {
+			spaceDID := blobSpace.Get(shardDigest)
 			if spaceDID == did.Undef {
 				if len(spaces) == 1 {
 					spaceDID = spaces[0]
@@ -228,13 +254,18 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, hash mh.Mult
 					spaceDID = blobSpace.Get(indexCid.Hash())
 					// we expect the indexer to return a location claim for the index though
 					if spaceDID == did.Undef {
-						return fmt.Errorf("missing location claim for index %q in query results for hash: %s", indexCid, digestutil.Format(hash))
+						digestStrs := make([]string, 0, len(digests))
+						for _, d := range digests {
+							digestStrs = append(digestStrs, digestutil.Format(d))
+						}
+						return fmt.Errorf("missing location claim for index %q in query results for: %s", indexCid, strings.Join(digestStrs, ", "))
 					}
 				}
 			}
-			for sliceHash, position := range shardMap.Iterator() {
-				s.inclusions[cacheKey(spaceDID, sliceHash)] = append(s.inclusions[cacheKey(spaceDID, sliceHash)], inclusion{
-					shard:    shardHash,
+			for sliceDigest, position := range shardMap.Iterator() {
+				key := cacheKey(spaceDID, sliceDigest)
+				s.inclusions[key] = append(s.inclusions[key], inclusion{
+					shard:    shardDigest,
 					position: position,
 				})
 			}
