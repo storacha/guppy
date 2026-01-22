@@ -6,14 +6,20 @@ import (
 	"slices"
 
 	"github.com/storacha/go-ucanto/did"
+
+	"github.com/storacha/guppy/pkg/agentstore"
 )
 
-func (c *Client) Accounts() []did.DID {
+func (c *Client) Accounts() ([]did.DID, error) {
 	accounts := make(map[did.DID]struct{})
-	for _, p := range c.Proofs(CapabilityQuery{
+	res, err := c.Proofs(agentstore.CapabilityQuery{
 		Can:  "*",
 		With: "ucan:*",
-	}) {
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range res {
 		if p.Audience().DID() == c.Issuer().DID() {
 			for _, cap := range p.Capabilities() {
 				// `Proofs()` also gives us attestations, so filter those out.
@@ -28,5 +34,5 @@ func (c *Client) Accounts() []did.DID {
 	slices.SortFunc(result, func(a, b did.DID) int {
 		return cmp.Compare(a.String(), b.String())
 	})
-	return result
+	return result, nil
 }

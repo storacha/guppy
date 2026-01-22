@@ -41,7 +41,8 @@ var rootCmd = &cobra.Command{
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
 
-		storePath = filepath.Join(guppyDirPath, "store.json")
+		// TODO replace this with config
+		storePath = guppyDirPath
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,

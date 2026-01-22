@@ -29,9 +29,10 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/build"
-	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/config"
@@ -81,7 +82,10 @@ var serveCmd = &cobra.Command{
 		storePath := filepath.Join(guppyDirPath, "store.json")
 
 		c := cmdutil.MustGetClient(storePath)
-		allProofs := c.Proofs(client.CapabilityQuery{Can: contentcap.RetrieveAbility})
+		allProofs, err := c.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
+		if err != nil {
+			return err
+		}
 		authdSpaces := map[did.DID]struct{}{}
 		for _, proof := range allProofs {
 			if r, ok := proofResource(proof, contentcap.RetrieveAbility); ok {
@@ -111,16 +115,20 @@ var serveCmd = &cobra.Command{
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
-			queries := make([]client.CapabilityQuery, 0, len(spaces))
+			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
-				queries = append(queries, client.CapabilityQuery{
+				queries = append(queries, agentstore.CapabilityQuery{
 					Can:  contentcap.RetrieveAbility,
 					With: space.String(),
 				})
 			}
 
 			var pfs []delegation.Proof
-			for _, del := range c.Proofs(queries...) {
+			res, err := c.Proofs(queries...)
+			if err != nil {
+				return nil, err
+			}
+			for _, del := range res {
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
