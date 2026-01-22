@@ -1,0 +1,98 @@
+#!/bin/zsh
+
+set -e
+set -o pipefail
+
+export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
+export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
+export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
+
+# Check for dependencies
+if ! command -v jq &> /dev/null; then
+		echo "jq could not be found, please install it to run this script."
+		exit 1
+fi
+if ! command -v ipfs &> /dev/null; then
+		echo "ipfs (Kubo) could not be found, please install it to run this script."
+		exit 1
+fi
+
+# Change to the directory of this script
+cd "$(dirname "$0")"
+
+export IPFS_PATH=$PWD/ipfs
+
+sandbox="doupload-dir"
+
+guppy=("go" "run" ".." "--guppy-dir" "./$sandbox/storacha")
+
+certFile="$sandbox/cert.pem"
+keyFile="$sandbox/key.pem"
+outDir="$sandbox/out-kubo"
+
+if ! [[ -f "$sandbox/test-params.json" ]]; then
+	echo "Test parameters not found! Please run test/doupload first."
+	exit 1
+fi
+
+{
+  read -d '' account
+  read -d '' space
+  read -d '' rootCID
+	read -d '' dataDir
+} < <(jq --raw-output0 '.account, .space, .rootCID, .dataDir' "$sandbox/test-params.json")
+
+mprocsPort=4050
+gupwayPort=3000
+gupwayRoutingPort=3001
+
+rm -rf "$IPFS_PATH"
+ipfs init
+ipfs config --json Routing "$(jq -n \
+	--arg gupwayRoutingPort "$gupwayRoutingPort" \
+	'{"Type": "delegated", "DelegatedRouters": ["http://localhost:\($gupwayRoutingPort)"]}'
+)"
+ipfs config --bool Provide.Enabled false
+ipfs config --bool HTTPRetrieval.TLSInsecureSkipVerify true
+
+openssl req -x509 -newkey rsa:2048 -keyout "$keyFile" -out "$certFile" \
+  -days 36500 -nodes -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+	-quiet
+
+echo "📥 Retrieving data through gateway and ipfs"
+
+config=$(mktemp) && mv "$config" "$config.json" && config="$config.json"
+jq -n \
+	--arg mprocsServer "127.0.0.1:$mprocsPort" \
+	--arg guppy "${guppy[*]}" \
+	--arg gupwayPort "$gupwayPort" \
+	--arg certFile "$certFile" \
+	--arg keyFile "$keyFile" \
+	--arg gupwayRoutingPort "$gupwayRoutingPort" \
+	--arg space "$space" \
+	--arg rootCID "$rootCID" \
+	--arg outDir "$outDir" \
+	'{
+		server: "\($mprocsServer)",
+		procs: {
+			gupway: {
+				shell: "\($guppy) gateway serve --port=\($gupwayPort) --trusted=false --tls-cert=\($certFile) --tls-key=\($keyFile) --routing-port=\($gupwayRoutingPort) \($space)"
+			},
+			"kubo-daemon": {
+				shell: "sleep 2 && echo $SSL_CERT_FILE && mprocs --server \"\($mprocsServer)\" --ctl \"{c: select-proc, index: 1}\" && ipfs daemon"
+			},
+			"kubo-get": {
+				shell: "sleep 4 && mprocs --server \"\($mprocsServer)\" --ctl \"{c: select-proc, index: 2}\" && echo \"Getting /ipfs/\($rootCID)\" && ipfs get /ipfs/\($rootCID) -o \($outDir) && mprocs --server \"\($mprocsServer)\" --ctl \"{c: quit}\""
+			}
+		},
+	}' > "$config"
+
+mprocs --config "$config"
+rm "$config"
+
+echo "↔️ Verifying retrieved data matches original"
+diff -r "$dataDir" "$outDir"
+echo "✅ Data verified!"

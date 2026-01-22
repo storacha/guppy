@@ -40,6 +40,9 @@ import (
 const (
 	// port is the default port to run the gateway on.
 	port = 3000
+	// routingPort is the default port for the delegated routing server (HTTP, no TLS).
+	// Set to 0 to disable.
+	routingPort = 0
 	// blockCacheCapacity defines the default number of blocks to cache in memory.
 	// Blocks are typically <1MB due to IPFS chunking, so an upper bound for how
 	// much memory the cache will utilize is approximately this number multiplied
@@ -76,6 +79,12 @@ func init() {
 
 	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
+
+	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (enables HTTPS)")
+	cobra.CheckErr(viper.BindPFlag("gateway.tls-cert", serveCmd.Flags().Lookup("tls-cert")))
+
+	serveCmd.Flags().String("tls-key", "", "Path to TLS key file (enables HTTPS)")
+	cobra.CheckErr(viper.BindPFlag("gateway.tls-key", serveCmd.Flags().Lookup("tls-key")))
 }
 
 var serveCmd = &cobra.Command{
@@ -226,6 +235,41 @@ var serveCmd = &cobra.Command{
 			e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
 		}
 
+		// Routing server (HTTP, no TLS) - for local Kubo delegated routing
+		var r *echo.Echo
+		if cfg.Gateway.RoutingPort != 0 {
+			// Routing handlers - returns the gateway address for content retrieval
+			r = echo.New()
+			r.HideBanner = true
+			r.HidePort = true
+			r.Use(requestLogger(log))
+			r.Use(middleware.Recover())
+			r.GET("/routing/v1/providers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(fmt.Sprintf(`{
+					"Providers": [
+						{
+							"Schema": "peer",
+							"Protocols": ["transport-ipfs-gateway-http"],
+							"ID": "k51qzi5uqu5dj26lryc36mobgexftham120h0nu7o4ig6xu56y4h8wdvc4le6t",
+							"Addrs": ["/dns4/localhost/tcp/%d/tls/http"]
+						}
+					]
+				}`, cfg.Gateway.Port)))
+			})
+			r.GET("/routing/v1/peers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(fmt.Sprintf(`{
+					"Peers": [
+						{
+							"Schema": "peer",
+							"Protocols": ["transport-ipfs-gateway-http"],
+							"ID": "k51qzi5uqu5dj26lryc36mobgexftham120h0nu7o4ig6xu56y4h8wdvc4le6t",
+							"Addrs": ["/dns4/localhost/tcp/%d/tls/http"]
+						}
+					]
+				}`, cfg.Gateway.Port)))
+			})
+		}
+
 		// print banner after short delay to ensure it only appears if no errors
 		// occurred during startup
 		timer := time.NewTimer(time.Second)
@@ -239,22 +283,57 @@ var serveCmd = &cobra.Command{
 			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
 		}()
 
-		// shut down the server gracefully on context cancellation
-		go func() {
-			<-cmd.Context().Done()
-			cmd.Println("\nShutting down server...")
+		errCh := make(chan error, 2)
+
+		// shutdown shuts down all servers gracefully
+		shutdown := func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 			defer cancel()
 			if err := e.Shutdown(ctx); err != nil {
 				cmd.PrintErrf("shutting down server: %s", err.Error())
 			}
+			if r != nil {
+				if err := r.Shutdown(ctx); err != nil {
+					cmd.PrintErrf("shutting down routing server: %s", err.Error())
+				}
+			}
+		}
+
+		// Start routing server in background if configured
+		if r != nil {
+			go func() {
+				routingAddr := fmt.Sprintf(":%d", cfg.Gateway.RoutingPort)
+				log.Infow("starting routing server", "addr", routingAddr)
+				if err := r.Start(routingAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					errCh <- fmt.Errorf("routing server: %w", err)
+				}
+			}()
+		}
+
+		// Start main gateway server in background
+		go func() {
+			addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
+			if cfg.Gateway.TlsCert != "" && cfg.Gateway.TlsKey != "" {
+				if err := e.StartTLS(addr, cfg.Gateway.TlsCert, cfg.Gateway.TlsKey); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					errCh <- fmt.Errorf("gateway server: %w", err)
+				}
+			} else {
+				if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					errCh <- fmt.Errorf("gateway server: %w", err)
+				}
+			}
 		}()
 
-		addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
-		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("closing server: %w", err)
+		// Wait for context cancellation or server error
+		select {
+		case <-cmd.Context().Done():
+			cmd.Println("\nShutting down server...")
+			shutdown()
+			return nil
+		case err := <-errCh:
+			shutdown()
+			return err
 		}
-		return nil
 	},
 }
 
