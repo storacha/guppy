@@ -21,7 +21,9 @@ import (
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
+	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -40,13 +42,17 @@ var retrieveCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
-		repo, err := makeRepo(ctx)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
 		if err != nil {
 			return err
 		}
 		defer repo.Close()
 
-		c := cmdutil.MustGetClient(storePath)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		space, err := did.Parse(args[0])
 		if err != nil {
 			cmd.SilenceUsage = false

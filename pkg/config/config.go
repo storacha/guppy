@@ -1,8 +1,13 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"fmt"
+
+	"github.com/spf13/viper"
+)
 
 type Config struct {
+	Repo    RepoConfig    `mapstructure:"repo" toml:"repo"`
 	Gateway GatewayConfig `mapstructure:"gateway" toml:"gateway"`
 }
 
@@ -17,10 +22,10 @@ func (c Config) Validate() error {
 func Load[T Validatable]() (T, error) {
 	var out T
 	if err := viper.Unmarshal(&out); err != nil {
-		return out, err
+		return out, fmt.Errorf("unable to decode config, %w", err)
 	}
 	if err := out.Validate(); err != nil {
-		return out, err
+		return out, fmt.Errorf("invalid config, %w", err)
 	}
 	return out, nil
 }

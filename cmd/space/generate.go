@@ -15,6 +15,7 @@ import (
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -52,7 +53,12 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("generating signer for space: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		accounts, err := c.Accounts()
 		if err != nil {
 			return err

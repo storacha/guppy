@@ -11,6 +11,7 @@ import (
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var lsFlags struct {
@@ -42,7 +43,11 @@ var lsCmd = &cobra.Command{
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(storePath, client.WithAdditionalProofs(proofs...))
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, client.WithAdditionalProofs(proofs...))
 
 		var cursor *string
 		for {

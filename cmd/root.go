@@ -29,9 +29,7 @@ var (
 )
 
 var (
-	guppyDirPath string
-	storePath    string
-	cfgFile      string
+	cfgFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -40,9 +38,6 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		span := trace.SpanFromContext(cmd.Context())
 		setSpanAttributes(cmd, span)
-
-		// TODO replace this with config
-		storePath = guppyDirPath
 	},
 	// We handle errors ourselves when they're returned from ExecuteContext.
 	SilenceErrors: true,
@@ -61,12 +56,12 @@ func init() {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
 
-	rootCmd.PersistentFlags().StringVar(
-		&guppyDirPath,
-		"guppy-dir",
+	rootCmd.PersistentFlags().String(
+		"data-dir",
 		filepath.Join(homedir, ".storacha/guppy"),
 		"Directory containing the config and data store (default: ~/.storacha/guppy)",
 	)
+	cobra.CheckErr(viper.BindPFlag("repo.data_dir", rootCmd.PersistentFlags().Lookup("data-dir")))
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+configFilePath)
 

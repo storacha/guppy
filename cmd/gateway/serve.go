@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -78,10 +77,8 @@ var serveCmd = &cobra.Command{
 		}
 
 		indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
-		guppyDirPath, _ := cmd.Flags().GetString("guppy-dir")
-		storePath := filepath.Join(guppyDirPath, "store.json")
 
-		c := cmdutil.MustGetClient(storePath)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		allProofs, err := c.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		if err != nil {
 			return err

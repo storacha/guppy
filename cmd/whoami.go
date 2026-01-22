@@ -1,11 +1,10 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var whoamiCmd = &cobra.Command{
@@ -13,8 +12,13 @@ var whoamiCmd = &cobra.Command{
 	Short: "Print information about the local agent",
 	Long:  "Prints information about the local agent.",
 
-	Run: func(cmd *cobra.Command, args []string) {
-		c := cmdutil.MustGetClient(storePath)
-		fmt.Println(c.DID())
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		cmd.Println(c.DID())
+		return nil
 	},
 }
