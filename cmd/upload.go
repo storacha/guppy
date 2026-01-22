@@ -219,8 +219,6 @@ var uploadCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(uploadCmd)
-
 	uploadCmd.PersistentFlags().StringVar(
 		&uploadFlags.dbPath,
 		"db",

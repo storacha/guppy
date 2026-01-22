@@ -158,7 +158,7 @@ var generateCmd = &cobra.Command{
 }
 
 func init() {
-	SpaceCmd.AddCommand(generateCmd)
+	Cmd.AddCommand(generateCmd)
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
 }

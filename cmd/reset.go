@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
@@ -18,8 +19,4 @@ var resetCmd = &cobra.Command{
 		c := cmdutil.MustGetClient(storePath)
 		return c.Reset()
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(resetCmd)
 }

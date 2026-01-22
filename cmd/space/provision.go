@@ -52,5 +52,5 @@ var provisionCmd = &cobra.Command{
 }
 
 func init() {
-	SpaceCmd.AddCommand(provisionCmd)
+	Cmd.AddCommand(provisionCmd)
 }

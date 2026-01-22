@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
@@ -16,8 +17,4 @@ var whoamiCmd = &cobra.Command{
 		c := cmdutil.MustGetClient(storePath)
 		fmt.Println(c.DID())
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(whoamiCmd)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 )
 
@@ -51,5 +52,5 @@ var listCmd = &cobra.Command{
 
 func init() {
 	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
-	AccountCmd.AddCommand(listCmd)
+	Cmd.AddCommand(listCmd)
 }

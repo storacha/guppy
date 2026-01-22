@@ -252,7 +252,7 @@ func init() {
 	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
 
-	GatewayCmd.AddCommand(serveCmd)
+	Cmd.AddCommand(serveCmd)
 }
 
 func rootHandler(c echo.Context) error {

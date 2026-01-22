@@ -6,7 +6,7 @@ import (
 
 var StorePathP *string
 
-var AccountCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "account",
 	Short: "Manage accounts",
 }

@@ -7,7 +7,7 @@ import (
 
 var StorePathP *string
 
-var SpaceCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "space",
 	Short: "Manage spaces",
 	Long: wordwrap.WrapString(
