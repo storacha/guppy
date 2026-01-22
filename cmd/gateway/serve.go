@@ -98,7 +98,7 @@ var serveCmd = &cobra.Command{
 			space, err := did.Parse(arg)
 			if err != nil {
 				cmd.SilenceUsage = false
-				return fmt.Errorf("invalid space DID: %w", err)
+				return fmt.Errorf("invalid space DID: %q", arg)
 			}
 			if _, ok := authdSpaces[space]; !ok {
 				return fmt.Errorf("missing %q proof for space: %s", contentcap.RetrieveAbility, space)
