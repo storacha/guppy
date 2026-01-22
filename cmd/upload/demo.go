@@ -1,10 +1,11 @@
 //go:build dev
 
-package cmd
+package upload
 
 import (
 	"errors"
 
+	"github.com/dgraph-io/badger/badger/cmd"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,13 @@ import (
 var uploadDemoFlags struct {
 	alterMetadata bool
 	alterData     bool
+}
+
+func init() {
+	cmd.RootCmd.AddCommand(uploadDemoCmd)
+
+	uploadDemoCmd.Flags().BoolVar(&uploadDemoFlags.alterMetadata, "alter-metadata", false, "Cause an error during DAG generation by changing the modification time in a file on the \"filesystem\" between file opens.")
+	uploadDemoCmd.Flags().BoolVar(&uploadDemoFlags.alterData, "alter-data", false, "Cause an error during shard generation by changing the data in a file on the \"filesystem\" between file opens.")
 }
 
 var uploadDemoCmd = &cobra.Command{
@@ -49,11 +57,4 @@ var uploadDemoCmd = &cobra.Command{
 
 		return demo.Demo(ctx, repo, spaceName, uploadDemoFlags.alterMetadata, uploadDemoFlags.alterData)
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(uploadDemoCmd)
-
-	uploadDemoCmd.Flags().BoolVar(&uploadDemoFlags.alterMetadata, "alter-metadata", false, "Cause an error during DAG generation by changing the modification time in a file on the \"filesystem\" between file opens.")
-	uploadDemoCmd.Flags().BoolVar(&uploadDemoFlags.alterData, "alter-data", false, "Cause an error during shard generation by changing the data in a file on the \"filesystem\" between file opens.")
 }

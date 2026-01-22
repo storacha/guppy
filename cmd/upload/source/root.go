@@ -1,14 +1,16 @@
-package proof
+package source
 
 import (
 	"github.com/spf13/cobra"
 )
 
 var Cmd = &cobra.Command{
-	Use:   "proof",
-	Short: "Manage proofs",
+	Use: "source",
 }
 
 func init() {
-	Cmd.AddCommand(addCmd)
+	Cmd.AddCommand(
+		AddCmd,
+		ListCmd,
+	)
 }
