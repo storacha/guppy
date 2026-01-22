@@ -97,7 +97,6 @@ var serveCmd = &cobra.Command{
 		for _, arg := range args {
 			space, err := did.Parse(arg)
 			if err != nil {
-				cmd.SilenceUsage = false
 				return fmt.Errorf("invalid space DID: %q", arg)
 			}
 			if _, ok := authdSpaces[space]; !ok {
