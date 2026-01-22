@@ -45,8 +45,6 @@ const (
 	// much memory the cache will utilize is approximately this number multiplied
 	// by 1MB. e.g. capacity for 1,000 blocks ~= 1GB of memory.
 	blockCacheCapacity = 1000
-	// logLevel sets the default logging level for the gateway server.
-	logLevel = "warn"
 	// subdomainEnabled indicates whether to enable subdomain gateway mode, which
 	// is disabled by default.
 	subdomainEnabled = false
@@ -73,7 +71,10 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
-		cobra.CheckErr(logging.SetLogLevel("cmd/gateway", cfg.Gateway.LogLevel))
+
+		if cfg.Gateway.LogLevel != "" {
+			cobra.CheckErr(logging.SetLogLevel("cmd/gateway", cfg.Gateway.LogLevel))
+		}
 
 		indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
 		guppyDirPath, _ := cmd.Flags().GetString("guppy-dir")
@@ -248,7 +249,7 @@ func init() {
 	serveCmd.Flags().BoolP("trusted", "t", trustedEnabled, "Enable trusted gateway mode (allows deserialized responses)")
 	cobra.CheckErr(viper.BindPFlag("gateway.trusted", serveCmd.Flags().Lookup("trusted")))
 
-	serveCmd.Flags().String("log-level", logLevel, "Logging level for the gateway server (debug, info, warn, error)")
+	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
 
 	GatewayCmd.AddCommand(serveCmd)
