@@ -16,6 +16,10 @@ var infoFlags struct {
 	jsonOutput bool
 }
 
+func init() {
+	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
+}
+
 var infoCmd = &cobra.Command{
 	Use:   "info <space-did>",
 	Short: "Get information about a space",
@@ -65,9 +69,4 @@ var infoCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
-	Cmd.AddCommand(infoCmd)
 }

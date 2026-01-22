@@ -15,6 +15,10 @@ var listFlags struct {
 	jsonOutput bool
 }
 
+func init() {
+	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
+}
+
 var listCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
@@ -56,9 +60,4 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
-	Cmd.AddCommand(listCmd)
 }
