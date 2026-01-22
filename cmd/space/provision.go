@@ -56,7 +56,3 @@ var provisionCmd = &cobra.Command{
 		return nil
 	},
 }
-
-func init() {
-	Cmd.AddCommand(provisionCmd)
-}

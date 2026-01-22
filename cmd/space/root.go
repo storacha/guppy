@@ -13,3 +13,12 @@ var Cmd = &cobra.Command{
 			"contexts that can be shared with other users via delegations.",
 		80),
 }
+
+func init() {
+	Cmd.AddCommand(
+		generateCmd,
+		infoCmd,
+		listCmd,
+		provisionCmd,
+	)
+}

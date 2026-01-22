@@ -19,6 +19,7 @@ import (
 	"github.com/storacha/guppy/cmd/gateway"
 	"github.com/storacha/guppy/cmd/proof"
 	"github.com/storacha/guppy/cmd/space"
+	"github.com/storacha/guppy/cmd/upload"
 )
 
 var (
@@ -71,11 +72,11 @@ func init() {
 	rootCmd.AddCommand(
 		whoamiCmd,
 		versionCmd,
-		uploadCmd,
 		retrieveCmd,
 		resetCmd,
 		lsCmd,
 		loginCmd,
+		upload.Cmd,
 		space.Cmd,
 		proof.Cmd,
 		gateway.Cmd,
