@@ -15,6 +15,7 @@ import (
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var createFlags struct {
@@ -43,7 +44,11 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("at least one capability must be specified with --can")
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(createFlags.can))
 		proofs := map[string]delegation.Proof{}
 		for _, can := range createFlags.can {

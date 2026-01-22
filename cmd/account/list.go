@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var listFlags struct {
@@ -22,7 +23,11 @@ var listCmd = &cobra.Command{
 		"Lists all Storacha accounts currently logged in.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 
 		accounts, err := c.Accounts()
 		if err != nil {
