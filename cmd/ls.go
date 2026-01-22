@@ -19,6 +19,11 @@ var lsFlags struct {
 	showShards bool
 }
 
+func init() {
+	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
+	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
+}
+
 var lsCmd = &cobra.Command{
 	Use:     "ls <space-did>",
 	Aliases: []string{"list"},
@@ -76,9 +81,4 @@ var lsCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
-	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }

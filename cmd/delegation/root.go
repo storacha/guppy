@@ -6,3 +6,7 @@ var Cmd = &cobra.Command{
 	Use:   "delegation",
 	Short: "Manage delegations",
 }
+
+func init() {
+	Cmd.AddCommand(createCmd)
+}

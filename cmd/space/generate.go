@@ -38,6 +38,11 @@ var generateFlags struct {
 	provisionTo string
 }
 
+func init() {
+	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
+	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
+}
+
 var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a new space",
@@ -164,12 +169,6 @@ var generateCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	Cmd.AddCommand(generateCmd)
-	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
-	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
 }
 
 func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats]) (delegation.Delegation, error) {
