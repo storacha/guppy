@@ -707,7 +707,6 @@ func TestLocateMany(t *testing.T) {
 		// Verify the URLs are correct for each shard
 		require.ElementsMatch(t, ctestutil.Urls("https://storage.example.com/shard1/abc"), locations.Get(block1Hash)[0].Commitment.Nb().Location)
 		require.ElementsMatch(t, ctestutil.Urls("https://storage.example.com/shard1/abc"), locations.Get(block2Hash)[0].Commitment.Nb().Location)
-		// require.ElementsMatch(t, ctestutil.Urls("https://storage.example.com/shard2/def"), locations.Get(block3Hash)[0].Commitment.Nb().Location)
 
 		// Should still be only one query since all blocks were cached from first query
 		require.Len(t, mockIndexer.Queries, 1, "All blocks should be served from cache")
