@@ -24,7 +24,10 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := cmdutil.MustGetClient(*StorePathP)
 
-		accounts := c.Accounts()
+		accounts, err := c.Accounts()
+		if err != nil {
+			return err
+		}
 
 		if listFlags.jsonOutput {
 			// Build JSON array of account DIDs

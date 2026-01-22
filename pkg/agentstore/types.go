@@ -1,4 +1,4 @@
-package agentdata
+package agentstore
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multibase"
@@ -17,7 +16,26 @@ import (
 	"github.com/storacha/go-ucanto/principal"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	rsasigner "github.com/storacha/go-ucanto/principal/rsa/signer"
+	"github.com/storacha/go-ucanto/ucan"
 )
+
+type Store interface {
+	HasPrincipal() (bool, error)
+	Principal() (principal.Signer, error)
+	SetPrincipal(principal principal.Signer) error
+	Delegations() ([]delegation.Delegation, error)
+	AddDelegations(delegations ...delegation.Delegation) error
+	Reset() error
+	Query(queries ...CapabilityQuery) ([]delegation.Delegation, error)
+}
+
+// CapabilityQuery represents a query to filter proofs by capability.
+type CapabilityQuery struct {
+	// Can is the ability to match (e.g., "store/add"). Use "*" to match all abilities.
+	Can ucan.Ability
+	// With is the resource to match. Use "ucan:*" to match all resources.
+	With ucan.Resource
+}
 
 type AgentData struct {
 	Principal   principal.Signer
@@ -112,31 +130,24 @@ func (ad *AgentData) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (ad AgentData) WriteToFile(path string) error {
-	b, err := json.Marshal(ad)
-	if err != nil {
-		return err
-	}
-
-	// Ensure the directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-
-	return os.WriteFile(path, b, 0600)
-}
-
-func ReadFromFile(path string) (AgentData, error) {
+func readFromFile(path string) (AgentData, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return AgentData{}, err
+		return AgentData{}, fmt.Errorf("failed to read agent data from %q: %w", path, err)
 	}
 
 	var ad AgentData
 	err = json.Unmarshal(b, &ad)
 	if err != nil {
-		return AgentData{}, err
+		return AgentData{}, fmt.Errorf("failed to unmarshal agent data from %q: %w", path, err)
 	}
 	return ad, nil
+}
+
+func writeToFile(path string, data AgentData) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0600)
 }

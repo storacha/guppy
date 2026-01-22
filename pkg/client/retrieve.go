@@ -15,6 +15,8 @@ import (
 	"github.com/storacha/go-ucanto/core/receipt"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
+
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/locator"
 )
 
@@ -36,10 +38,13 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 		return nil, fmt.Errorf("parsing DID of storage provider `%s`: %w", locationCommitment.With(), err)
 	}
 
-	delegations := c.Proofs(CapabilityQuery{
+	delegations, err := c.Proofs(agentstore.CapabilityQuery{
 		Can:  contentcap.Retrieve.Can(),
 		With: space.String(),
 	})
+	if err != nil {
+		return nil, err
+	}
 	prfs := make([]delegation.Proof, 0, len(delegations))
 	for _, del := range delegations {
 		prfs = append(prfs, delegation.FromDelegation(del))

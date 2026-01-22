@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/dagfs"
@@ -81,16 +81,20 @@ var retrieveCmd = &cobra.Command{
 		}()
 
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
-			queries := make([]client.CapabilityQuery, 0, len(spaces))
+			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
-				queries = append(queries, client.CapabilityQuery{
+				queries = append(queries, agentstore.CapabilityQuery{
 					Can:  contentcap.Retrieve.Can(),
 					With: space.String(),
 				})
 			}
 
 			var pfs []delegation.Proof
-			for _, del := range c.Proofs(queries...) {
+			res, err := c.Proofs(queries...)
+			if err != nil {
+				return nil, err
+			}
+			for _, del := range res {
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 

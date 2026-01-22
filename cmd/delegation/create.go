@@ -12,8 +12,9 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+
 	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/agentstore"
 )
 
 var createFlags struct {
@@ -46,8 +47,11 @@ var createCmd = &cobra.Command{
 		caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(createFlags.can))
 		proofs := map[string]delegation.Proof{}
 		for _, can := range createFlags.can {
-			query := client.CapabilityQuery{Can: can, With: space.String()}
-			dlgs := c.Proofs(query)
+			query := agentstore.CapabilityQuery{Can: can, With: space.String()}
+			dlgs, err := c.Proofs(query)
+			if err != nil {
+				return err
+			}
 			if len(dlgs) == 0 {
 				return fmt.Errorf("no delegations found for ability %q with space %q", can, space.String())
 			}
