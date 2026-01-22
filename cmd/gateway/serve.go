@@ -93,7 +93,7 @@ var serveCmd = &cobra.Command{
 		}
 		log.Debugw("found authorizations in proofs", "spaces", slices.Collect(maps.Keys(authdSpaces)))
 
-		spaces := make([]did.DID, 0, len(args))
+		var spaces []did.DID
 		for _, arg := range args {
 			space, err := did.Parse(arg)
 			if err != nil {
@@ -105,6 +105,7 @@ var serveCmd = &cobra.Command{
 			spaces = append(spaces, space)
 		}
 		if len(spaces) == 0 {
+			log.Info("no space DIDs specified, serving content from all authorized spaces")
 			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 
