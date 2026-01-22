@@ -167,7 +167,7 @@ var serveCmd = &cobra.Command{
 			PublicGateways: pubGws,
 		}
 
-		blockStore := blockstore.NewBlockstore(arc.New(cfg.Gateway.BlockCacheCapacity))
+		blockStore := blockstore.NewIdStore(blockstore.NewBlockstore(arc.New(cfg.Gateway.BlockCacheCapacity)))
 		blockService := blockservice.New(blockStore, exchange)
 		backend, err := gateway.NewBlocksBackend(blockService)
 		cobra.CheckErr(err)
