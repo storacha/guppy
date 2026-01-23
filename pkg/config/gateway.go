@@ -5,6 +5,13 @@ import "errors"
 type GatewayConfig struct {
 	// Port is the port to run the gateway on.
 	Port int `mapstructure:"port" flag:"port" toml:"port"`
+	// TlsCert is the path to the TLS certificate file. If empty, TLS is disabled.
+	TlsCert string `mapstructure:"tls-cert" flag:"tls-cert" toml:"tls-cert"`
+	// TlsKey is the path to the TLS key file. If empty, TLS is disabled.
+	TlsKey string `mapstructure:"tls-key" flag:"tls-key" toml:"tls-key"`
+	// RoutingPort is the port to use for delegated routing requests. Use 0 to
+	// disable delegated routing.
+	RoutingPort int `mapstructure:"routing-port" flag:"routing-port" toml:"routing-port"`
 	// BlockCacheCapacity defines the number of blocks to cache in memory. Blocks
 	// are typically <1MB due to IPFS chunking, so an upper bound for how much
 	// memory the cache will utilize is approximately this number multiplied by
