@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -40,9 +39,6 @@ import (
 const (
 	// port is the default port to run the gateway on.
 	port = 3000
-	// routingPort is the default port for the delegated routing server (HTTP, no TLS).
-	// Set to 0 to disable.
-	routingPort = 0
 	// blockCacheCapacity defines the default number of blocks to cache in memory.
 	// Blocks are typically <1MB due to IPFS chunking, so an upper bound for how
 	// much memory the cache will utilize is approximately this number multiplied
@@ -68,6 +64,9 @@ func init() {
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
 	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
 
+	serveCmd.Flags().Int("tls-port", 0, "External TLS port advertised in routing responses (e.g. nginx listen port). 0 to omit /tls.")
+	cobra.CheckErr(viper.BindPFlag("gateway.tls-port", serveCmd.Flags().Lookup("tls-port")))
+
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
 
@@ -80,11 +79,6 @@ func init() {
 	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
 
-	serveCmd.Flags().String("tls-cert", "", "Path to TLS certificate file (enables HTTPS)")
-	cobra.CheckErr(viper.BindPFlag("gateway.tls-cert", serveCmd.Flags().Lookup("tls-cert")))
-
-	serveCmd.Flags().String("tls-key", "", "Path to TLS key file (enables HTTPS)")
-	cobra.CheckErr(viper.BindPFlag("gateway.tls-key", serveCmd.Flags().Lookup("tls-key")))
 }
 
 var serveCmd = &cobra.Command{
@@ -219,7 +213,7 @@ var serveCmd = &cobra.Command{
 
 		if cfg.Gateway.Subdomain.Enabled {
 			echoHandler := echo.WrapHandler(ipfsHandler)
-			e.GET("/*", func(c echo.Context) error {
+			subdomainHandler := func(c echo.Context) error {
 				r := c.Request()
 				host := r.Host
 				if xHost := r.Header.Get("X-Forwarded-Host"); xHost != "" {
@@ -229,45 +223,45 @@ var serveCmd = &cobra.Command{
 					return rootHandler(c)
 				}
 				return echoHandler(c)
-			})
+			}
+			e.GET("/*", subdomainHandler)
+			e.HEAD("/*", subdomainHandler)
 		} else {
 			e.GET("/", rootHandler)
+			e.HEAD("/", rootHandler)
 			e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
+			e.HEAD("/ipfs/*", echo.WrapHandler(ipfsHandler))
 		}
 
-		// Routing server (HTTP, no TLS) - for local Kubo delegated routing
-		var r *echo.Echo
-		if cfg.Gateway.RoutingPort != 0 {
-			// Routing handlers - returns the gateway address for content retrieval
-			r = echo.New()
-			r.HideBanner = true
-			r.HidePort = true
-			r.Use(requestLogger(log))
-			r.Use(middleware.Recover())
-			r.GET("/routing/v1/providers/*", func(c echo.Context) error {
-				return c.JSONBlob(http.StatusOK, []byte(fmt.Sprintf(`{
-					"Providers": [
-						{
-							"Schema": "peer",
-							"Protocols": ["transport-ipfs-gateway-http"],
-							"ID": "k51qzi5uqu5dj26lryc36mobgexftham120h0nu7o4ig6xu56y4h8wdvc4le6t",
-							"Addrs": ["/dns4/localhost/tcp/%d/tls/http"]
-						}
-					]
-				}`, cfg.Gateway.Port)))
+		// Routing handlers - returns the gateway address for content retrieval.
+		// Requires --tls-port to be set so the advertised address uses TLS,
+		// which Kubo requires for HTTP retrieval.
+		if cfg.Gateway.TlsPort != 0 {
+			routingAddr := fmt.Sprintf("/dns4/localhost/tcp/%d/tls/http", cfg.Gateway.TlsPort)
+			routingPeerJSON := fmt.Sprintf(`{
+				"Schema": "peer",
+				"Protocols": ["transport-ipfs-gateway-http"],
+				"ID": "bafzaajaiaejca43uw7awohd3btwofus44dawh6qzqup5goagryegshm3b4ixdhyv",
+				"Addrs": [%q]
+			}`, routingAddr)
+
+			e.GET("/routing/v1/providers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(
+					fmt.Sprintf(`{"Providers": [%s]}`, routingPeerJSON),
+				))
 			})
-			r.GET("/routing/v1/peers/*", func(c echo.Context) error {
-				return c.JSONBlob(http.StatusOK, []byte(fmt.Sprintf(`{
-					"Peers": [
-						{
-							"Schema": "peer",
-							"Protocols": ["transport-ipfs-gateway-http"],
-							"ID": "k51qzi5uqu5dj26lryc36mobgexftham120h0nu7o4ig6xu56y4h8wdvc4le6t",
-							"Addrs": ["/dns4/localhost/tcp/%d/tls/http"]
-						}
-					]
-				}`, cfg.Gateway.Port)))
+			e.GET("/routing/v1/peers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(
+					fmt.Sprintf(`{"Peers": [%s]}`, routingPeerJSON),
+				))
 			})
+		} else {
+			routingHandler := func(c echo.Context) error {
+				log.Warn("routing request received but --tls-port is not set; Kubo requires a TLS address")
+				return c.NoContent(http.StatusNotFound)
+			}
+			e.GET("/routing/v1/providers/*", routingHandler)
+			e.GET("/routing/v1/peers/*", routingHandler)
 		}
 
 		// print banner after short delay to ensure it only appears if no errors
@@ -283,57 +277,11 @@ var serveCmd = &cobra.Command{
 			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
 		}()
 
-		errCh := make(chan error, 2)
-
-		// shutdown shuts down all servers gracefully
-		shutdown := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			if err := e.Shutdown(ctx); err != nil {
-				cmd.PrintErrf("shutting down server: %s", err.Error())
-			}
-			if r != nil {
-				if err := r.Shutdown(ctx); err != nil {
-					cmd.PrintErrf("shutting down routing server: %s", err.Error())
-				}
-			}
+		addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
+		if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("closing server: %w", err)
 		}
-
-		// Start routing server in background if configured
-		if r != nil {
-			go func() {
-				routingAddr := fmt.Sprintf(":%d", cfg.Gateway.RoutingPort)
-				log.Infow("starting routing server", "addr", routingAddr)
-				if err := r.Start(routingAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					errCh <- fmt.Errorf("routing server: %w", err)
-				}
-			}()
-		}
-
-		// Start main gateway server in background
-		go func() {
-			addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
-			if cfg.Gateway.TlsCert != "" && cfg.Gateway.TlsKey != "" {
-				if err := e.StartTLS(addr, cfg.Gateway.TlsCert, cfg.Gateway.TlsKey); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					errCh <- fmt.Errorf("gateway server: %w", err)
-				}
-			} else {
-				if err := e.Start(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					errCh <- fmt.Errorf("gateway server: %w", err)
-				}
-			}
-		}()
-
-		// Wait for context cancellation or server error
-		select {
-		case <-cmd.Context().Done():
-			cmd.Println("\nShutting down server...")
-			shutdown()
-			return nil
-		case err := <-errCh:
-			shutdown()
-			return err
-		}
+		return nil
 	},
 }
 
