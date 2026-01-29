@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
 # Run nginx as a TLS-terminating reverse proxy in front of the guppy gateway.
+# Generates a self-signed certificate automatically.
 #
 # Usage:
-#   ./scripts/nginx-tls-proxy.sh --cert cert.pem --key key.pem
+#   ./scripts/nginx-tls-proxy.sh
 #
 # Options (also settable via environment variables):
-#   --cert, NGINX_TLS_CERT     Path to TLS certificate file (required)
-#   --key,  NGINX_TLS_KEY      Path to TLS key file (required)
 #   --listen, NGINX_LISTEN     HTTPS listen port (default: 3443)
 #   --upstream, NGINX_UPSTREAM Upstream HTTP port (default: 3000)
 
@@ -15,30 +14,24 @@ set -euo pipefail
 
 LISTEN="${NGINX_LISTEN:-3443}"
 UPSTREAM="${NGINX_UPSTREAM:-3000}"
-CERT="${NGINX_TLS_CERT:-}"
-KEY="${NGINX_TLS_KEY:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cert) CERT="$2"; shift 2 ;;
-    --key) KEY="$2"; shift 2 ;;
     --listen) LISTEN="$2"; shift 2 ;;
     --upstream) UPSTREAM="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-if [[ -z "$CERT" || -z "$KEY" ]]; then
-  echo "Error: --cert and --key are required" >&2
-  exit 1
-fi
-
-CERT="$(cd "$(dirname "$CERT")" && pwd)/$(basename "$CERT")"
-KEY="$(cd "$(dirname "$KEY")" && pwd)/$(basename "$KEY")"
-
 TMPDIR="$(mktemp -d)"
 
 trap 'rm -rf "$TMPDIR"' EXIT
+
+openssl req -x509 -newkey rsa:2048 \
+  -keyout "$TMPDIR/key.pem" -out "$TMPDIR/cert.pem" \
+  -days 1 -nodes -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+  -quiet
 
 cat > "$TMPDIR/nginx.conf" <<EOF
 daemon off;
@@ -55,10 +48,10 @@ http {
 
   server {
     listen $LISTEN ssl;
-		http2 on;
+    http2 on;
 
-    ssl_certificate     $CERT;
-    ssl_certificate_key $KEY;
+    ssl_certificate     $TMPDIR/cert.pem;
+    ssl_certificate_key $TMPDIR/key.pem;
 
     location / {
       proxy_pass http://127.0.0.1:$UPSTREAM;

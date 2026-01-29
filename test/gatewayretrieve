@@ -51,32 +51,10 @@ fi
 mprocsPort=4050
 gupwayPort=3000
 gupwayTlsPort=3443
-kuboApiPort=5001
 
 scriptsDir="$(cd ../scripts && pwd)"
 
 rm -rf "$IPFS_PATH"
-ipfs init
-ipfs config --json Addresses "$(jq -n \
-	--arg kuboApiPort "$kuboApiPort" \
-	'{
-    "API": "/ip4/127.0.0.1/tcp/\($kuboApiPort)",
-    "Gateway": [],
-    "Swarm": [],
-    "Announce": [],
-    "NoAnnounce": [],
-    "AppendAnnounce": []
-  }'
-)"
-ipfs config --json Routing "$(jq -n \
-	--arg gupwayPort "$gupwayPort" \
-	'{"Type": "delegated", "DelegatedRouters": ["http://localhost:\($gupwayPort)"]}'
-)"
-ipfs config --bool Provide.Enabled false
-ipfs config --bool AutoTLS.Enabled false
-ipfs config --bool HTTPRetrieval.TLSInsecureSkipVerify true
-ipfs config Plugins.Plugins.telemetry.Config.Mode off
-ipfs config --bool Discovery.MDNS.Enabled false
 
 openssl req -x509 -newkey rsa:2048 -keyout "$keyFile" -out "$certFile" \
   -days 36500 -nodes -subj "/CN=localhost" \
@@ -94,6 +72,7 @@ jq -n \
 	--arg certFile "$certFile" \
 	--arg keyFile "$keyFile" \
 	--arg scriptsDir "$scriptsDir" \
+	--arg ipfsPath "$IPFS_PATH" \
 	--arg space "$space" \
 	--arg rootCID "$rootCID" \
 	--arg outDir "$outDir" \
@@ -101,20 +80,17 @@ jq -n \
 		server: "\($mprocsServer)",
 		procs: {
 			gupway: {
-				shell: "\($guppy) gateway serve --log-level=info --port=\($gupwayPort) --tls-port=\($gupwayTlsPort) --trusted=false \($space)"
+				shell: "\($guppy) gateway serve --port=\($gupwayPort) --tls-port=\($gupwayTlsPort) --trusted=false \($space)"
 			},
 			"nginx-tls": {
-				shell: "sleep 1 && mprocs --server \"\($mprocsServer)\" --ctl \"{c: select-proc, index: 1}\" && \($scriptsDir)/nginx-tls-proxy.sh --cert \($certFile) --key \($keyFile) --listen \($gupwayTlsPort) --upstream \($gupwayPort)",
+				shell: "sleep 1 && \($scriptsDir)/nginx-tls-proxy.sh --cert \($certFile) --key \($keyFile) --listen \($gupwayTlsPort) --upstream \($gupwayPort)",
 				stop: "SIGTERM"
 			},
 			"kubo-daemon": {
-				shell: "sleep 2 && mprocs --server \"\($mprocsServer)\" --ctl \"{c: select-proc, index: 2}\" && ipfs daemon"
-			},
-			"kubo-daemon-logging": {
-				shell: "sleep 3 && ipfs log level bitswap/session info"
+				shell: "sleep 2 && \($scriptsDir)/kubo-gateway.sh --init --insecure --ipfs-path \($ipfsPath) --gateway-url http://localhost:\($gupwayPort)"
 			},
 			"kubo-get": {
-				shell: "sleep 4 && mprocs --server \"\($mprocsServer)\" --ctl \"{c: select-proc, index: 4}\" && echo \"Getting /ipfs/\($rootCID)\" && GOLOG_LOG_LEVEL=info ipfs get /ipfs/\($rootCID) -o \($outDir) && mprocs --server \"\($mprocsServer)\" --ctl \"{c: quit}\""
+				shell: "sleep 4 && echo \"Getting /ipfs/\($rootCID)\" && ipfs get /ipfs/\($rootCID) -o \($outDir) && mprocs --server \"\($mprocsServer)\" --ctl \"{c: quit}\""
 			}
 		},
 	}' > "$config"
