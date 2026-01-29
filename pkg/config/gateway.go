@@ -5,6 +5,10 @@ import "errors"
 type GatewayConfig struct {
 	// Port is the port to run the gateway on.
 	Port int `mapstructure:"port" flag:"port" toml:"port"`
+	// TlsPort is the external TLS port advertised in delegated routing
+	// responses. This is the port an external TLS proxy (e.g. nginx) listens
+	// on. Set to 0 to omit /tls from the advertised multiaddr.
+	TlsPort int `mapstructure:"tls-port" flag:"tls-port" toml:"tls-port"`
 	// BlockCacheCapacity defines the number of blocks to cache in memory. Blocks
 	// are typically <1MB due to IPFS chunking, so an upper bound for how much
 	// memory the cache will utilize is approximately this number multiplied by
