@@ -105,7 +105,7 @@ var serveCmd = &cobra.Command{
 			cobra.CheckErr(logging.SetLogLevel("cmd/gateway", cfg.Gateway.LogLevel))
 		}
 
-		indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
+		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		allProofs, err := c.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
