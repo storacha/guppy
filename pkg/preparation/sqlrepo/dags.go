@@ -209,7 +209,7 @@ func (r *Repo) nodeFinder(ctx context.Context) (nodeFinder, error) {
 			ufsdata,
 			path,
 			source_id,
-			offset
+			"offset"
 		FROM nodes
 		WHERE cid = ?
 		AND space_did = ?
@@ -246,7 +246,7 @@ type nodeCreator struct {
 
 func (r *Repo) nodeCreator(ctx context.Context) (nodeCreator, error) {
 	stmt, err := r.prepareStmt(ctx, `
-			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset)
+			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, "offset")
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 		`)
 
@@ -546,11 +546,11 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 	// key.
 
 	_, err := r.db.ExecContext(ctx,
-		fmt.Sprintf(`
+		r.rebind(fmt.Sprintf(`
 		UPDATE dag_scans
 		SET cid = NULL
 		WHERE cid IN (%s)
-		  AND space_did = ?`, placeholders),
+		  AND space_did = ?`, placeholders)),
 		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {
@@ -558,11 +558,11 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 	}
 
 	_, err = r.db.ExecContext(ctx,
-		fmt.Sprintf(`
+		r.rebind(fmt.Sprintf(`
 		UPDATE uploads
 		SET root_cid = NULL
 		WHERE root_cid IN (%s)
-		  AND space_did = ?`, placeholders),
+		  AND space_did = ?`, placeholders)),
 		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {
@@ -570,10 +570,10 @@ func (r *Repo) DeleteNodes(ctx context.Context, spaceDID did.DID, nodeCIDs []cid
 	}
 
 	_, err = r.db.ExecContext(ctx,
-		fmt.Sprintf(`
+		r.rebind(fmt.Sprintf(`
 		DELETE FROM nodes
 		WHERE cid IN (%s)
-		  AND space_did = ?`, placeholders),
+		  AND space_did = ?`, placeholders)),
 		append(dbCIDs, util.DbDID(&spaceDID))...,
 	)
 	if err != nil {

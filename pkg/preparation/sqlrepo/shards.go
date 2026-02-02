@@ -95,7 +95,7 @@ func (r *Repo) CreateShard(ctx context.Context, uploadID id.UploadID, size uint6
 }
 
 func (r *Repo) ShardsForUpload(ctx context.Context, uploadID id.UploadID) ([]*model.Shard, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.QueryContext(ctx, r.rebind(`
 		SELECT
 			id,
 			upload_id,
@@ -110,7 +110,7 @@ func (r *Repo) ShardsForUpload(ctx context.Context, uploadID id.UploadID) ([]*mo
 			location_inv,
 			pdp_accept_inv
 		FROM shards
-		WHERE upload_id = ?`,
+		WHERE upload_id = ?`),
 		uploadID,
 	)
 	if err != nil {
@@ -341,7 +341,7 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 
 func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
 	stmt, err := r.prepareStmt(ctx, `
-		SELECT cid, size, space_did, ufsdata, path, source_id, offset
+		SELECT cid, size, space_did, ufsdata, path, source_id, "offset"
 		FROM nodes
 		WHERE cid = ?
 		  AND space_did = ?
@@ -362,7 +362,7 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 				nodes.ufsdata,
 				nodes.path,
 				nodes.source_id,
-				nodes.offset
+				nodes."offset"
 			FROM node_uploads
 			JOIN nodes ON nodes.cid = node_uploads.node_cid
 			AND nodes.space_did = node_uploads.space_did
@@ -403,10 +403,10 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 			nodes.ufsdata,
 			nodes.path,
 			nodes.source_id,
-			nodes.offset,
+			nodes."offset",
 			node_uploads.shard_offset
 		FROM node_uploads
-		JOIN nodes ON nodes.cid = node_uploads.node_cid 
+		JOIN nodes ON nodes.cid = node_uploads.node_cid
 		AND nodes.space_did = node_uploads.space_did
 		WHERE node_uploads.shard_id = ?`)
 	if err != nil {

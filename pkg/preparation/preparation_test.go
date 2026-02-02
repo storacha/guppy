@@ -50,6 +50,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ctestutil "github.com/storacha/guppy/pkg/client/testutil"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
@@ -725,8 +726,7 @@ func BenchmarkExecuteUpload2GB(b *testing.B) {
 
 		// Create fresh database for each iteration
 		dbDir := b.TempDir()
-		dbPath := filepath.Join(dbDir, "guppy.db")
-		repo, err := preparation.OpenRepo(b.Context(), dbPath)
+		repo, err := preparation.OpenRepo(b.Context(), config.RepoConfig{Dir: dbDir})
 		require.NoError(b, err)
 
 		putClient := ctestutil.NewPutClient()

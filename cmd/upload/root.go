@@ -74,7 +74,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath(), sqlrepo.WithEventBus(eb))
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo, sqlrepo.WithEventBus(eb))
 		if err != nil {
 			return err
 		}
