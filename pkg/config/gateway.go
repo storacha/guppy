@@ -9,7 +9,7 @@ type GatewayConfig struct {
 	// by peers (e.g. via an nginx TLS proxy). Used to construct the multiaddr
 	// advertised in delegated routing responses. Must be an HTTPS URL.
 	// Leave empty to disable routing responses.
-	AdvertiseURL string `mapstructure:"advertise-url" flag:"advertise-url" toml:"advertise-url"`
+	AdvertiseURL string `mapstructure:"advertise_url" flag:"advertise-url" toml:"advertise_url"`
 	// BlockCacheCapacity defines the number of blocks to cache in memory. Blocks
 	// are typically <1MB due to IPFS chunking, so an upper bound for how much
 	// memory the cache will utilize is approximately this number multiplied by
