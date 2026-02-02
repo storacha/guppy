@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -64,8 +65,13 @@ func init() {
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
 	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
 
-	serveCmd.Flags().Int("tls-port", 0, "External TLS port advertised in routing responses (e.g. nginx listen port). 0 to omit /tls.")
-	cobra.CheckErr(viper.BindPFlag("gateway.tls-port", serveCmd.Flags().Lookup("tls-port")))
+	serveCmd.Flags().String("peer-url", "", wordwrap.WrapString(
+		"External HTTPS URL at which this gateway is reachable by peers (e.g. "+
+			"https://localhost:3443). Delegated routing responses served by the "+
+			"gateway will point to this URL as the location of blocks, which must be "+
+			"served over HTTPS.",
+		80))
+	cobra.CheckErr(viper.BindPFlag("gateway.peer-url", serveCmd.Flags().Lookup("peer-url")))
 
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
@@ -234,10 +240,22 @@ var serveCmd = &cobra.Command{
 		}
 
 		// Routing handlers - returns the gateway address for content retrieval.
-		// Requires --tls-port to be set so the advertised address uses TLS,
+		// Requires --peer-url to be set so the advertised address uses TLS,
 		// which Kubo requires for HTTP retrieval.
-		if cfg.Gateway.TlsPort != 0 {
-			routingAddr := fmt.Sprintf("/dns4/localhost/tcp/%d/tls/http", cfg.Gateway.TlsPort)
+		if cfg.Gateway.PeerURL != "" {
+			peerURL, err := url.Parse(cfg.Gateway.PeerURL)
+			if err != nil {
+				return fmt.Errorf("parsing --peer-url: %w", err)
+			}
+			if peerURL.Scheme != "https" {
+				return fmt.Errorf("--peer-url must be an HTTPS URL, got %q", cfg.Gateway.PeerURL)
+			}
+			host := peerURL.Hostname()
+			peerPort := peerURL.Port()
+			if peerPort == "" {
+				peerPort = "443"
+			}
+			routingAddr := fmt.Sprintf("/dns4/%s/tcp/%s/tls/http", host, peerPort)
 			routingPeerJSON := fmt.Sprintf(`{
 				"Schema": "peer",
 				"Protocols": ["transport-ipfs-gateway-http"],
@@ -257,7 +275,7 @@ var serveCmd = &cobra.Command{
 			})
 		} else {
 			routingHandler := func(c echo.Context) error {
-				log.Warn("routing request received but --tls-port is not set; Kubo requires a TLS address")
+				log.Warn("routing request received but --peer-url is not set; Kubo requires a TLS address")
 				return c.NoContent(http.StatusNotFound)
 			}
 			e.GET("/routing/v1/providers/*", routingHandler)

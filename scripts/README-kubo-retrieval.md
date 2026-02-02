@@ -36,9 +36,9 @@ Kubo discovers content providers by querying the gateway's delegated routing end
 Start the gateway (in one terminal):
 
 ```sh
-# The gateway needs to know the TLS port, as it will advertise that port to Kubo
-# through delegated routing.
-guppy gateway serve --port 3000 --tls-port 3443
+# The gateway needs to know its external HTTPS URL, as it will advertise that
+# address to Kubo through delegated routing.
+guppy gateway serve --port 3000 --peer-url https://localhost:3443
 ```
 
 Start the TLS proxy (in another terminal):

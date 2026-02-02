@@ -5,10 +5,11 @@ import "errors"
 type GatewayConfig struct {
 	// Port is the port to run the gateway on.
 	Port int `mapstructure:"port" flag:"port" toml:"port"`
-	// TlsPort is the external TLS port advertised in delegated routing
-	// responses. This is the port an external TLS proxy (e.g. nginx) listens
-	// on. Set to 0 to omit /tls from the advertised multiaddr.
-	TlsPort int `mapstructure:"tls-port" flag:"tls-port" toml:"tls-port"`
+	// PeerURL is the external HTTPS URL at which this gateway is reachable by
+	// peers (e.g. via an nginx TLS proxy). Used to construct the multiaddr
+	// advertised in delegated routing responses. Must be an HTTPS URL.
+	// Leave empty to disable routing responses.
+	PeerURL string `mapstructure:"peer-url" flag:"peer-url" toml:"peer-url"`
 	// BlockCacheCapacity defines the number of blocks to cache in memory. Blocks
 	// are typically <1MB due to IPFS chunking, so an upper bound for how much
 	// memory the cache will utilize is approximately this number multiplied by
