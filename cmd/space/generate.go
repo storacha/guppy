@@ -16,6 +16,7 @@ import (
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -39,6 +40,12 @@ var generateFlags struct {
 	outputKey   bool
 }
 
+func init() {
+	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
+	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
+	generateCmd.Flags().BoolVarP(&generateFlags.outputKey, "output-key", "k", false, "Output the space key (WARNING: sensitive data)")
+}
+
 var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a new space",
@@ -54,7 +61,7 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("generating signer for space: %w", err)
 		}
 
-				// Output space key if requested
+		// Output space key if requested
 		if generateFlags.outputKey {
 			// Export the private key as base64
 			keyBytes := space.Raw()
@@ -65,8 +72,16 @@ var generateCmd = &cobra.Command{
 			cmd.PrintErrln()
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
-		accounts := c.Accounts()
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		accounts, err := c.Accounts()
+		if err != nil {
+			return err
+		}
 
 		var provisionAccount did.DID
 		var grantAccount did.DID
@@ -168,14 +183,6 @@ var generateCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-
-func init() {
-	generateCmd.Flags().BoolVarP(&generateFlags.outputKey, "output-key", "k", false, "Output the space key (WARNING: sensitive data)")
-	SpaceCmd.AddCommand(generateCmd)
-	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
-	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
 }
 
 func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats]) (delegation.Delegation, error) {

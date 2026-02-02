@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/didmailto"
 )
 
@@ -43,7 +44,11 @@ var loginCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient(storePath)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 
 		authOk, err := c.RequestAccess(ctx, accountDid.String())
 		if err != nil {
@@ -74,8 +79,4 @@ var loginCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(loginCmd)
 }

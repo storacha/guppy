@@ -90,7 +90,7 @@ The uploader will pick up where it left off, quickly scanning to make sure it's 
 Guppy can then be used to retrieve content from the network. 
 
 ```sh
-$ retrieve <space> <content-path> <output-path>
+$ guppy retrieve <space> <content-path> <output-path>
 ```
 
 The `<content-path>` can take any of these forms:
@@ -103,6 +103,57 @@ The `<content-path>` can take any of these forms:
 
 The named content will be written to `<output-path>`.
 
+#### IPFS Gateway
+
+Guppy can be used to retrieve content from the network via an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/). Start an IPFS Gateway that serves content from a specific space with the following command:
+
+```sh
+$ guppy gateway serve <space> [flags...]
+```
+
+The gateway can be configured via command line flags, environment variables (prefix `GUPPY_GATEWAY_`) or a TOML file. Place the config file in your config directory e.g. `~/.config/guppy/config.toml` to have it loaded automatically or specify the location on the command line with `--config=/path/to/config.toml`.
+
+Defaults shown in the following configuration TOML template:
+
+```toml
+# Main configuration for the IPFS Gateway.
+[gateway]
+  # Number of blocks to retain in the in-memory cache. Blocks are typically <1MB
+  # due to IPFS chunking, so an upper bound for how much memory the cache will
+  # utilize is approximately the number specified here * 1MB. e.g. capacity for
+  # 1,000 blocks ~= 1GB of memory.
+  block_cache_capacity = 1000
+  # Logging level for the gateway server (debug, info, warn, error).
+  log_level = "warn"
+  # The port to run the gateway on.
+  port = 3000
+  # Run a trusted gateway. See Trusted vs. Trustless Gateways for more info:
+  # https://docs.ipfs.tech/reference/http/gateway/#trusted-vs-trustless
+  trusted = true
+
+# [Subdomain Gateway] configuration. Subdomain gateways encode the IPFS hash in
+# the domain instead of the path.
+#
+# If enabled, any `/ipfs/$id` paths will be permanently redirected to
+# `http(s)://$id.ipfs.$host/`.
+#
+# Using both paths and subdomains for a single domain is not supported for
+# security reasons ([Origin isolation]).
+# 
+# [Subdomain Gateway]: https://specs.ipfs.tech/http-gateways/subdomain-gateway/
+# [Origin isolation]: https://en.wikipedia.org/wiki/Same-origin_policy
+[gateway.subdomain]
+  # Enables or disables subdomain mode.
+  enabled = true
+  # Public host(s) your gateway may be accessed via. Note: one or more required
+  # when subdomain mode is enabled.
+  #
+  # e.g. "gateway.example.com"
+  #
+  # Serves content at `http(s)://bafyHash.ipfs.gateway.example.com` and will
+  # redirect `http(s)://gateway.example.com/ipfs/bafyHash` to it.
+  hosts = ["gateway.example.com"]
+```
 
 ## Client library
 

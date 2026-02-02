@@ -275,10 +275,6 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-
 	digestStateUpdateStmt, err := r.prepareStmt(ctx, `
 			UPDATE shards
 			SET digest_state_up_to = ?,

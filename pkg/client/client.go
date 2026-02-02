@@ -8,8 +8,8 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-ipld-prime/schema"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
-	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	uclient "github.com/storacha/go-ucanto/client"
+	rclient "github.com/storacha/go-ucanto/client/retrieval"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/invocation"
 	"github.com/storacha/go-ucanto/core/receipt"
@@ -19,16 +19,16 @@ import (
 	"github.com/storacha/go-ucanto/core/result/failure/datamodel"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
-	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	serverdatamodel "github.com/storacha/go-ucanto/server/datamodel"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
-	"github.com/storacha/guppy/pkg/agentdata"
-	"github.com/storacha/guppy/pkg/client/nodevalue"
-	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/client/nodevalue"
+	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
 var (
@@ -39,9 +39,9 @@ var (
 type Client struct {
 	connection       uclient.Connection
 	receiptsClient   *receiptclient.Client
-	data             agentdata.AgentData
-	saveFn           func(agentdata.AgentData) error
+	store            agentstore.Store
 	additionalProofs []delegation.Delegation
+	retrievalOpts    []rclient.Option
 }
 
 // NewClient creates a new client.
@@ -57,17 +57,13 @@ func NewClient(options ...Option) (*Client, error) {
 		}
 	}
 
-	if c.data.Principal == nil {
-		newPrincipal, err := ed25519.Generate()
+	// Create a default memory store if none provided
+	if c.store == nil {
+		store, err := agentstore.NewMemory()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("creating default memory store: %w", err)
 		}
-		c.data.Principal = newPrincipal
-	}
-
-	err := c.save()
-	if err != nil {
-		return nil, err
+		c.store = store
 	}
 
 	return &c, nil
@@ -75,10 +71,15 @@ func NewClient(options ...Option) (*Client, error) {
 
 // DID returns the DID of the client.
 func (c *Client) DID() did.DID {
-	if c.data.Principal == nil {
+	p, err := c.store.Principal()
+	if err != nil {
+		log.Warnf("getting principal: %s", err)
 		return did.DID{}
 	}
-	return c.data.Principal.DID()
+	if p == nil {
+		return did.DID{}
+	}
+	return p.DID()
 }
 
 // Connection returns the connection used by the client.
@@ -88,16 +89,12 @@ func (c *Client) Connection() uclient.Connection {
 
 // Issuer returns the issuing signer of the client.
 func (c *Client) Issuer() principal.Signer {
-	return c.data.Principal
-}
-
-// CapabilityQuery represents a query to filter proofs by capability.
-type CapabilityQuery struct {
-	// Can is the ability to match (e.g., "store/add").
-	Can ucan.Ability
-	// With is the resource to match. Omit or set to empty string to query for any
-	// resource. Note: using "ucan:*" will only match "ucan:*" resources.
-	With ucan.Resource
+	p, err := c.store.Principal()
+	if err != nil {
+		log.Warnf("getting principal: %s", err)
+		return nil
+	}
+	return p
 }
 
 // Proofs returns delegations that match the given capability queries.
@@ -111,209 +108,54 @@ type CapabilityQuery struct {
 // Additionally, this method includes relevant session proofs (ucan/attest delegations)
 // that attest to the returned authorizations.
 //
-// Returns both stored delegations (from c.data.Delegations) and additional proofs
+// Returns both stored delegations (from store) and additional proofs
 // (from c.additionalProofs).
-func (c *Client) Proofs(queries ...CapabilityQuery) []delegation.Delegation {
-	now := ucan.Now()
-
-	// Map to track which delegations to include (by CID string)
-	authorizations := make(map[string]delegation.Delegation)
-
-	// Combine stored delegations and additional proofs
-	allDelegations := make([]delegation.Delegation, 0, len(c.data.Delegations)+len(c.additionalProofs))
-	allDelegations = append(allDelegations, c.data.Delegations...)
-	allDelegations = append(allDelegations, c.additionalProofs...)
-
-	// First pass: collect matching authorizations (non-session-proof delegations)
-	for _, del := range allDelegations {
-		// Filter out expired delegations
-		if exp := del.Expiration(); exp != nil && *exp < now {
-			continue
-		}
-
-		// Filter out delegations that are not yet valid
-		if del.NotBefore() > now {
-			continue
-		}
-
-		// Skip session proofs in the first pass
-		if isSessionProof(del) {
-			continue
-		}
-
-		// If no queries, include all non-expired delegations
-		if len(queries) == 0 {
-			authorizations[del.Link().String()] = del
-			continue
-		}
-
-		// Check if delegation matches any query
-		if matchesAnyQuery(del, queries) {
-			authorizations[del.Link().String()] = del
-		}
-	}
-
-	// Second pass: collect session proofs that attest to the authorizations
-	sessionProofs := getSessionProofs(allDelegations, now)
-
-	for authCID := range authorizations {
-		if proofsForAuth, exists := sessionProofs[authCID]; exists {
-			// Add all session proofs for this authorization
-			for _, sessionProof := range proofsForAuth {
-				authorizations[sessionProof.Link().String()] = sessionProof
-			}
-		}
-	}
-
-	// Convert map to slice
-	result := make([]delegation.Delegation, 0, len(authorizations))
-	for _, del := range authorizations {
-		result = append(result, del)
-	}
-
-	return result
-}
-
-// matchesAnyQuery checks if a delegation's capabilities match any of the provided queries.
-func matchesAnyQuery(del delegation.Delegation, queries []CapabilityQuery) bool {
-	caps := del.Capabilities()
-
-	for _, query := range queries {
-		for _, cap := range caps {
-			if matchesCapability(cap, query) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// matchesCapability checks if a capability matches a query using the resolution logic
-// from go-ucanto's validator package.
-func matchesCapability(cap ucan.Capability[any], query CapabilityQuery) bool {
-	// Match ability
-	if !matchesAbility(cap.Can(), query.Can) {
-		return false
-	}
-
-	// Match resource
-	if !matchesResource(cap.With(), query.With) {
-		return false
-	}
-
-	return true
-}
-
-// matchesAbility checks if a delegation's ability can authorize the query ability.
-// A delegation matches if it has the same ability or a broader wildcard.
-// For example, searching for "upload/add" matches delegations with:
-//   - "upload/add" (exact match)
-//   - "upload/*" (namespace wildcard)
-//   - "*" (global wildcard)
-func matchesAbility(capAbility, queryAbility ucan.Ability) bool {
-	// Exact match
-	if capAbility == queryAbility {
-		return true
-	}
-
-	// Global wildcard in capability
-	if capAbility == "*" {
-		return true
-	}
-
-	// Namespace wildcard in capability (e.g., capability has "upload/*", query is "upload/add")
-	if len(capAbility) > 2 && capAbility[len(capAbility)-2:] == "/*" {
-		prefix := capAbility[:len(capAbility)-1] // "upload/"
-		return len(queryAbility) >= len(prefix) && queryAbility[:len(prefix)] == prefix
-	}
-
-	return false
-}
-
-// matchesResource checks if a capability's resource matches the query resource.
-// A capability matches if:
-//   - The resources match exactly
-//   - The capability has "ucan:*" (matches any query resource)
-//   - The query resource is empty (matches any capability resource)
-func matchesResource(capResource, queryResource ucan.Resource) bool {
-	return queryResource == "" || capResource == "ucan:*" || queryResource == capResource
-}
-
-// isSessionProof checks if a delegation is a session proof (ucan/attest capability).
-func isSessionProof(del delegation.Delegation) bool {
-	caps := del.Capabilities()
-	if len(caps) == 0 {
-		return false
-	}
-	// A session proof has a ucan/attest capability
-	return caps[0].Can() == ucancap.AttestAbility
-}
-
-// getSessionProofs organizes session proofs by the CID of the authorization they attest to.
-// Returns a map from authorization CID string to list of session proof delegations.
-func getSessionProofs(delegations []delegation.Delegation, now ucan.UTCUnixTimestamp) map[string][]delegation.Delegation {
-	proofs := make(map[string][]delegation.Delegation)
-
-	for _, del := range delegations {
-		if !isSessionProof(del) {
-			continue
-		}
-
-		// Filter out expired session proofs
-		if exp := del.Expiration(); exp != nil && *exp < now {
-			continue
-		}
-
-		// Filter out session proofs that are not yet valid
-		if del.NotBefore() > now {
-			continue
-		}
-
-		caps := del.Capabilities()
-		if len(caps) == 0 {
-			continue
-		}
-
-		// Parse the capability using the ucan/attest parser to get typed access
-		source := validator.NewSource(caps[0], del)
-		match, err := ucancap.Attest.Match(source)
-		if err != nil {
-			// If we can't parse it, skip it
-			continue
-		}
-
-		// Get the proof link from the typed capability
-		attestCap := match.Value()
-		proofCID := attestCap.Nb().Proof.String()
-		proofs[proofCID] = append(proofs[proofCID], del)
-	}
-
-	return proofs
-}
-
-// AddProofs adds the given delegations to the client's data and saves it.
-func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
-	c.data.Delegations = append(c.data.Delegations, delegations...)
-	return c.save()
-}
-
-func (c *Client) save() error {
-	if c.saveFn == nil {
-		return nil
-	}
-
-	err := c.saveFn(c.data)
+func (c *Client) Proofs(queries ...agentstore.CapabilityQuery) ([]delegation.Delegation, error) {
+	// Get delegations from store
+	storeDelegations, err := c.store.Query(queries...)
 	if err != nil {
-		return fmt.Errorf("saving client data: %w", err)
+		return nil, fmt.Errorf("querying delegations: %w", err)
 	}
-	return nil
+
+	// If no additional proofs, return store results directly
+	if len(c.additionalProofs) == 0 {
+		return storeDelegations, nil
+	}
+
+	// Query additional proofs using the same query logic
+	additionalResults := agentstore.Query(c.additionalProofs, queries)
+
+	// Combine results, deduplicating by CID
+	seen := make(map[string]struct{})
+	res := make([]delegation.Delegation, 0, len(storeDelegations)+len(additionalResults))
+
+	for _, del := range storeDelegations {
+		cidStr := del.Link().String()
+		if _, exists := seen[cidStr]; !exists {
+			seen[cidStr] = struct{}{}
+			res = append(res, del)
+		}
+	}
+
+	for _, del := range additionalResults {
+		cidStr := del.Link().String()
+		if _, exists := seen[cidStr]; !exists {
+			seen[cidStr] = struct{}{}
+			res = append(res, del)
+		}
+	}
+
+	return res, nil
 }
 
+// AddProofs adds the given delegations to the client's store.
+func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
+	return c.store.AddDelegations(delegations...)
+}
+
+// Reset clears all delegations from the store while preserving the principal.
 func (c *Client) Reset() error {
-	c.data = agentdata.AgentData{
-		Principal: c.Issuer(),
-	}
-	return c.save()
+	return c.store.Reset()
 }
 
 func invokeAndExecute[Caveats, Out any](
@@ -340,13 +182,17 @@ func invoke[Caveats, Out any](
 	options ...delegation.Option,
 ) (invocation.IssuedInvocation, error) {
 	var err error
-	pfs := make([]delegation.Proof, 0, len(c.Proofs(CapabilityQuery{
+	res, err := c.Proofs(agentstore.CapabilityQuery{
 		Can:  capParser.Can(),
 		With: with,
-	})))
+	})
+	if err != nil {
+		return nil, err
+	}
+	pfs := make([]delegation.Proof, 0, len(res))
 
 	var inv invocation.IssuedInvocation
-	for _, del := range c.Proofs() {
+	for _, del := range res {
 		pfs = append(pfs, delegation.FromDelegation(del))
 	}
 

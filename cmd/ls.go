@@ -8,13 +8,20 @@ import (
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var lsFlags struct {
 	proofsPath string
 	showShards bool
+}
+
+func init() {
+	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
+	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }
 
 var lsCmd = &cobra.Command{
@@ -41,7 +48,11 @@ var lsCmd = &cobra.Command{
 			proofs = append(proofs, proof)
 		}
 
-		c := cmdutil.MustGetClient(storePath, client.WithAdditionalProofs(proofs...))
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, client.WithAdditionalProofs(proofs...))
 
 		var cursor *string
 		for {
@@ -70,11 +81,4 @@ var lsCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(lsCmd)
-
-	lsCmd.Flags().StringVar(&lsFlags.proofsPath, "proof", "", "Path to archive (CAR) containing UCAN proofs for this operation.")
-	lsCmd.Flags().BoolVar(&lsFlags.showShards, "shards", false, "Display shard CIDs under each upload root.")
 }

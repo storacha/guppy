@@ -12,14 +12,22 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+
 	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var createFlags struct {
 	can        []string
 	expiration int
 	output     string
+}
+
+func init() {
+	createCmd.Flags().StringArrayVarP(&createFlags.can, "can", "c", nil, "One or more abilities to delegate.")
+	createCmd.Flags().IntVarP(&createFlags.expiration, "expiration", "e", 0, "Unix timestamp when the delegation is no longer valid. Zero indicates no expiration.")
+	createCmd.Flags().StringVarP(&createFlags.output, "output", "o", "", "Path to write the delegation CAR file to. If not specified, outputs to stdout.")
 }
 
 var createCmd = &cobra.Command{
@@ -42,12 +50,19 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("at least one capability must be specified with --can")
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(createFlags.can))
 		proofs := map[string]delegation.Proof{}
 		for _, can := range createFlags.can {
-			query := client.CapabilityQuery{Can: can, With: space.String()}
-			dlgs := c.Proofs(query)
+			query := agentstore.CapabilityQuery{Can: can, With: space.String()}
+			dlgs, err := c.Proofs(query)
+			if err != nil {
+				return err
+			}
 			if len(dlgs) == 0 {
 				return fmt.Errorf("no delegations found for ability %q with space %q", can, space.String())
 			}
@@ -91,11 +106,4 @@ var createCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	createCmd.Flags().StringArrayVarP(&createFlags.can, "can", "c", nil, "One or more abilities to delegate.")
-	createCmd.Flags().IntVarP(&createFlags.expiration, "expiration", "e", 0, "Unix timestamp when the delegation is no longer valid. Zero indicates no expiration.")
-	createCmd.Flags().StringVarP(&createFlags.output, "output", "o", "", "Path to write the delegation CAR file to. If not specified, outputs to stdout.")
-	DelegationCmd.AddCommand(createCmd)
 }

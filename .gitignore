@@ -4,3 +4,13 @@ dist/
 /*.gif
 /demo.db*
 guppy
+
+# Environment Files
+.env*
+
+# Config Files
+*.yaml
+*.toml
+
+# IDE's
+*.idea/

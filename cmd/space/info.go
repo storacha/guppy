@@ -7,11 +7,17 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/did"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var infoFlags struct {
 	jsonOutput bool
+}
+
+func init() {
+	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
 }
 
 var infoCmd = &cobra.Command{
@@ -32,7 +38,11 @@ var infoCmd = &cobra.Command{
 			return fmt.Errorf("invalid space DID: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 
 		result, err := c.SpaceInfo(cmd.Context(), spaceDID)
 		if err != nil {
@@ -59,9 +69,4 @@ var infoCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	infoCmd.Flags().BoolVar(&infoFlags.jsonOutput, "json", false, "Output in JSON format")
-	SpaceCmd.AddCommand(infoCmd)
 }
