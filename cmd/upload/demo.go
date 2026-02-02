@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/cmd/internal/upload/demo"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 )
 
@@ -40,7 +41,7 @@ var uploadDemoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		repo, err := preparation.OpenRepo(ctx, "demo.db")
+		repo, err := preparation.OpenRepo(ctx, config.RepoConfig{Dir: "."})
 		if err != nil {
 			return err
 		}

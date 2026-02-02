@@ -76,6 +76,13 @@ func init() {
 	)
 	cobra.CheckErr(viper.BindPFlag("repo.data_dir", rootCmd.PersistentFlags().Lookup("data-dir")))
 
+	rootCmd.PersistentFlags().String(
+		"database-url",
+		"",
+		"PostgreSQL connection URL (e.g., postgres://user:pass@host:5432/dbname). If set, uses PostgreSQL instead of SQLite. The database should not be shared with other processes.",
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.database_url", rootCmd.PersistentFlags().Lookup("database-url")))
+
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+configFilePath)
 
 	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")

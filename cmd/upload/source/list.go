@@ -24,7 +24,7 @@ var ListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo)
 		if err != nil {
 			return err
 		}
