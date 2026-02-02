@@ -96,6 +96,12 @@ jq -n \
 mprocs --config "$config"
 rm "$config"
 
+# Sometimes nginx doesn't exit when it should.
+if lsof -ti ":$gupwayTlsPort" > /dev/null; then
+	echo "Killing nginx processes still running on port $gupwayTlsPort"
+	lsof -ti ":$gupwayTlsPort" | xargs kill
+fi
+
 echo "↔️ Verifying retrieved data matches original"
 diff -r "$dataDir" "$outDir"
 echo "✅ Data verified!"
