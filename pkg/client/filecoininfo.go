@@ -14,26 +14,17 @@ func (c *Client) FilecoinInfo(ctx context.Context, space did.DID, piece ipld.Lin
 	caveats := filecoincap.InfoCaveats{
 		Piece: piece,
 	}
-
-	inv, err := invoke[filecoincap.InfoCaveats, filecoincap.InfoOk](
+	
+	res, _, err := invokeAndExecute[filecoincap.InfoCaveats, filecoincap.InfoOk](
+		ctx,
 		c,
 		filecoincap.Info,
 		space.String(),
 		caveats,
-	)
-	if err != nil {
-		return filecoincap.InfoOk{}, fmt.Errorf("invoking `filecoin/info`: %w", err)
-	}
-
-	res, _, err := execute[filecoincap.InfoCaveats, filecoincap.InfoOk](
-		ctx,
-		c,
-		filecoincap.Info,
-		inv,
 		filecoincap.InfoOkType(),
 	)
 	if err != nil {
-		return filecoincap.InfoOk{}, fmt.Errorf("executing `filecoin/info`: %w", err)
+		return filecoincap.InfoOk{}, fmt.Errorf("invokeAndExecute `filecoin/info`: %w", err)
 	}
 
 	infoOk, failErr := result.Unwrap(res)
