@@ -67,13 +67,13 @@ func init() {
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
 	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
 
-	serveCmd.Flags().String("peer-url", "", wordwrap.WrapString(
+	serveCmd.Flags().String("advertise-url", "", wordwrap.WrapString(
 		"External HTTPS URL at which this gateway is reachable by peers (e.g. "+
 			"https://localhost:3443). Delegated routing responses served by the "+
 			"gateway will point to this URL as the location of blocks, which must be "+
 			"served over HTTPS.",
 		80))
-	cobra.CheckErr(viper.BindPFlag("gateway.peer-url", serveCmd.Flags().Lookup("peer-url")))
+	cobra.CheckErr(viper.BindPFlag("gateway.advertise-url", serveCmd.Flags().Lookup("advertise-url")))
 
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
@@ -248,18 +248,18 @@ var serveCmd = &cobra.Command{
 		}
 
 		// Routing handlers - returns the gateway address for content retrieval.
-		// Requires --peer-url to be set so the advertised address uses TLS,
+		// Requires --advertise-url to be set so the advertised address uses TLS,
 		// which Kubo requires for HTTP retrieval.
-		if cfg.Gateway.PeerURL != "" {
-			peerURL, err := url.Parse(cfg.Gateway.PeerURL)
+		if cfg.Gateway.AdvertiseURL != "" {
+			advertiseURL, err := url.Parse(cfg.Gateway.AdvertiseURL)
 			if err != nil {
-				return fmt.Errorf("parsing --peer-url: %w", err)
+				return fmt.Errorf("parsing --advertise-url: %w", err)
 			}
-			if peerURL.Scheme != "https" {
-				return fmt.Errorf("--peer-url must be an HTTPS URL, got %q", cfg.Gateway.PeerURL)
+			if advertiseURL.Scheme != "https" {
+				return fmt.Errorf("--advertise-url must be an HTTPS URL, got %q", cfg.Gateway.AdvertiseURL)
 			}
-			host := peerURL.Hostname()
-			peerPort := peerURL.Port()
+			host := advertiseURL.Hostname()
+			peerPort := advertiseURL.Port()
 			if peerPort == "" {
 				peerPort = "443"
 			}
@@ -283,7 +283,7 @@ var serveCmd = &cobra.Command{
 			})
 		} else {
 			routingHandler := func(c echo.Context) error {
-				log.Warn("routing request received but --peer-url is not set; Kubo requires a TLS address")
+				log.Warn("routing request received but --advertise-url is not set; Kubo requires a TLS address")
 				return c.NoContent(http.StatusNotFound)
 			}
 			e.GET("/routing/v1/providers/*", routingHandler)

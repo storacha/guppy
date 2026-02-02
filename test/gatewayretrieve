@@ -78,7 +78,7 @@ jq -n \
 		server: "\($mprocsServer)",
 		procs: {
 			gupway: {
-				shell: "\($guppy) gateway serve --port=\($gupwayPort) --peer-url=\"https://localhost:\($gupwayTlsPort)\" --trusted=false \($space)"
+				shell: "\($guppy) gateway serve --port=\($gupwayPort) --advertise-url=\"https://localhost:\($gupwayTlsPort)\" --trusted=false \($space)"
 			},
 			"nginx-tls": {
 				shell: "sleep 1 && \($scriptsDir)/nginx-tls-proxy.sh --listen \($gupwayTlsPort) --upstream \($gupwayPort)",

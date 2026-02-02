@@ -11,25 +11,32 @@ This guide explains how to run a local [Kubo](https://github.com/ipfs/kubo) node
 
 ## Architecture
 
-<!-- This should be better -->
-```
-ipfs get /ipfs/<cid>
-       |
-       v
-  Kubo daemon
-       |
-       |  1. Delegated routing (HTTP)
-       |     GET /routing/v1/providers/<cid>
-       v
-  Guppy gateway (:3000)
-       |
-       |  2. Content retrieval (HTTPS)
-       |     GET /ipfs/<cid>?format=raw
-       v
-  TLS proxy (:3443) --> Guppy gateway (:3000)
+```mermaid
+sequenceDiagram
+    participant User
+    participant Kubo as Kubo<br/>daemon
+    participant Guppy as Guppy<br/>gateway<br/>(:3000)
+    participant nginx as nginx<br/>(:3443)
+
+    User->>Kubo: ipfs get /ipfs/bafy...
+    
+    Note over Kubo,Guppy: 1️⃣ "Who has bafy...?"
+    Kubo->>Guppy: GET http://localhost:3000/routing/v1/providers/bafy...
+    Note over Kubo,Guppy: 2️⃣ "This HTTP gateway 'peer' does."
+    Guppy-->>Kubo: [ { "ID": "…", "Protocols": ["transport-ipfs-gateway-http"], "Addrs": ["/dns4/localhost/tcp/3443/tls/http"] } ]
+    
+    Note over Kubo,nginx: 3️⃣ "Please give me bafy..."
+    Kubo->>nginx: GET https://localhost:3443/ipfs/bafy...
+    nginx->>Guppy: proxy request
+    Guppy-->>nginx: content response
+    nginx-->>Kubo: content response
 ```
 
-Kubo discovers content providers by querying the gateway's delegated routing endpoint over plain HTTP. The routing response directs Kubo to fetch blocks from the gateway's TLS address. Kubo requires HTTPS (with HTTP/2) for HTTP block retrieval, so a TLS proxy is required in front of the gateway, even if it uses a self-signed certificate (enabled with `--insecure`) for local use. With a valid certificate with a real CA root, this setup is suitable to use as a public Bitswap gateway.
+Kubo discovers content providers by querying the gateway's delegated routing endpoint over plain HTTP. The routing response directs Kubo to fetch blocks from the gateway's TLS address. Kubo requires HTTPS (with HTTP/2) for HTTP block retrieval, so a TLS proxy is required in front of the gateway.
+
+For local-only use, to provide incremental retrieval through a local Guppy instance, you can use a self-signed certificate and `--insecure` to disable certificate verification. However, the *routing* request can't disable TLS security, so for local use, it has to be made over plain HTTP—and luckily, the delegated routing system is okay with plain HTTP. Thus, in the local-only case, we need both an HTTP path and an HTTPS path to Guppy.
+
+This setup is suitable to use as a public Bitswap gateway, using a valid certificate with a real CA root. In that case, the routing requests can go through HTTPS as well, because the certificate is verifyable.
 
 ## Quick start (for a local gateway)
 
@@ -38,7 +45,7 @@ Start the gateway (in one terminal):
 ```sh
 # The gateway needs to know its external HTTPS URL, as it will advertise that
 # address to Kubo through delegated routing.
-guppy gateway serve --port 3000 --peer-url https://localhost:3443
+guppy gateway serve --port 3000 --advertise-url https://localhost:3443
 ```
 
 Start the TLS proxy (in another terminal):
