@@ -18,6 +18,8 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -108,6 +110,12 @@ var serveCmd = &cobra.Command{
 		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+
+		pub, err := crypto.UnmarshalEd25519PublicKey(c.Issuer().Verifier().Raw())
+		cobra.CheckErr(err)
+		peerID, err := peer.IDFromPublicKey(pub)
+		cobra.CheckErr(err)
+
 		allProofs, err := c.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		if err != nil {
 			return err
@@ -259,9 +267,9 @@ var serveCmd = &cobra.Command{
 			routingPeerJSON := fmt.Sprintf(`{
 				"Schema": "peer",
 				"Protocols": ["transport-ipfs-gateway-http"],
-				"ID": "bafzaajaiaejca43uw7awohd3btwofus44dawh6qzqup5goagryegshm3b4ixdhyv",
+				"ID": %q,
 				"Addrs": [%q]
-			}`, routingAddr)
+			}`, peer.ToCid(peerID), routingAddr)
 
 			e.GET("/routing/v1/providers/*", func(c echo.Context) error {
 				return c.JSONBlob(http.StatusOK, []byte(
