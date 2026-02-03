@@ -33,9 +33,18 @@ func spacesFromDelegations(dels []delegation.Delegation) ([]Space, error) {
 		// Extract name from facts
 		name := ""
 		for _, fact := range d.Facts() {
-			if n, ok := fact["name"].(string); ok {
-				name = n
-				break
+			if f, ok := fact["name"]; ok {
+				if n, ok := f.(string); ok {
+					name = n
+					break
+				}
+				// Use a generic interface check for AsString to be more robust
+				if node, ok := f.(interface{ AsString() (string, error) }); ok {
+					if n, err := node.AsString(); err == nil {
+						name = n
+						break
+					}
+				}
 			}
 		}
 
@@ -75,5 +84,9 @@ func spacesFromDelegations(dels []delegation.Delegation) ([]Space, error) {
 			}
 		}
 	}
-	return slices.Collect(maps.Values(spaces)), nil
+	res := slices.Collect(maps.Values(spaces))
+	slices.SortFunc(res, func(a, b Space) int {
+		return slices.Compare([]byte(a.DID.String()), []byte(b.DID.String()))
+	})
+	return res, nil
 }
