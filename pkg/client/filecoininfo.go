@@ -14,7 +14,7 @@ func (c *Client) FilecoinInfo(ctx context.Context, space did.DID, piece ipld.Lin
 	caveats := filecoincap.InfoCaveats{
 		Piece: piece,
 	}
-	
+
 	res, _, err := invokeAndExecute[filecoincap.InfoCaveats, filecoincap.InfoOk](
 		ctx,
 		c,
