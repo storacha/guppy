@@ -47,7 +47,7 @@ $ guppy login <account-email-address>
 
 This will ask Storacha to send you an email with a link to click. Clicking that link will confirm to the network that Guppy is authorized to act as you. You can log your identity into multiple accounts at once, if necessary.
 
-Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--guppy-dir`.
+Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--data-dir`.
 
 #### Spaces
 
@@ -77,7 +77,7 @@ $ guppy upload <space>
 > [!WARNING]  
 > Multiple sources for the same space are not well supported yet, mainly by the UI. This will improve shortly.
 
-The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--guppy-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
+The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--data-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
 
 ```sh
 $ guppy upload <space>

@@ -1,12 +1,12 @@
 package gateway
 
 import (
-	"context"
 	_ "embed"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +18,8 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -65,6 +67,14 @@ func init() {
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
 	cobra.CheckErr(viper.BindPFlag("gateway.port", serveCmd.Flags().Lookup("port")))
 
+	serveCmd.Flags().String("advertise-url", "", wordwrap.WrapString(
+		"External HTTPS URL at which this gateway is reachable by peers (e.g. "+
+			"https://localhost:3443). Delegated routing responses served by the "+
+			"gateway will point to this URL as the location of blocks, which must be "+
+			"served over HTTPS.",
+		80))
+	cobra.CheckErr(viper.BindPFlag("gateway.advertise-url", serveCmd.Flags().Lookup("advertise-url")))
+
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
 
@@ -76,6 +86,7 @@ func init() {
 
 	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
+
 }
 
 var serveCmd = &cobra.Command{
@@ -96,9 +107,15 @@ var serveCmd = &cobra.Command{
 			cobra.CheckErr(logging.SetLogLevel("cmd/gateway", cfg.Gateway.LogLevel))
 		}
 
-		indexHTML = []byte(strings.Replace(string(indexHTML), "{{.Version}}", build.Version, -1))
+		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+
+		pub, err := crypto.UnmarshalEd25519PublicKey(c.Issuer().Verifier().Raw())
+		cobra.CheckErr(err)
+		peerID, err := peer.IDFromPublicKey(pub)
+		cobra.CheckErr(err)
+
 		allProofs, err := c.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		if err != nil {
 			return err
@@ -210,7 +227,7 @@ var serveCmd = &cobra.Command{
 
 		if cfg.Gateway.Subdomain.Enabled {
 			echoHandler := echo.WrapHandler(ipfsHandler)
-			e.GET("/*", func(c echo.Context) error {
+			subdomainHandler := func(c echo.Context) error {
 				r := c.Request()
 				host := r.Host
 				if xHost := r.Header.Get("X-Forwarded-Host"); xHost != "" {
@@ -220,10 +237,57 @@ var serveCmd = &cobra.Command{
 					return rootHandler(c)
 				}
 				return echoHandler(c)
-			})
+			}
+			e.GET("/*", subdomainHandler)
+			e.HEAD("/*", subdomainHandler)
 		} else {
 			e.GET("/", rootHandler)
+			e.HEAD("/", rootHandler)
 			e.GET("/ipfs/*", echo.WrapHandler(ipfsHandler))
+			e.HEAD("/ipfs/*", echo.WrapHandler(ipfsHandler))
+		}
+
+		// Routing handlers - returns the gateway address for content retrieval.
+		// Requires --advertise-url to be set so the advertised address uses TLS,
+		// which Kubo requires for HTTP retrieval.
+		if cfg.Gateway.AdvertiseURL != "" {
+			advertiseURL, err := url.Parse(cfg.Gateway.AdvertiseURL)
+			if err != nil {
+				return fmt.Errorf("parsing --advertise-url: %w", err)
+			}
+			if advertiseURL.Scheme != "https" {
+				return fmt.Errorf("--advertise-url must be an HTTPS URL, got %q", cfg.Gateway.AdvertiseURL)
+			}
+			host := advertiseURL.Hostname()
+			peerPort := advertiseURL.Port()
+			if peerPort == "" {
+				peerPort = "443"
+			}
+			routingAddr := fmt.Sprintf("/dns4/%s/tcp/%s/tls/http", host, peerPort)
+			routingPeerJSON := fmt.Sprintf(`{
+				"Schema": "peer",
+				"Protocols": ["transport-ipfs-gateway-http"],
+				"ID": %q,
+				"Addrs": [%q]
+			}`, peer.ToCid(peerID), routingAddr)
+
+			e.GET("/routing/v1/providers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(
+					fmt.Sprintf(`{"Providers": [%s]}`, routingPeerJSON),
+				))
+			})
+			e.GET("/routing/v1/peers/*", func(c echo.Context) error {
+				return c.JSONBlob(http.StatusOK, []byte(
+					fmt.Sprintf(`{"Peers": [%s]}`, routingPeerJSON),
+				))
+			})
+		} else {
+			routingHandler := func(c echo.Context) error {
+				log.Warn("routing request received but --advertise-url is not set; Kubo requires a TLS address")
+				return c.NoContent(http.StatusNotFound)
+			}
+			e.GET("/routing/v1/providers/*", routingHandler)
+			e.GET("/routing/v1/peers/*", routingHandler)
 		}
 
 		// print banner after short delay to ensure it only appears if no errors
@@ -237,17 +301,6 @@ var serveCmd = &cobra.Command{
 				hosts = cfg.Gateway.Subdomain.Hosts
 			}
 			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
-		}()
-
-		// shut down the server gracefully on context cancellation
-		go func() {
-			<-cmd.Context().Done()
-			cmd.Println("\nShutting down server...")
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-			if err := e.Shutdown(ctx); err != nil {
-				cmd.PrintErrf("shutting down server: %s", err.Error())
-			}
 		}()
 
 		addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
