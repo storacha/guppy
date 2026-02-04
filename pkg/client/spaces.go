@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/ipld/go-ipld-prime/datamodel"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
@@ -50,6 +51,25 @@ func (s Space) Names() []string {
 		}
 	}
 	return names
+}
+
+// SpaceFact is a UCAN fact that gives a space a name.
+type SpaceFact struct {
+	name string
+}
+
+// NewSpaceFact creates a new SpaceFact with the given name.
+func NewSpaceFact(name string) SpaceFact {
+	return SpaceFact{name: name}
+}
+
+// ToIPLD implements ucan.FactBuilder.
+func (sf SpaceFact) ToIPLD() (map[string]datamodel.Node, error) {
+	nb := basicnode.Prototype.String.NewBuilder()
+	nb.AssignString(sf.name)
+	return map[string]datamodel.Node{
+		"name": nb.Build(),
+	}, nil
 }
 
 // Spaces returns all spaces we can act as.

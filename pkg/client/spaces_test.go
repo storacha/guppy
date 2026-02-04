@@ -3,8 +3,6 @@ package client_test
 import (
 	"testing"
 
-	"github.com/ipld/go-ipld-prime/datamodel"
-	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -14,18 +12,6 @@ import (
 
 	"github.com/storacha/guppy/pkg/client"
 )
-
-type nameFact struct {
-	name string
-}
-
-func (nf nameFact) ToIPLD() (map[string]datamodel.Node, error) {
-	nb := basicnode.Prototype.String.NewBuilder()
-	nb.AssignString(nf.name)
-	return map[string]datamodel.Node{
-		"name": nb.Build(),
-	}, nil
-}
 
 func TestSpaces(t *testing.T) {
 	t.Run("returns empty slice when no space proofs exist", func(t *testing.T) {
@@ -417,7 +403,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				nameFact{name: "my cool space"},
+				client.NewSpaceFact("my cool space"),
 			}),
 		)
 		require.NoError(t, err)
@@ -465,7 +451,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				nameFact{name: "name one"},
+				client.NewSpaceFact("name one"),
 			}),
 		)
 		require.NoError(t, err)
@@ -475,7 +461,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				nameFact{name: "name two"},
+				client.NewSpaceFact("name two"),
 			}),
 		)
 		require.NoError(t, err)
@@ -501,7 +487,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{specificCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				nameFact{name: "named space"},
+				client.NewSpaceFact("named space"),
 			}),
 		)
 		require.NoError(t, err)
