@@ -34,10 +34,9 @@ Guppy provides several enterprise-focused features that set it apart:
 
 * **Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
 
+## Usage
 
-### Usage
-
-#### Login
+### Login
 
 Guppy will automatically generate an identity for you. First, you'll need to authorize that identity to act on behalf of your account:
 
@@ -49,7 +48,7 @@ This will ask Storacha to send you an email with a link to click. Clicking that 
 
 Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--data-dir`.
 
-#### Spaces
+### Spaces
 
 Before you can upload data, you'll need a Storacha space to put it in. To create one:
 
@@ -65,7 +64,7 @@ You can get a list of all spaces you are known to have access to with:
 $ guppy space list
 ```
 
-#### Uploading
+### Uploading
 
 Guppy's uploader is where most of the work happens. To upload data, you first associate one or more **sources** with a **space**, and then run the uploader for that space.
 
@@ -85,9 +84,9 @@ $ guppy upload <space>
 
 The uploader will pick up where it left off, quickly scanning to make sure it's aware of any changes to the underlying source data. This ensures that the final root CID returned will point to a complete, consistent view of the data source.
 
-#### Retrieving
+### Retrieving
 
-Guppy can then be used to retrieve content from the network. 
+Guppy can then be used to retrieve content from the network.
 
 ```sh
 $ guppy retrieve <space> <content-path> <output-path>
@@ -103,7 +102,7 @@ The `<content-path>` can take any of these forms:
 
 The named content will be written to `<output-path>`.
 
-#### IPFS Gateway
+### IPFS Gateway
 
 Guppy can be used to retrieve content from the network via an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/). Start an IPFS Gateway that serves content from a specific space with the following command:
 
@@ -139,7 +138,7 @@ Defaults shown in the following configuration TOML template:
 #
 # Using both paths and subdomains for a single domain is not supported for
 # security reasons ([Origin isolation]).
-# 
+#
 # [Subdomain Gateway]: https://specs.ipfs.tech/http-gateways/subdomain-gateway/
 # [Origin isolation]: https://en.wikipedia.org/wiki/Same-origin_policy
 [gateway.subdomain]
