@@ -3,6 +3,7 @@ package space
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
@@ -39,11 +40,15 @@ var listCmd = &cobra.Command{
 		}
 
 		if listFlags.jsonOutput {
-			// Build JSON array of space DIDs
-			output := make([]map[string]string, 0, len(spaces))
+			type spaceOutput struct {
+				ID    string   `json:"id"`
+				Names []string `json:"names,omitempty"`
+			}
+			output := make([]spaceOutput, 0, len(spaces))
 			for _, space := range spaces {
-				output = append(output, map[string]string{
-					"id": space.DID().String(),
+				output = append(output, spaceOutput{
+					ID:    space.DID().String(),
+					Names: space.Names(),
 				})
 			}
 
@@ -53,8 +58,18 @@ var listCmd = &cobra.Command{
 			}
 			fmt.Println(string(jsonBytes))
 		} else {
+			fmt.Printf("%-60s %s\n", "SPACE", "NAME")
 			for _, space := range spaces {
-				fmt.Println(space.DID().String())
+				names := space.Names()
+				if len(names) > 0 {
+					quoted := make([]string, len(names))
+					for i, n := range names {
+						quoted[i] = fmt.Sprintf("%q", n)
+					}
+					fmt.Printf("%-60s %s\n", space.DID().String(), strings.Join(quoted, ", "))
+				} else {
+					fmt.Println(space.DID().String())
+				}
 			}
 		}
 
