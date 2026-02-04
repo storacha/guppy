@@ -34,11 +34,13 @@ var spaceAccess = []string{
 }
 
 var generateFlags struct {
+	name        string
 	grantTo     string
 	provisionTo string
 }
 
 func init() {
+	generateCmd.Flags().StringVar(&generateFlags.name, "name", "", "Name for the space (optional)")
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
 }
@@ -156,7 +158,7 @@ var generateCmd = &cobra.Command{
 			))
 		}
 
-		_, err = grant(cmd.Context(), c, space, grantAccount, capabilities)
+		_, err = grant(cmd.Context(), c, space, grantAccount, capabilities, generateFlags.name)
 		if err != nil {
 			return fmt.Errorf("granting capabilities: %w", err)
 		}
@@ -171,13 +173,21 @@ var generateCmd = &cobra.Command{
 	},
 }
 
-func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats]) (delegation.Delegation, error) {
+func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats], name string) (delegation.Delegation, error) {
 	// Create the delegation from space to account
+	opts := []delegation.Option{
+		delegation.WithNoExpiration(),
+	}
+	if name != "" {
+		opts = append(opts, delegation.WithFacts([]ucan.FactBuilder{
+			client.NewSpaceFact(name),
+		}))
+	}
 	delToStore, err := delegation.Delegate(
 		spaceSigner,
 		account,
 		capabilities,
-		delegation.WithNoExpiration(),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating delegation: %w", err)
