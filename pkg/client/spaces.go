@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/ipld/go-ipld-prime/datamodel"
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
@@ -25,6 +26,30 @@ func (s Space) DID() did.DID {
 // AccessProofs returns the delegations that grant access to this space.
 func (s Space) AccessProofs() []delegation.Delegation {
 	return s.accessProofs
+}
+
+// Names returns the names found in the facts of this space's access proofs.
+// Typically, a space has at most one name, but multiple names are possible.
+func (s Space) Names() []string {
+	var names []string
+	for _, proof := range s.accessProofs {
+		for _, fact := range proof.Facts() {
+			nameValue, ok := fact["name"]
+			if !ok {
+				continue
+			}
+			nameNode, ok := nameValue.(datamodel.Node)
+			if !ok {
+				continue
+			}
+			name, err := nameNode.AsString()
+			if err != nil {
+				continue
+			}
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // Spaces returns all spaces we can act as.

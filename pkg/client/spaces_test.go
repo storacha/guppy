@@ -3,6 +3,8 @@ package client_test
 import (
 	"testing"
 
+	"github.com/ipld/go-ipld-prime/datamodel"
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/core/delegation"
@@ -12,6 +14,18 @@ import (
 
 	"github.com/storacha/guppy/pkg/client"
 )
+
+type nameFact struct {
+	name string
+}
+
+func (nf nameFact) ToIPLD() (map[string]datamodel.Node, error) {
+	nb := basicnode.Prototype.String.NewBuilder()
+	nb.AssignString(nf.name)
+	return map[string]datamodel.Node{
+		"name": nb.Build(),
+	}, nil
+}
 
 func TestSpaces(t *testing.T) {
 	t.Run("returns empty slice when no space proofs exist", func(t *testing.T) {
@@ -392,5 +406,122 @@ func TestSpace(t *testing.T) {
 		require.Len(t, proofs, 1)
 		require.Equal(t, multiDel.Link(), proofs[0].Link())
 	})
-}
 
+	t.Run("Names returns names from access proof facts", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+		spaceDel, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				nameFact{name: "my cool space"},
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(spaceDel)
+		require.NoError(t, err)
+
+		spaces, err := c.Spaces()
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Equal(t, []string{"my cool space"}, spaces[0].Names())
+	})
+
+	t.Run("Names returns empty slice when no facts have names", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+		spaceDel, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(spaceDel)
+		require.NoError(t, err)
+
+		spaces, err := c.Spaces()
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Nil(t, spaces[0].Names())
+	})
+
+	t.Run("Names returns names from multiple access proofs", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+		issuer1 := testutil.Must(signer.Generate())(t)
+		issuer2 := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+
+		del1, err := delegation.Delegate(
+			issuer1,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				nameFact{name: "name one"},
+			}),
+		)
+		require.NoError(t, err)
+
+		del2, err := delegation.Delegate(
+			issuer2,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				nameFact{name: "name two"},
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(del1, del2)
+		require.NoError(t, err)
+
+		spaces, err := c.Spaces()
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.ElementsMatch(t, []string{"name one", "name two"}, spaces[0].Names())
+	})
+
+	t.Run("Names returns names from ucan:* delegation proofs", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+		issuer := testutil.Must(signer.Generate())(t)
+
+		// Create a delegation with a specific space and a name fact
+		specificCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+		specificDel, err := delegation.Delegate(
+			issuer,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{specificCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				nameFact{name: "named space"},
+			}),
+		)
+		require.NoError(t, err)
+
+		// Create a ucan:* delegation that includes the specific delegation as a proof
+		wildcardCap := ucan.NewCapability("space/*", "ucan:*", ucan.NoCaveats{})
+		wildcardDel, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{wildcardCap},
+			delegation.WithProof(delegation.FromDelegation(specificDel)),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(wildcardDel)
+		require.NoError(t, err)
+
+		spaces, err := c.Spaces()
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Contains(t, spaces[0].Names(), "named space")
+	})
+}
