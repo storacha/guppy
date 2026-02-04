@@ -33,6 +33,7 @@ func (s Space) AccessProofs() []delegation.Delegation {
 // Typically, a space has at most one name, but multiple names are possible.
 func (s Space) Names() []string {
 	var names []string
+	seen := map[string]struct{}{}
 	for _, proof := range s.accessProofs {
 		for _, fact := range proof.Facts() {
 			nameValue, ok := fact["name"]
@@ -47,6 +48,10 @@ func (s Space) Names() []string {
 			if err != nil {
 				continue
 			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
 			names = append(names, name)
 		}
 	}

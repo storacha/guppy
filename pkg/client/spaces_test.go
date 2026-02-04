@@ -510,4 +510,41 @@ func TestSpace(t *testing.T) {
 		require.Len(t, spaces, 1)
 		require.Contains(t, spaces[0].Names(), "named space")
 	})
+
+	t.Run("Names deduplicates identical names", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+		issuer1 := testutil.Must(signer.Generate())(t)
+		issuer2 := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+
+		del1, err := delegation.Delegate(
+			issuer1,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceFact("same name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		del2, err := delegation.Delegate(
+			issuer2,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceFact("same name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(del1, del2)
+		require.NoError(t, err)
+
+		spaces, err := c.Spaces()
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Equal(t, []string{"same name"}, spaces[0].Names())
+	})
 }
