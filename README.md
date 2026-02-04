@@ -155,6 +155,18 @@ Defaults shown in the following configuration TOML template:
   hosts = ["gateway.example.com"]
 ```
 
+### Using different networks
+
+Guppy can be pointed to different Storacha Forge networks (e.g. a testing network). You can do that by setting the following environment variables:
+
+```sh
+export STORACHA_SERVICE_URL="https://up.storacha.network"
+export STORACHA_SERVICE_DID="did:web:up.storacha.network"
+export STORACHA_RECEIPTS_URL="https://up.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://indexer.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:indexer.storacha.network"
+```
+
 ## Client library
 
 There are two ways to use the client library: you can get a user to interactively log in, or bring a prepared, authorized identity.
