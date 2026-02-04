@@ -31,6 +31,7 @@ import (
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
 
+	"github.com/storacha/guppy/cmd/gateway/banner"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/build"
@@ -300,7 +301,7 @@ var serveCmd = &cobra.Command{
 			if cfg.Gateway.Subdomain.Enabled {
 				hosts = cfg.Gateway.Subdomain.Hosts
 			}
-			cmd.Println(banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
+			cmd.Println(banner.Banner(build.Version, cfg.Gateway.Port, c.DID(), spaces, hosts))
 		}()
 
 		addr := fmt.Sprintf(":%d", cfg.Gateway.Port)
