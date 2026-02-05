@@ -65,7 +65,7 @@ func init() {
 		&guppyDirPath,
 		"guppy-dir",
 		"",
-		"Guupy Directory"
+		"Guupy Directory",
 	)
 	rootCmd.PersistentFlags().String(
 		"data-dir",
