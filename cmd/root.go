@@ -10,9 +10,8 @@ import (
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/storacha/guppy/cmd/unixfs"
 	"github.com/spf13/viper"
+	"github.com/storacha/guppy/cmd/unixfs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
@@ -32,7 +31,8 @@ var (
 )
 
 var (
-	cfgFile string
+	cfgFile      string
+	guppyDirPath string
 )
 
 var rootCmd = &cobra.Command{
@@ -59,7 +59,6 @@ func init() {
 		panic(fmt.Errorf("failed to get user home directory: %w", err))
 	}
 
-	unixfs.StorePathP = &storePath
 	rootCmd.AddCommand(unixfs.Cmd)
 	rootCmd.PersistentFlags().StringVar(
 		&guppyDirPath,
@@ -67,6 +66,9 @@ func init() {
 		"",
 		"Guupy Directory",
 	)
+
+	unixfs.StorePathP = &guppyDirPath
+
 	rootCmd.PersistentFlags().String(
 		"data-dir",
 		filepath.Join(homedir, ".storacha/guppy"),

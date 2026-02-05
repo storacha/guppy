@@ -55,8 +55,13 @@ var lsCmd = &cobra.Command{
 		c := cmdutil.MustGetClient(*StorePathP)
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
 
-		pfs := make([]delegation.Proof, 0, len(c.Proofs()))
-		for _, del := range c.Proofs() {
+		proofs, err := c.Proofs()
+		if err != nil {
+			return err
+		}
+
+		pfs := make([]delegation.Proof, 0, len(proofs))
+		for _, del := range proofs {
 			pfs = append(pfs, delegation.FromDelegation(del))
 		}
 
@@ -74,11 +79,11 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("delegating capability: %w", err)
 		}
 
-		loc := locator.NewIndexLocator(indexer, locator.AuthorizeRetrievalFunc(func(space did.DID) (delegation.Delegation, error) {
+		loc := locator.NewIndexLocator(indexer, locator.AuthorizeRetrievalFunc(func(spaces []did.DID) (delegation.Delegation, error) {
 			return retrievalAuth, nil
 		}))
 
-		dagSvc := dagservice.NewDAGService(loc, c, spaceDID)
+		dagSvc := dagservice.NewDAGService(loc, c, []did.DID{spaceDID})
 		dfs := dagfs.New(ctx, dagSvc, rootCid)
 
 		targetPath := subPath
