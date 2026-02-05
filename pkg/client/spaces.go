@@ -13,6 +13,25 @@ import (
 	"github.com/storacha/guppy/pkg/agentstore"
 )
 
+// SpaceNotFoundError is returned when no space is found with a given name.
+type SpaceNotFoundError struct {
+	Name string
+}
+
+func (e SpaceNotFoundError) Error() string {
+	return fmt.Sprintf("no space found with name %q", e.Name)
+}
+
+// MultipleSpacesFoundError is returned when multiple spaces are found with the same name.
+type MultipleSpacesFoundError struct {
+	Name   string
+	Spaces []Space
+}
+
+func (e MultipleSpacesFoundError) Error() string {
+	return fmt.Sprintf("multiple spaces found with name %q", e.Name)
+}
+
 // Space represents a space we can act as, along with the proofs that grant access.
 type Space struct {
 	did          did.DID
@@ -101,6 +120,24 @@ func (c *Client) SpacesNamed(name string) ([]Space, error) {
 		}
 	}
 	return result, nil
+}
+
+// SpaceNamed returns the single space with the given name. Returns
+// [SpaceNotFoundError] if no space is found. Returns [MultipleSpacesFoundError]
+// if multiple spaces have the same name.
+func (c *Client) SpaceNamed(name string) (Space, error) {
+	spaces, err := c.SpacesNamed(name)
+	if err != nil {
+		return Space{}, err
+	}
+
+	if len(spaces) == 0 {
+		return Space{}, SpaceNotFoundError{Name: name}
+	}
+	if len(spaces) > 1 {
+		return Space{}, MultipleSpacesFoundError{Name: name, Spaces: spaces}
+	}
+	return spaces[0], nil
 }
 
 func spacesFromDelegations(dels []delegation.Delegation) ([]Space, error) {
