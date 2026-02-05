@@ -66,11 +66,11 @@ func MustGetClientForNetwork(storePath string, networkName string, options ...cl
 
 	network := MustGetNetworkConfig(networkName)
 
-	// HTTP transport and CAR encoding
-	channel := uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(tracedHttpClient))
-	codec := car.NewOutboundCodec()
-
-	conn, err := uclient.NewConnection(network.UploadID, channel, uclient.WithOutboundCodec(codec))
+	conn, err := uclient.NewConnection(
+		network.UploadID,
+		uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(tracedHttpClient)),
+		uclient.WithOutboundCodec(car.NewOutboundCodec()),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
