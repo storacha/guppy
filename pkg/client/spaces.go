@@ -30,7 +30,8 @@ func (s Space) AccessProofs() []delegation.Delegation {
 }
 
 // Names returns the names found in the facts of this space's access proofs.
-// Typically, a space has at most one name, but multiple names are possible.
+// Typically, a space has only one name, but multiple names are possible if
+// there are multiple delegations providing access to the space.
 func (s Space) Names() []string {
 	var names []string
 	seen := map[string]struct{}{}
