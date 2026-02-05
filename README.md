@@ -47,7 +47,7 @@ $ guppy login <account-email-address>
 
 This will ask Storacha to send you an email with a link to click. Clicking that link will confirm to the network that Guppy is authorized to act as you. You can log your identity into multiple accounts at once, if necessary.
 
-Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--guppy-dir`.
+Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--data-dir`.
 
 #### Spaces
 

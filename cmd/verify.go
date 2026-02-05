@@ -22,7 +22,6 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/config"
-	"github.com/storacha/guppy/pkg/presets"
 	"github.com/storacha/guppy/pkg/verification"
 	indexing_service "github.com/storacha/indexing-service/pkg/client"
 )
@@ -45,16 +44,10 @@ var verifyCmd = &cobra.Command{
 			return fmt.Errorf("parsing root CID: %w", err)
 		}
 
-		network := presets.DefaultNetwork
 		networkName, _ := cmd.Flags().GetString("network")
-		for _, n := range presets.Networks {
-			if n.Name == networkName {
-				network = n
-				break
-			}
-		}
+		network := cmdutil.MustGetNetworkConfig(networkName)
 
-		guppy := cmdutil.MustGetClient(cfg.Repo.Dir)
+		guppy := cmdutil.MustGetClientForNetwork(cfg.Repo.Dir, networkName)
 		allProofs, err := guppy.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		if err != nil {
 			return err
@@ -154,7 +147,7 @@ var verifyCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(verifyCmd)
-	verifyCmd.Flags().StringP("network", "n", "forge", "Network to verify content retrieval from.")
+	verifyCmd.Flags().StringP("network", "n", "", "Network to verify content retrieval from.")
 	verifyCmd.Flags().MarkHidden("network")
 }
 

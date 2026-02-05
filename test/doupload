@@ -44,7 +44,7 @@ sandbox="doupload-dir"
 
 # Function wrapper to properly invoke guppy with word splitting
 guppy() {
-	go run .. --guppy-dir ./$sandbox/storacha "$@"
+	go run .. --data-dir ./$sandbox/storacha "$@"
 }
 
 dataDir="$sandbox/data"

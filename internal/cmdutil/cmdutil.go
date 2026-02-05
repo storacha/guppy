@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
 
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
-	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/transport/car"
@@ -22,13 +20,11 @@ import (
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client"
 	cdg "github.com/storacha/guppy/pkg/delegation"
+	"github.com/storacha/guppy/pkg/presets"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
-
-const defaultServiceName = "up.forge.storacha.network"
-const defaultIndexerName = "indexer.forge.storacha.network"
 
 // envSigner returns a principal.Signer from the environment variable
 // GUPPY_PRIVATE_KEY, if any.
@@ -48,6 +44,12 @@ var tracedHttpClient = &http.Client{
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. The storePath should be a directory path where agent data will be stored.
 func MustGetClient(storePath string, options ...client.Option) *client.Client {
+	return MustGetClientForNetwork(storePath, "", options...)
+}
+
+// MustGetClientForNetwork is like MustGetClient but allows specifying a network
+// configuration by name (which may be empty).
+func MustGetClientForNetwork(storePath string, networkName string, options ...client.Option) *client.Client {
 	store, err := agentstore.NewFs(storePath)
 	if err != nil {
 		log.Fatalf("creating agent store: %s", err)
@@ -62,13 +64,24 @@ func MustGetClient(storePath string, options ...client.Option) *client.Client {
 		}
 	}
 
+	network := MustGetNetworkConfig("")
+
+	// HTTP transport and CAR encoding
+	channel := uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(tracedHttpClient))
+	codec := car.NewOutboundCodec()
+
+	conn, err := uclient.NewConnection(network.UploadID, channel, uclient.WithOutboundCodec(codec))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	c, err := client.NewClient(
 		append(
 			[]client.Option{client.WithStore(store)},
 			append(
 				options,
-				client.WithConnection(MustGetConnection()),
-				client.WithReceiptsClient(receiptclient.New(MustGetReceiptsURL(), receiptclient.WithHTTPClient(tracedHttpClient))),
+				client.WithConnection(conn),
+				client.WithReceiptsClient(receiptclient.New(&network.ReceiptsURL, receiptclient.WithHTTPClient(tracedHttpClient))),
 			)...,
 		)...,
 	)
@@ -79,81 +92,23 @@ func MustGetClient(storePath string, options ...client.Option) *client.Client {
 	return c
 }
 
-func MustGetConnection() uclient.Connection {
-	// service URL & DID
-	serviceURLStr := os.Getenv("STORACHA_SERVICE_URL") // use env var preferably
-	if serviceURLStr == "" {
-		serviceURLStr = fmt.Sprintf("https://%s", defaultServiceName)
-	}
-
-	serviceURL, err := url.Parse(serviceURLStr)
+func MustGetNetworkConfig(name string) presets.NetworkConfig {
+	network, err := presets.GetNetworkConfig(name)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("getting network configuration: %w", err))
 	}
-
-	serviceDIDStr := os.Getenv("STORACHA_SERVICE_DID")
-	if serviceDIDStr == "" {
-		serviceDIDStr = fmt.Sprintf("did:web:%s", defaultServiceName)
-	}
-
-	servicePrincipal, err := did.Parse(serviceDIDStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// HTTP transport and CAR encoding
-	channel := uhttp.NewChannel(serviceURL, uhttp.WithClient(tracedHttpClient))
-	codec := car.NewOutboundCodec()
-
-	conn, err := uclient.NewConnection(servicePrincipal, channel, uclient.WithOutboundCodec(codec))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return conn
-}
-
-func MustGetReceiptsURL() *url.URL {
-	receiptsURLStr := os.Getenv("STORACHA_RECEIPTS_URL")
-	if receiptsURLStr == "" {
-		receiptsURLStr = fmt.Sprintf("https://%s/receipt", defaultServiceName)
-	}
-
-	receiptsURL, err := url.Parse(receiptsURLStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return receiptsURL
+	return network
 }
 
 func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
-	indexerURLStr := os.Getenv("STORACHA_INDEXING_SERVICE_URL") // use env var preferably
-	if indexerURLStr == "" {
-		indexerURLStr = fmt.Sprintf("https://%s", defaultIndexerName)
-	}
+	network := MustGetNetworkConfig("")
 
-	indexerURL, err := url.Parse(indexerURLStr)
+	client, err := indexclient.New(network.IndexerID, network.IndexerURL, indexclient.WithHTTPClient(tracedHttpClient))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	indexerDIDStr := os.Getenv("STORACHA_INDEXING_SERVICE_DID")
-	if indexerDIDStr == "" {
-		indexerDIDStr = fmt.Sprintf("did:web:%s", defaultIndexerName)
-	}
-
-	indexerPrincipal, err := did.Parse(indexerDIDStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	client, err := indexclient.New(indexerPrincipal, *indexerURL, indexclient.WithHTTPClient(tracedHttpClient))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return client, indexerPrincipal
+	return client, network.IndexerID
 }
 
 func MustGetProof(path string) delegation.Delegation {
