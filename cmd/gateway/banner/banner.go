@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/labstack/gommon/color"
 	"github.com/storacha/go-ucanto/did"
 )
 
@@ -91,7 +90,7 @@ func portal() string {
 func serverAndSpaces(id did.DID, spaces []did.DID, hosts []string) string {
 	var sb strings.Builder
 	sb.WriteString("Server ")
-	sb.WriteString(color.Grey(id.String()))
+	sb.WriteString(didStyle.Render(id.String()))
 
 	if len(spaces) > 1 {
 		sb.WriteString("\nSpaces")
@@ -101,14 +100,14 @@ func serverAndSpaces(id did.DID, spaces []did.DID, hosts []string) string {
 			} else {
 				sb.WriteString("       ")
 			}
-			sb.WriteString(color.Grey(space.String()))
+			sb.WriteString(didStyle.Render(space.String()))
 			if i < len(spaces)-1 {
 				sb.WriteString("\n")
 			}
 		}
 	} else {
 		sb.WriteString("\nSpace  ")
-		sb.WriteString(color.Grey(spaces[0].String()))
+		sb.WriteString(didStyle.Render(spaces[0].String()))
 	}
 
 	if len(hosts) > 0 {
@@ -120,14 +119,14 @@ func serverAndSpaces(id did.DID, spaces []did.DID, hosts []string) string {
 				} else {
 					sb.WriteString("       ")
 				}
-				sb.WriteString(color.Grey(domain))
+				sb.WriteString(didStyle.Render(domain))
 				if i < len(hosts)-1 {
 					sb.WriteString("\n")
 				}
 			}
 		} else {
 			sb.WriteString("\nHost   ")
-			sb.WriteString(color.Grey(hosts[0]))
+			sb.WriteString(didStyle.Render(hosts[0]))
 		}
 	}
 	return sb.String()
