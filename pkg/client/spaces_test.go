@@ -403,7 +403,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("my cool space"),
+				client.NewSpaceNameFact("my cool space"),
 			}),
 		)
 		require.NoError(t, err)
@@ -451,7 +451,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("name one"),
+				client.NewSpaceNameFact("name one"),
 			}),
 		)
 		require.NoError(t, err)
@@ -461,7 +461,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("name two"),
+				client.NewSpaceNameFact("name two"),
 			}),
 		)
 		require.NoError(t, err)
@@ -487,7 +487,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{specificCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("named space"),
+				client.NewSpaceNameFact("named space"),
 			}),
 		)
 		require.NoError(t, err)
@@ -524,7 +524,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("same name"),
+				client.NewSpaceNameFact("same name"),
 			}),
 		)
 		require.NoError(t, err)
@@ -534,7 +534,7 @@ func TestSpace(t *testing.T) {
 			c.Issuer(),
 			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
 			delegation.WithFacts([]ucan.FactBuilder{
-				client.NewSpaceFact("same name"),
+				client.NewSpaceNameFact("same name"),
 			}),
 		)
 		require.NoError(t, err)

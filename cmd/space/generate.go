@@ -180,7 +180,7 @@ func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, 
 	}
 	if name != "" {
 		opts = append(opts, delegation.WithFacts([]ucan.FactBuilder{
-			client.NewSpaceFact(name),
+			client.NewSpaceNameFact(name),
 		}))
 	}
 	delToStore, err := delegation.Delegate(

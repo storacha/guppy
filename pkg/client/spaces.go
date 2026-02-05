@@ -59,18 +59,18 @@ func (s Space) Names() []string {
 	return names
 }
 
-// SpaceFact is a UCAN fact that gives a space a name.
-type SpaceFact struct {
+// SpaceNameFact is a UCAN fact that gives a space a name.
+type SpaceNameFact struct {
 	name string
 }
 
-// NewSpaceFact creates a new SpaceFact with the given name.
-func NewSpaceFact(name string) SpaceFact {
-	return SpaceFact{name: name}
+// NewSpaceNameFact creates a new SpaceNameFact with the given name.
+func NewSpaceNameFact(name string) SpaceNameFact {
+	return SpaceNameFact{name: name}
 }
 
 // ToIPLD implements ucan.FactBuilder.
-func (sf SpaceFact) ToIPLD() (map[string]datamodel.Node, error) {
+func (sf SpaceNameFact) ToIPLD() (map[string]datamodel.Node, error) {
 	nb := basicnode.Prototype.String.NewBuilder()
 	nb.AssignString(sf.name)
 	return map[string]datamodel.Node{
