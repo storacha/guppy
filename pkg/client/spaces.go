@@ -12,8 +12,14 @@ import (
 	"github.com/storacha/guppy/pkg/agentstore"
 )
 
+// Space represents a Storacha space.
+type Space struct {
+	DID  did.DID
+	Name string
+}
+
 // Spaces returns all spaces we can act as.
-func (c *Client) Spaces() ([]did.DID, error) {
+func (c *Client) Spaces() ([]Space, error) {
 	res, err := c.Proofs(agentstore.CapabilityQuery{Can: "space/*"})
 	if err != nil {
 		return nil, err
@@ -21,9 +27,27 @@ func (c *Client) Spaces() ([]did.DID, error) {
 	return spacesFromDelegations(res)
 }
 
-func spacesFromDelegations(dels []delegation.Delegation) ([]did.DID, error) {
-	spaces := map[did.DID]struct{}{}
+func spacesFromDelegations(dels []delegation.Delegation) ([]Space, error) {
+	spaces := map[did.DID]Space{}
 	for _, d := range dels {
+		// Extract name from facts
+		name := ""
+		for _, fact := range d.Facts() {
+			if f, ok := fact["name"]; ok {
+				if n, ok := f.(string); ok {
+					name = n
+					break
+				}
+				// Use a generic interface check for AsString to be more robust
+				if node, ok := f.(interface{ AsString() (string, error) }); ok {
+					if n, err := node.AsString(); err == nil {
+						name = n
+						break
+					}
+				}
+			}
+		}
+
 		for _, cap := range d.Capabilities() {
 			if cap.Can() == "ucan/attest" {
 				continue
@@ -45,16 +69,24 @@ func spacesFromDelegations(dels []delegation.Delegation) ([]did.DID, error) {
 					return nil, fmt.Errorf("getting spaces from proofs: %w", err)
 				}
 				for _, s := range spacesFromProofs {
-					spaces[s] = struct{}{}
+					if existing, ok := spaces[s.DID]; !ok || existing.Name == "" {
+						spaces[s.DID] = s
+					}
 				}
 			} else {
-				space, err := did.Parse(cap.With())
+				spaceDID, err := did.Parse(cap.With())
 				if err != nil {
 					return nil, fmt.Errorf("parsing space DID %s: %w", cap.With(), err)
 				}
-				spaces[space] = struct{}{}
+				if existing, ok := spaces[spaceDID]; !ok || existing.Name == "" {
+					spaces[spaceDID] = Space{DID: spaceDID, Name: name}
+				}
 			}
 		}
 	}
-	return slices.Collect(maps.Keys(spaces)), nil
+	res := slices.Collect(maps.Values(spaces))
+	slices.SortFunc(res, func(a, b Space) int {
+		return slices.Compare([]byte(a.DID.String()), []byte(b.DID.String()))
+	})
+	return res, nil
 }

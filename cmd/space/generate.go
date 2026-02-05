@@ -2,12 +2,15 @@ package space
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"slices"
 
+	basicnode "github.com/ipld/go-ipld-prime/node/basic"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
@@ -36,11 +39,15 @@ var spaceAccess = []string{
 var generateFlags struct {
 	grantTo     string
 	provisionTo string
+	outputKey   bool
+	name        string
 }
 
 func init() {
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
+	generateCmd.Flags().BoolVarP(&generateFlags.outputKey, "output-key", "k", false, "Output the space key (WARNING: sensitive data)")
+	generateCmd.Flags().StringVar(&generateFlags.name, "name", "", "Name of the space")
 }
 
 var generateCmd = &cobra.Command{
@@ -56,6 +63,17 @@ var generateCmd = &cobra.Command{
 		if err != nil {
 			cmd.SilenceUsage = false
 			return fmt.Errorf("generating signer for space: %w", err)
+		}
+
+		// Output space key if requested
+		if generateFlags.outputKey {
+			// Export the private key as base64
+			keyBytes := space.Raw()
+			keyBase64 := base64.StdEncoding.EncodeToString(keyBytes)
+			cmd.PrintErrln("\nWARNING: This is your space private key. Keep it secret and secure!")
+			cmd.PrintErrln("Space Key (base64):")
+			fmt.Println(keyBase64)
+			cmd.PrintErrln()
 		}
 
 		cfg, err := config.Load[config.Config]()
@@ -156,7 +174,7 @@ var generateCmd = &cobra.Command{
 			))
 		}
 
-		_, err = grant(cmd.Context(), c, space, grantAccount, capabilities)
+		_, err = grant(cmd.Context(), c, space, grantAccount, capabilities, generateFlags.name)
 		if err != nil {
 			return fmt.Errorf("granting capabilities: %w", err)
 		}
@@ -171,13 +189,19 @@ var generateCmd = &cobra.Command{
 	},
 }
 
-func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats]) (delegation.Delegation, error) {
+func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, account did.DID, capabilities []ucan.Capability[ucan.NoCaveats], name string) (delegation.Delegation, error) {
+	var opts []delegation.Option
+	opts = append(opts, delegation.WithNoExpiration())
+	if name != "" {
+		opts = append(opts, delegation.WithFacts([]ucan.FactBuilder{nameFact{Name: name}}))
+	}
+
 	// Create the delegation from space to account
 	delToStore, err := delegation.Delegate(
 		spaceSigner,
 		account,
 		capabilities,
-		delegation.WithNoExpiration(),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating delegation: %w", err)
@@ -187,7 +211,7 @@ func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, 
 		spaceSigner,
 		c.Issuer().DID(),
 		capabilities,
-		delegation.WithNoExpiration(),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating delegation: %w", err)
@@ -202,4 +226,14 @@ func grant(ctx context.Context, c *client.Client, spaceSigner principal.Signer, 
 	}
 
 	return delToStore, nil
+}
+
+type nameFact struct {
+	Name string
+}
+
+func (n nameFact) ToIPLD() (map[string]ipld.Node, error) {
+	return map[string]ipld.Node{
+		"name": basicnode.NewString(n.Name),
+	}, nil
 }

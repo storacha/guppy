@@ -43,7 +43,8 @@ var listCmd = &cobra.Command{
 			output := make([]map[string]string, 0, len(spaces))
 			for _, space := range spaces {
 				output = append(output, map[string]string{
-					"id": space.DID().String(),
+					"id":   space.DID.String(),
+					"name": space.Name,
 				})
 			}
 
@@ -54,7 +55,11 @@ var listCmd = &cobra.Command{
 			fmt.Println(string(jsonBytes))
 		} else {
 			for _, space := range spaces {
-				fmt.Println(space.DID().String())
+				if space.Name != "" {
+					fmt.Printf("%s (%s)\n", space.DID, space.Name)
+				} else {
+					fmt.Println(space.DID)
+				}
 			}
 		}
 
