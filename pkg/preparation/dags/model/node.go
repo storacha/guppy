@@ -282,11 +282,20 @@ func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 		}
 		return unixFSNode, nil
 	case cid.Raw:
+		var p string
+		var o uint64
+		if path != nil {
+			p = *path
+		}
+		if offset != nil {
+			o = *offset
+		}
+
 		rawNode := &RawNode{
 			node:     node,
-			path:     *path,
+			path:     p,
 			sourceID: sourceID,
-			offset:   *offset,
+			offset:   o,
 		}
 		if err := validateRawNode(rawNode); err != nil {
 			return nil, err
