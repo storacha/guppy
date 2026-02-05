@@ -64,6 +64,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(
 		&guppyDirPath,
 		"guppy-dir",
+		"",
+		"Guupy Directory"
+	)
 	rootCmd.PersistentFlags().String(
 		"data-dir",
 		filepath.Join(homedir, ".storacha/guppy"),
