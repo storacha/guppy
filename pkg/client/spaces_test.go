@@ -548,3 +548,181 @@ func TestSpace(t *testing.T) {
 		require.Equal(t, []string{"same name"}, spaces[0].Names())
 	})
 }
+
+func TestSpacesNamed(t *testing.T) {
+	t.Run("returns empty slice when no spaces exist", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+
+		spaces, err := c.SpacesNamed("some name")
+		require.NoError(t, err)
+		require.Empty(t, spaces)
+	})
+
+	t.Run("returns empty slice when no spaces have the given name", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+		spaceDel, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("some name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(spaceDel)
+		require.NoError(t, err)
+
+		spaces, err := c.SpacesNamed("different name")
+		require.NoError(t, err)
+		require.Empty(t, spaces)
+	})
+
+	t.Run("returns space with matching name", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+		spaceDel, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("my space"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(spaceDel)
+		require.NoError(t, err)
+
+		spaces, err := c.SpacesNamed("my space")
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Equal(t, space.DID(), spaces[0].DID())
+	})
+
+	t.Run("returns multiple spaces with same name", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space1 := testutil.Must(signer.Generate())(t)
+		space2 := testutil.Must(signer.Generate())(t)
+
+		spaceCap1 := ucan.NewCapability("space/*", space1.DID().String(), ucan.NoCaveats{})
+		del1, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap1},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("shared name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		spaceCap2 := ucan.NewCapability("space/*", space2.DID().String(), ucan.NoCaveats{})
+		del2, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap2},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("shared name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(del1, del2)
+		require.NoError(t, err)
+
+		spaces, err := c.SpacesNamed("shared name")
+		require.NoError(t, err)
+		require.Len(t, spaces, 2)
+
+		spaceDIDs := []string{spaces[0].DID().String(), spaces[1].DID().String()}
+		require.ElementsMatch(t, []string{space1.DID().String(), space2.DID().String()}, spaceDIDs)
+	})
+
+	t.Run("filters to only spaces with matching name", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space1 := testutil.Must(signer.Generate())(t)
+		space2 := testutil.Must(signer.Generate())(t)
+
+		spaceCap1 := ucan.NewCapability("space/*", space1.DID().String(), ucan.NoCaveats{})
+		del1, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap1},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("target name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		spaceCap2 := ucan.NewCapability("space/*", space2.DID().String(), ucan.NoCaveats{})
+		del2, err := delegation.Delegate(
+			c.Issuer(),
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap2},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("other name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(del1, del2)
+		require.NoError(t, err)
+
+		spaces, err := c.SpacesNamed("target name")
+		require.NoError(t, err)
+		require.Len(t, spaces, 1)
+		require.Equal(t, space1.DID(), spaces[0].DID())
+	})
+
+	t.Run("matches space with multiple names", func(t *testing.T) {
+		c := testutil.Must(client.NewClient())(t)
+		space := testutil.Must(signer.Generate())(t)
+		issuer1 := testutil.Must(signer.Generate())(t)
+		issuer2 := testutil.Must(signer.Generate())(t)
+
+		spaceCap := ucan.NewCapability("space/*", space.DID().String(), ucan.NoCaveats{})
+
+		del1, err := delegation.Delegate(
+			issuer1,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("first name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		del2, err := delegation.Delegate(
+			issuer2,
+			c.Issuer(),
+			[]ucan.Capability[ucan.NoCaveats]{spaceCap},
+			delegation.WithFacts([]ucan.FactBuilder{
+				client.NewSpaceNameFact("second name"),
+				client.NewSpaceNameFact("third name"),
+			}),
+		)
+		require.NoError(t, err)
+
+		err = c.AddProofs(del1, del2)
+		require.NoError(t, err)
+
+		spaces1, err := c.SpacesNamed("first name")
+		require.NoError(t, err)
+		spaces2, err := c.SpacesNamed("second name")
+		require.NoError(t, err)
+		spaces3, err := c.SpacesNamed("third name")
+		require.NoError(t, err)
+
+		require.Len(t, spaces1, 1)
+		require.Equal(t, space.DID(), spaces1[0].DID())
+		require.Len(t, spaces2, 1)
+		require.Equal(t, space.DID(), spaces2[0].DID())
+		require.Len(t, spaces3, 1)
+		require.Equal(t, space.DID(), spaces3[0].DID())
+	})
+}

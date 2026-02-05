@@ -87,6 +87,22 @@ func (c *Client) Spaces() ([]Space, error) {
 	return spacesFromDelegations(res)
 }
 
+// SpacesNamed returns all spaces with the given name.
+func (c *Client) SpacesNamed(name string) ([]Space, error) {
+	spaces, err := c.Spaces()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []Space
+	for _, space := range spaces {
+		if slices.Contains(space.Names(), name) {
+			result = append(result, space)
+		}
+	}
+	return result, nil
+}
+
 func spacesFromDelegations(dels []delegation.Delegation) ([]Space, error) {
 	// Map from space DID to the delegations that grant access to it
 	spaceProofs := map[string][]delegation.Delegation{}
