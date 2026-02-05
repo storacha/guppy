@@ -64,7 +64,7 @@ func MustGetClientForNetwork(storePath string, networkName string, options ...cl
 		}
 	}
 
-	network := MustGetNetworkConfig("")
+	network := MustGetNetworkConfig(networkName)
 
 	// HTTP transport and CAR encoding
 	channel := uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(tracedHttpClient))
@@ -101,7 +101,11 @@ func MustGetNetworkConfig(name string) presets.NetworkConfig {
 }
 
 func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
-	network := MustGetNetworkConfig("")
+	return MustGetIndexClientForNetwork("")
+}
+
+func MustGetIndexClientForNetwork(networkName string) (*indexclient.Client, ucan.Principal) {
+	network := MustGetNetworkConfig(networkName)
 
 	client, err := indexclient.New(network.IndexerID, network.IndexerURL, indexclient.WithHTTPClient(tracedHttpClient))
 	if err != nil {
