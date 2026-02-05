@@ -36,6 +36,12 @@ type ContentRetrieveProofGetterFunc func(space did.DID) ([]delegation.Proof, err
 // the indexer by returning a delegation that can be used for retrieval.
 type AuthorizeIndexerRetrievalFunc func() (delegation.Delegation, error)
 
+// ShardFinder finds shards and their locations for content retrieval.
+type ShardFinder interface {
+	FindShard(ctx context.Context, slice multihash.Multihash) (multihash.Multihash, blobindex.Position, error)
+	FindLocations(ctx context.Context, shard multihash.Multihash) ([]Location, error)
+}
+
 // VerifyDAGRetrieval verifies the retrieval of a DAG starting from the given
 // root CID. It uses the provided indexer to find shards and locations, and
 // retrieves blocks while verifying their integrity. The function returns a
@@ -45,7 +51,7 @@ func VerifyDAGRetrieval(
 	ctx context.Context,
 	id principal.Signer,
 	getProofs ContentRetrieveProofGetterFunc,
-	indexer *Indexer,
+	indexer ShardFinder,
 	root cid.Cid,
 ) iter.Seq2[VerifiedBlock, error] {
 	// list of already verified blocks to avoid redundant work
@@ -105,7 +111,7 @@ type Origin struct {
 // indexer. It also performs integrity checks on the retrieved blocks. Note:
 // the getProofs function can be nil, in which case no authorization will be
 // sent for retrievals.
-func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetrieveProofGetterFunc, indexer *Indexer, links []cid.Cid) iter.Seq2[BlockStat, error] {
+func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetrieveProofGetterFunc, indexer ShardFinder, links []cid.Cid) iter.Seq2[BlockStat, error] {
 	return func(yield func(BlockStat, error) bool) {
 		for _, link := range links {
 			slice := link.Hash()

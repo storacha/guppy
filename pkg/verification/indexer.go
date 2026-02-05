@@ -14,12 +14,16 @@ import (
 	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
-	indexing_service "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
 
+// IndexingServiceClient is the interface for querying the indexing service.
+type IndexingServiceClient interface {
+	QueryClaims(ctx context.Context, query types.Query) (types.QueryResult, error)
+}
+
 type Indexer struct {
-	client        *indexing_service.Client
+	client        IndexingServiceClient
 	authorize     AuthorizeIndexerRetrievalFunc
 	indexCache    *IndexCache
 	locationCache *LocationCache
@@ -28,7 +32,7 @@ type Indexer struct {
 // NewIndexer creates a new Indexer with the given indexing service client and
 // authorization function. Note: the authorize function can be nil, in which
 // case no authorization will be sent for indexer queries.
-func NewIndexer(client *indexing_service.Client, authorize AuthorizeIndexerRetrievalFunc) *Indexer {
+func NewIndexer(client IndexingServiceClient, authorize AuthorizeIndexerRetrievalFunc) *Indexer {
 	return &Indexer{
 		client:        client,
 		authorize:     authorize,
