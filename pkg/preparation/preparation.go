@@ -10,11 +10,12 @@ import (
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/pkg/bus"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/scans"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
-	"github.com/storacha/guppy/pkg/preparation/shards"
 	"github.com/storacha/guppy/pkg/preparation/sources"
 	sourcesmodel "github.com/storacha/guppy/pkg/preparation/sources/model"
 	"github.com/storacha/guppy/pkg/preparation/spaces"
@@ -34,7 +35,7 @@ type Repo interface {
 	sources.Repo
 	scans.Repo
 	dags.Repo
-	shards.Repo
+	blobs.Repo
 }
 
 type StorachaClient = storacha.Client
@@ -46,22 +47,24 @@ type API struct {
 	Sources sources.API
 	DAGs    dags.API
 	Scans   scans.API
+	Bus     bus.Bus
 }
 
 // Option is an option configuring the API.
 type Option func(cfg *config) error
 
 type config struct {
-	getLocalFSForPathFn    func(path string) (fs.FS, error)
-	maxNodesPerIndex       int
-	shardUploadParallelism int
+	getLocalFSForPathFn   func(path string) (fs.FS, error)
+	maxNodesPerIndex      int
+	blobUploadParallelism int
+	bus                   bus.Bus
 }
 
-const defaultShardUploadParallelism = 6
+const defaultBlobUploadParallelism = 6
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
-		shardUploadParallelism: defaultShardUploadParallelism,
+		blobUploadParallelism: defaultBlobUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
 			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
 			// a single file, where opening `"."` gives you the file. `os.DirFS()`
@@ -79,6 +82,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 			return fsys, nil
 		},
 		maxNodesPerIndex: defaultMaxNodesPerIndex,
+		bus:              &bus.NoopBus{},
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
@@ -131,33 +135,39 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		panic(fmt.Sprintf("failed to create node reader: %v", err))
 	}
 
-	shardsAPI := &shards.API{
+	blobsAPI := &blobs.API{
 		Repo:             repo,
 		OpenNodeReader:   nr.OpenNodeReader,
 		MaxNodesPerIndex: cfg.maxNodesPerIndex,
-		ShardEncoder:     shards.NewCAREncoder(),
+		ShardEncoder:     blobs.NewCAREncoder(),
 	}
 
 	storachaAPI := storacha.API{
-		Repo:                   repo,
-		Client:                 client,
-		ReaderForShard:         shardsAPI.ReaderForShard,
-		IndexesForUpload:       shardsAPI.IndexesForUpload,
-		ShardUploadParallelism: cfg.shardUploadParallelism,
+		Repo:                  repo,
+		Client:                client,
+		ReaderForShard:        blobsAPI.ReaderForShard,
+		ReaderForIndex:        blobsAPI.ReaderForIndex,
+		BlobUploadParallelism: cfg.blobUploadParallelism,
+		Bus:                   cfg.bus,
 	}
 
 	uploadsAPI = uploads.API{
 		Repo:                       repo,
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
-		AddNodeToUploadShards:      shardsAPI.AddNodeToUploadShards,
-		CloseUploadShards:          shardsAPI.CloseUploadShards,
+		AddNodesToUploadShards:     blobsAPI.AddNodesToUploadShards,
+		AddShardsToUploadIndexes:   blobsAPI.AddShardsToUploadIndexes,
+		CloseUploadShards:          blobsAPI.CloseUploadShards,
+		CloseUploadIndexes:         blobsAPI.CloseUploadIndexes,
 		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
+		PostProcessUploadedShards:  storachaAPI.PostProcessUploadedShards,
+		PostProcessUploadedIndexes: storachaAPI.PostProcessUploadedIndexes,
 		AddIndexesForUpload:        storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
-		RemoveShard:                shardsAPI.RemoveShard,
+		RemoveShard:                blobsAPI.RemoveShard,
+		Publisher:                  cfg.bus,
 	}
 
 	return API{
@@ -167,6 +177,14 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		Sources: sourcesAPI,
 		DAGs:    dagsAPI,
 		Scans:   scansAPI,
+		Bus:     cfg.bus,
+	}
+}
+
+func WithEventBus(bus bus.Bus) Option {
+	return func(cfg *config) error {
+		cfg.bus = bus
+		return nil
 	}
 }
 
@@ -184,12 +202,12 @@ func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
 	}
 }
 
-func WithShardUploadParallelism(shardUploadParallelism int) Option {
+func WithBlobUploadParallelism(blobUploadParallelism int) Option {
 	return func(cfg *config) error {
-		if shardUploadParallelism <= 0 {
+		if blobUploadParallelism <= 0 {
 			return fmt.Errorf("parallelism must be greater than 0")
 		}
-		cfg.shardUploadParallelism = shardUploadParallelism
+		cfg.blobUploadParallelism = blobUploadParallelism
 		return nil
 	}
 }

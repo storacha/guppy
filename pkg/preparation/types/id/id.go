@@ -55,5 +55,8 @@ type ScanID = ID
 // FSEntryID is an alias for ID and uniquely identifies a filesystem entry.
 type FSEntryID = ID
 
-// FSEntryID is an alias for ID and uniquely identifies a shard.
+// ShardID is an alias for ID and uniquely identifies a shard.
 type ShardID = ID
+
+// IndexID is an alias for ID and uniquely identifies an index.
+type IndexID = ID

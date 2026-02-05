@@ -13,14 +13,17 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
-	"github.com/storacha/guppy/internal/cmdutil"
-	"github.com/storacha/guppy/pkg/client"
-	"github.com/storacha/guppy/pkg/client/dagservice"
-	"github.com/storacha/guppy/pkg/client/locator"
-	"github.com/storacha/guppy/pkg/dagfs"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
+	"github.com/storacha/guppy/pkg/client/dagservice"
+	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
+	"github.com/storacha/guppy/pkg/dagfs"
+	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -39,13 +42,17 @@ var retrieveCmd = &cobra.Command{
 
 	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		ctx := cmd.Context()
-		repo, err := makeRepo(ctx)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
 		if err != nil {
 			return err
 		}
 		defer repo.Close()
 
-		c := cmdutil.MustGetClient(storePath)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		space, err := did.Parse(args[0])
 		if err != nil {
 			cmd.SilenceUsage = false
@@ -79,12 +86,21 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
-		locator := locator.NewIndexLocator(indexer, func(space did.DID) (delegation.Delegation, error) {
+		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
+			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
+			for _, space := range spaces {
+				queries = append(queries, agentstore.CapabilityQuery{
+					Can:  contentcap.Retrieve.Can(),
+					With: space.String(),
+				})
+			}
+
 			var pfs []delegation.Proof
-			for _, del := range c.Proofs(client.CapabilityQuery{
-				Can:  contentcap.Retrieve.Can(),
-				With: space.String(),
-			}) {
+			res, err := c.Proofs(queries...)
+			if err != nil {
+				return nil, err
+			}
+			for _, del := range res {
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
@@ -99,7 +115,7 @@ var retrieveCmd = &cobra.Command{
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
-		ds := dagservice.NewDAGService(locator, c, space)
+		ds := dagservice.NewDAGService(locator, c, []did.DID{space})
 		retrievedFs := dagfs.New(ctx, ds, pathCID)
 
 		file, err := retrievedFs.Open(subpath)
@@ -141,8 +157,4 @@ var retrieveCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	rootCmd.AddCommand(retrieveCmd)
 }

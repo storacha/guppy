@@ -12,9 +12,8 @@ import (
 // Repo defines the interface for interacting with DAG scans, nodes, and links in the repository.
 type Repo interface {
 	UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error
-	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error)
-	FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte) (*model.UnixFSNode, bool, error)
-	CreateLinks(ctx context.Context, parent cid.Cid, spaceDID did.DID, links []model.LinkParams) error
+	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error)
+	FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, ufsdata []byte, links []model.LinkParams) (*model.UnixFSNode, bool, error)
 	LinksForCID(ctx context.Context, cid cid.Cid, spaceDID did.DID) ([]*model.Link, error)
 	HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error)
 	IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error)

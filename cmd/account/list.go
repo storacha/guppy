@@ -6,11 +6,17 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/config"
 )
 
 var listFlags struct {
 	jsonOutput bool
+}
+
+func init() {
+	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
 }
 
 var listCmd = &cobra.Command{
@@ -21,9 +27,16 @@ var listCmd = &cobra.Command{
 		"Lists all Storacha accounts currently logged in.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := cmdutil.MustGetClient(*StorePathP)
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 
-		accounts := c.Accounts()
+		accounts, err := c.Accounts()
+		if err != nil {
+			return err
+		}
 
 		if listFlags.jsonOutput {
 			// Build JSON array of account DIDs
@@ -47,9 +60,4 @@ var listCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func init() {
-	listCmd.Flags().BoolVar(&listFlags.jsonOutput, "json", false, "Output in JSON format")
-	AccountCmd.AddCommand(listCmd)
 }

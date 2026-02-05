@@ -11,23 +11,26 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	_ "modernc.org/sqlite"
+
+	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 )
 
 const (
-	defaultJournalMode = "WAL"
-	defaultSynchronous = "NORMAL"
-	defaultBusyTimeout = 3 * time.Second
-	defaultForeignKeys = true
+	defaultJournalMode      = "WAL"
+	defaultSynchronous      = "NORMAL"
+	defaultBusyTimeout      = 60 * time.Second
+	defaultForeignKeys      = true
+	defaultJournalSizeLimit = 256 * 1024 * 1024 // 256MB - limits WAL file growth
 )
 
-func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
+func OpenRepo(ctx context.Context, dbPath string, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
 	var pragmas []string
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=journal_mode(%s)", defaultJournalMode))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=busy_timeout(%d)", defaultBusyTimeout.Milliseconds()))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=synchronous(%s)", defaultSynchronous))
 	pragmas = append(pragmas, fmt.Sprintf("_pragma=foreign_keys(%d)", bool2int(defaultForeignKeys)))
+	pragmas = append(pragmas, fmt.Sprintf("_pragma=journal_size_limit(%d)", defaultJournalSizeLimit))
 
 	connStr := fmt.Sprintf("file:%s?%s", dbPath, strings.Join(pragmas, "&"))
 	db, err := sql.Open("sqlite", connStr)
@@ -61,7 +64,15 @@ func OpenRepo(ctx context.Context, dbPath string) (*sqlrepo.Repo, error) {
 	// Re-enable logging
 	log.Default().SetOutput(os.Stderr)
 
-	repo := sqlrepo.New(db)
+	repo, err := sqlrepo.New(db, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SQL repo: %w", err)
+	}
+
+	// Start periodic forced WAL checkpointing to prevent unbounded WAL growth
+	// during long-running upload operations.
+	repo.StartPeriodicCheckpoint(ctx, sqlrepo.DefaultCheckpointInterval)
+
 	return repo, nil
 }
 

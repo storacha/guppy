@@ -30,14 +30,17 @@ func (r *Repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, 
 		return nil, fmt.Errorf("failed to create space model: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO spaces (
-			did,
-			name,
-			created_at,
-			shard_size
-		) VALUES (?, ?, ?, ?)`,
-		space.DID().Bytes(),
+	stmt, err := r.prepareStmt(ctx, `
+		INSERT INTO spaces (did, name, created_at, shard_size)
+		VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare insert space statement: %w", err)
+	}
+
+	spaceDID := space.DID()
+	_, err = stmt.ExecContext(ctx,
+		util.DbDID(&spaceDID),
 		space.Name(),
 		space.CreatedAt().Unix(),
 		space.ShardSize(),
@@ -50,27 +53,29 @@ func (r *Repo) FindOrCreateSpace(ctx context.Context, did did.DID, name string, 
 
 // GetSpaceByDID retrieves a space by its unique DID from the repository.
 func (r *Repo) GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT
-			did,
-			name,
-			created_at,
-			shard_size
-		FROM spaces WHERE did = ?`, util.DbDID(&spaceDID),
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT did, name, created_at, shard_size
+		FROM spaces
+		WHERE did = ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare get space by DID statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, util.DbDID(&spaceDID))
 	return r.getSpaceFromRow(row)
 }
 
 // GetSpaceByName retrieves a space by its name from the repository.
 func (r *Repo) GetSpaceByName(ctx context.Context, name string) (*spacesmodel.Space, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT
-			did,
-			name,
-			created_at,
-			shard_size
-		FROM spaces WHERE name = ?`, name,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT did, name, created_at, shard_size
+		FROM spaces
+		WHERE name = ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare get space by name statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, name)
 	return r.getSpaceFromRow(row)
 }
 
@@ -96,26 +101,39 @@ func (r *Repo) getSpaceFromRow(row *sql.Row) (*spacesmodel.Space, error) {
 
 // DeleteSpace deletes a space from the repository.
 func (r *Repo) DeleteSpace(ctx context.Context, spaceDID did.DID) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM spaces WHERE did = ?`,
-		util.DbDID(&spaceDID),
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		DELETE FROM spaces
+		WHERE did = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare delete space statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, util.DbDID(&spaceDID))
 	if err != nil {
 		return err
 	}
 	// Also delete associated space sources
-	_, err = r.db.Exec(
-		`DELETE FROM space_sources WHERE space_did = ?`,
-		util.DbDID(&spaceDID),
-	)
+	stmt, err = r.prepareStmt(ctx, `
+		DELETE FROM space_sources
+		WHERE space_did = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare delete space sources statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, util.DbDID(&spaceDID))
 	return err
 }
 
 // ListSpaces lists all spaces in the repository.
 func (r *Repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT did, name, created_at, shard_size FROM spaces`,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT did, name, created_at, shard_size
+		FROM spaces
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare list spaces statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -139,10 +157,14 @@ func (r *Repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 
 // AddSourceToSpace adds a source to a space in the repository.
 func (r *Repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO space_sources (space_did, source_id) VALUES (?, ?)`,
-		util.DbDID(&spaceDID), sourceID,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		INSERT INTO space_sources (space_did, source_id)
+		VALUES (?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare add source to space statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, util.DbDID(&spaceDID), sourceID)
 	if err != nil {
 		return fmt.Errorf("failed to add source to space: %w", err)
 	}
@@ -151,10 +173,15 @@ func (r *Repo) AddSourceToSpace(ctx context.Context, spaceDID did.DID, sourceID 
 
 // RemoveSourceFromSpace removes a source from a space in the repository.
 func (r *Repo) RemoveSourceFromSpace(ctx context.Context, spaceDID did.DID, sourceID id.SourceID) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM space_sources WHERE space_did = ? AND source_id = ?`,
-		util.DbDID(&spaceDID), sourceID,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		DELETE FROM space_sources
+		WHERE space_did = ?
+		  AND source_id = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare remove source from space statement: %w", err)
+	}
+	_, err = stmt.ExecContext(ctx, util.DbDID(&spaceDID), sourceID)
 	if err != nil {
 		return fmt.Errorf("failed to remove source from space: %w", err)
 	}

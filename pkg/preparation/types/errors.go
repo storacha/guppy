@@ -145,46 +145,47 @@ func (e BadFSEntriesError) Unwrap() []error {
 	return errs
 }
 
-type ShardUploadError struct {
-	shardID id.ShardID
-	err     error
+type BlobUploadError struct {
+	id  id.ID
+	err error
 }
 
-func NewShardUploadError(shardID id.ShardID, err error) ShardUploadError {
-	return ShardUploadError{shardID: shardID, err: err}
+func NewBlobUploadError(id id.ID, err error) BlobUploadError {
+	return BlobUploadError{id: id, err: err}
 }
-func (e ShardUploadError) Error() string {
-	return fmt.Sprintf("shard upload %s failed: %s", e.shardID, e.err)
+func (e BlobUploadError) Error() string {
+	return fmt.Sprintf("blob upload %s failed: %s", e.id, e.err)
 }
-func (e ShardUploadError) Unwrap() error {
+func (e BlobUploadError) Unwrap() error {
 	return e.err
 }
-func (e ShardUploadError) ShardID() id.ShardID {
-	return e.shardID
+
+func (e BlobUploadError) ID() id.ID {
+	return e.id
 }
 
-type ShardUploadErrors struct {
-	errs []ShardUploadError
+type BlobUploadErrors struct {
+	errs []BlobUploadError
 }
 
-func NewShardUploadErrors(errs []ShardUploadError) error {
-	return RetriableError{err: ShardUploadErrors{errs: errs}}
+func NewBlobUploadErrors(errs []BlobUploadError) error {
+	return RetriableError{err: BlobUploadErrors{errs: errs}}
 }
 
-func (e ShardUploadErrors) Errs() []ShardUploadError {
+func (e BlobUploadErrors) Errs() []BlobUploadError {
 	return e.errs
 }
 
-func (e ShardUploadErrors) Error() string {
+func (e BlobUploadErrors) Error() string {
 	var messages []string
 	for _, err := range e.errs {
 		messages = append(messages, err.Error())
 	}
 
-	return fmt.Sprintf("shard uploads failed:\n%s", strings.Join(messages, "\n"))
+	return fmt.Sprintf("blob uploads failed:\n%s", strings.Join(messages, "\n"))
 }
 
-func (e ShardUploadErrors) Unwrap() []error {
+func (e BlobUploadErrors) Unwrap() []error {
 	errs := make([]error, len(e.errs))
 	for i, err := range e.errs {
 		errs[i] = err

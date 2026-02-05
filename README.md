@@ -47,7 +47,7 @@ $ guppy login <account-email-address>
 
 This will ask Storacha to send you an email with a link to click. Clicking that link will confirm to the network that Guppy is authorized to act as you. You can log your identity into multiple accounts at once, if necessary.
 
-Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--guppy-dir`.
+Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--data-dir`.
 
 #### Spaces
 
@@ -77,7 +77,7 @@ $ guppy upload <space>
 > [!WARNING]  
 > Multiple sources for the same space are not well supported yet, mainly by the UI. This will improve shortly.
 
-The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--guppy-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
+The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--data-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
 
 ```sh
 $ guppy upload <space>
@@ -90,7 +90,7 @@ The uploader will pick up where it left off, quickly scanning to make sure it's 
 Guppy can then be used to retrieve content from the network. 
 
 ```sh
-$ retrieve <space> <content-path> <output-path>
+$ guppy retrieve <space> <content-path> <output-path>
 ```
 
 The `<content-path>` can take any of these forms:
@@ -103,6 +103,57 @@ The `<content-path>` can take any of these forms:
 
 The named content will be written to `<output-path>`.
 
+#### IPFS Gateway
+
+Guppy can be used to retrieve content from the network via an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/). Start an IPFS Gateway that serves content from a specific space with the following command:
+
+```sh
+$ guppy gateway serve <space> [flags...]
+```
+
+The gateway can be configured via command line flags, environment variables (prefix `GUPPY_GATEWAY_`) or a TOML file. Place the config file in your config directory e.g. `~/.config/guppy/config.toml` to have it loaded automatically or specify the location on the command line with `--config=/path/to/config.toml`.
+
+Defaults shown in the following configuration TOML template:
+
+```toml
+# Main configuration for the IPFS Gateway.
+[gateway]
+  # Number of blocks to retain in the in-memory cache. Blocks are typically <1MB
+  # due to IPFS chunking, so an upper bound for how much memory the cache will
+  # utilize is approximately the number specified here * 1MB. e.g. capacity for
+  # 1,000 blocks ~= 1GB of memory.
+  block_cache_capacity = 1000
+  # Logging level for the gateway server (debug, info, warn, error).
+  log_level = "warn"
+  # The port to run the gateway on.
+  port = 3000
+  # Run a trusted gateway. See Trusted vs. Trustless Gateways for more info:
+  # https://docs.ipfs.tech/reference/http/gateway/#trusted-vs-trustless
+  trusted = true
+
+# [Subdomain Gateway] configuration. Subdomain gateways encode the IPFS hash in
+# the domain instead of the path.
+#
+# If enabled, any `/ipfs/$id` paths will be permanently redirected to
+# `http(s)://$id.ipfs.$host/`.
+#
+# Using both paths and subdomains for a single domain is not supported for
+# security reasons ([Origin isolation]).
+# 
+# [Subdomain Gateway]: https://specs.ipfs.tech/http-gateways/subdomain-gateway/
+# [Origin isolation]: https://en.wikipedia.org/wiki/Same-origin_policy
+[gateway.subdomain]
+  # Enables or disables subdomain mode.
+  enabled = true
+  # Public host(s) your gateway may be accessed via. Note: one or more required
+  # when subdomain mode is enabled.
+  #
+  # e.g. "gateway.example.com"
+  #
+  # Serves content at `http(s)://bafyHash.ipfs.gateway.example.com` and will
+  # redirect `http(s)://gateway.example.com/ipfs/bafyHash` to it.
+  hosts = ["gateway.example.com"]
+```
 
 ## Client library
 
@@ -124,4 +175,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for technical and logistical details ab
 
 ## License
 
-Dual-licensed under [MIT + Apache 2.0](LICENSE.md)
+Dual-licensed under [MIT OR Apache 2.0](LICENSE.md)

@@ -2,24 +2,26 @@ package sqlrepo
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
 func (r *Repo) TotalBytesToScan(ctx context.Context, uploadID id.UploadID) (uint64, error) {
-	row := r.db.QueryRowContext(
-		ctx, `
-			SELECT COALESCE(SUM(fs_entries.size), 0)
-		 	FROM dag_scans
-			JOIN fs_entries ON dag_scans.fs_entry_id = fs_entries.id
-		 	WHERE dag_scans.upload_id = $1
-			AND dag_scans.cid IS NULL
-		`,
-		uploadID,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT COALESCE(SUM(fs_entries.size), 0)
+		FROM dag_scans
+		JOIN fs_entries ON dag_scans.fs_entry_id = fs_entries.id
+		WHERE dag_scans.upload_id = ?
+		AND dag_scans.cid IS NULL
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare total bytes to scan statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, uploadID)
 
 	var totalBytes uint64
-	err := row.Scan(&totalBytes)
+	err = row.Scan(&totalBytes)
 	return totalBytes, err
 }
 
@@ -29,19 +31,19 @@ type FileInfo struct {
 }
 
 func (r *Repo) FilesToDAGScan(ctx context.Context, uploadID id.UploadID, count int) ([]FileInfo, error) {
-	rows, err := r.db.QueryContext(
-		ctx, `
-			SELECT fs_entries.path, fs_entries.size
-		 	FROM fs_entries
-			JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
-		 	WHERE dag_scans.upload_id = $1
-			AND dag_scans.cid IS NULL
-			ORDER BY dag_scans.created_at ASC
-			LIMIT $2
-		`,
-		uploadID,
-		count,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entries.path, fs_entries.size
+		FROM fs_entries
+		JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
+		WHERE dag_scans.upload_id = ?
+		AND dag_scans.cid IS NULL
+		ORDER BY dag_scans.created_at ASC
+		LIMIT ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare files to DAG scan statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID, count)
 	if err != nil {
 		return nil, err
 	}
@@ -64,21 +66,20 @@ func (r *Repo) FilesToDAGScan(ctx context.Context, uploadID id.UploadID, count i
 }
 
 func (r *Repo) ShardedFiles(ctx context.Context, uploadID id.UploadID, count int) ([]FileInfo, error) {
-	rows, err := r.db.QueryContext(
-		ctx, `
-			SELECT fs_entries.path, fs_entries.size
-		 	FROM fs_entries
-			JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
-      JOIN nodes_in_shards ON nodes_in_shards.node_cid = dag_scans.cid
-      JOIN shards ON shards.id = nodes_in_shards.shard_id
--- 		 	WHERE dag_scans.upload_id = X'637a2e3a0ce5448882a080576829696f'
-			WHERE shards.state = 'open'
-			ORDER BY dag_scans.created_at ASC
- 			LIMIT 6
-		`,
-		uploadID,
-		count,
-	)
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entries.path, fs_entries.size
+		FROM fs_entries
+		JOIN dag_scans ON dag_scans.fs_entry_id = fs_entries.id
+		JOIN node_uploads ON node_uploads.node_cid = dag_scans.cid
+      		JOIN shards ON shards.id = node_uploads.shard_id
+		WHERE shards.state = 'open'
+		ORDER BY dag_scans.created_at ASC
+ 		LIMIT 6
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare sharded files statement: %w", err)
+	}
+	rows, err := stmt.QueryContext(ctx, uploadID, count)
 	if err != nil {
 		return nil, err
 	}

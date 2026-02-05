@@ -20,7 +20,8 @@ func CreateTestDB(t *testing.T) *sql.DB {
 	// Give each test its own in-memory database to avoid cross-test contention and
 	// limit the connection pool to a single connection so modernc SQLite doesn't
 	// deadlock waiting on internal locks.
-	dsn := fmt.Sprintf("file:guppy-test-%d?mode=memory&cache=shared", time.Now().UnixNano())
+	d := t.TempDir()
+	dsn := fmt.Sprintf("file:%s/testdb_%d.db", d, time.Now().UnixNano())
 
 	db, err := sql.Open("sqlite", dsn)
 	require.NoError(t, err, "failed to open in-memory SQLite database")
