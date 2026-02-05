@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/cenkalti/backoff/v5"
 	"github.com/ipfs/go-cid"
@@ -20,7 +21,15 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
+	"go.uber.org/zap/zapcore"
 )
+
+// maxSpaceBetween is the default maximum space (in bytes) between blocks that
+// can still be coalesced into a single request. This value accommodates the
+// typical overhead between adjacent blocks in a CAR file, which consists of a
+// varint length prefix (1-10 bytes) and a CID (34-37 bytes for CIDv0/CIDv1 with
+// SHA2-256).
+const maxSpaceBetween = 64
 
 var log = logging.Logger("pkg/verification")
 
@@ -101,72 +110,86 @@ type Origin struct {
 	Position blobindex.Position  // Byte range within the shard.
 }
 
+type Slice struct {
+	Digest   multihash.Multihash
+	Bytes    []byte
+	Position blobindex.Position
+	Location Location
+}
+
 // StatBlocks retrieves block statistics for the given CIDs using the provided
 // indexer. It also performs integrity checks on the retrieved blocks. Note:
 // the getProofs function can be nil, in which case no authorization will be
 // sent for retrievals.
 func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetrieveProofGetterFunc, indexer *Indexer, links []cid.Cid) iter.Seq2[BlockStat, error] {
 	return func(yield func(BlockStat, error) bool) {
+		shardLocations := bytemap.NewByteMap[multihash.Multihash, []Location](0)
+		shardSlices := bytemap.NewByteMap[multihash.Multihash, bytemap.ByteMap[multihash.Multihash, blobindex.Position]](0)
+		blockCIDs := bytemap.NewByteMap[multihash.Multihash, cid.Cid](0)
+
+		// find all shard locations for slices and group by shard
 		for _, link := range links {
 			slice := link.Hash()
+			blockCIDs.Set(slice, link)
+
 			shard, pos, err := indexer.FindShard(ctx, slice)
 			if err != nil {
 				yield(BlockStat{}, fmt.Errorf("finding shard for %q: %w", link, err))
 				return
 			}
 
-			locations, err := indexer.FindLocations(ctx, shard)
-			if err != nil {
-				yield(BlockStat{}, fmt.Errorf("finding location for shard %q: %w", shard, err))
-				return
+			slices := shardSlices.Get(shard)
+			if slices == nil {
+				slices = bytemap.NewByteMap[multihash.Multihash, blobindex.Position](0)
+				shardSlices.Set(shard, slices)
 			}
+			slices.Set(link.Hash(), pos)
 
-			var fetchErr error
-			for _, loc := range locations {
-				var body []byte
-				var err error
-				if getProofs != nil {
-					body, err = authorizedFetch(ctx, id, getProofs, loc, pos)
-				} else {
-					body, err = fetch(ctx, loc, pos)
-				}
+			if !shardLocations.Has(shard) {
+				locations, err := indexer.FindLocations(ctx, shard)
 				if err != nil {
-					fetchErr = err
-					continue
+					yield(BlockStat{}, fmt.Errorf("finding location for shard %q: %w", digestutil.Format(shard), err))
+					return
+				}
+				shardLocations.Set(shard, locations)
+			}
+		}
+
+		// for each shard, fetch all slices in batches and yield stats for each block
+		for shard, slices := range shardSlices.Iterator() {
+			locations := shardLocations.Get(shard)
+			for slice, err := range batchFetchSlices(ctx, id, getProofs, shard, locations, slices) {
+				if err != nil {
+					yield(BlockStat{}, fmt.Errorf("fetching slices for shard %q: %w", digestutil.Format(shard), err))
+					return
 				}
 
-				err = verifyIntegrity(slice, body)
+				err = verifyIntegrity(slice.Digest, slice.Bytes)
 				if err != nil {
-					fetchErr = err
-					continue
+					yield(BlockStat{}, err)
+					return
 				}
 
-				codec := link.Prefix().Codec
-				links, err := extractLinks(codec, body)
+				cid := blockCIDs.Get(slice.Digest)
+				codec := cid.Prefix().Codec
+				links, err := extractLinks(codec, slice.Bytes)
 				if err != nil {
-					fetchErr = fmt.Errorf("extracting links for block %q: %w", link, err)
-					continue
+					yield(BlockStat{}, fmt.Errorf("extracting links for block %q: %w", cid, err))
+					return
 				}
 
 				if !yield(BlockStat{
 					Codec:  codec,
-					Size:   pos.Length,
-					Digest: slice,
+					Size:   uint64(len(slice.Bytes)),
+					Digest: slice.Digest,
 					Links:  links,
 					Origin: Origin{
-						Node:     loc.Commitment.Issuer().DID(),
-						URL:      loc.Caveats.Location[0],
+						Node:     slice.Location.Commitment.Issuer().DID(),
+						URL:      slice.Location.Caveats.Location[0],
 						Shard:    shard,
-						Position: pos,
+						Position: slice.Position,
 					},
 				}, nil) {
-					return
-				}
-				fetchErr = nil
-				break
-			}
-			if fetchErr != nil {
-				if !yield(BlockStat{}, fetchErr) {
 					return
 				}
 			}
@@ -174,9 +197,124 @@ func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetri
 	}
 }
 
-func authorizedFetch(ctx context.Context, id principal.Signer, getProofs ContentRetrieveProofGetterFunc, shardLocation Location, slicePosition blobindex.Position) ([]byte, error) {
+func batchFetchSlices(
+	ctx context.Context,
+	id principal.Signer,
+	getProofs ContentRetrieveProofGetterFunc,
+	shard multihash.Multihash,
+	locations []Location,
+	slices bytemap.ByteMap[multihash.Multihash, blobindex.Position],
+) iter.Seq2[Slice, error] {
+	return func(yield func(Slice, error) bool) {
+		batches := batchSlices(slices)
+		if log.Level().Enabled(zapcore.Level(logging.LevelDebug)) {
+			batchSizes := make([]int, len(batches))
+			for i, batch := range batches {
+				batchSizes[i] = len(batch)
+			}
+			log.Debugw("fetching slices in batches", "shard", digestutil.Format(shard), "batches", batchSizes)
+		}
+		for _, batch := range batches {
+			start := slices.Get(batch[0]).Offset
+			last := slices.Get(batch[len(batch)-1])
+			end := last.Offset + last.Length - 1
+			byteRange := contentcap.Range{Start: start, End: end}
+
+			var fetchErr error
+			for _, loc := range locations {
+				var body io.ReadCloser
+				var err error
+				if getProofs != nil {
+					body, err = authorizedFetch(ctx, id, getProofs, shard, loc, byteRange)
+				} else {
+					body, err = fetch(ctx, loc, byteRange)
+				}
+				if err != nil {
+					fetchErr = err
+					continue
+				}
+
+				scratch := make([]byte, maxSpaceBetween)
+				for i, digest := range batch {
+					pos := slices.Get(digest)
+					bytes := make([]byte, pos.Length)
+					_, err := io.ReadAtLeast(body, bytes, int(pos.Length))
+					if err != nil {
+						fetchErr = fmt.Errorf("reading bytes for slice %d in batch: %w", i, err)
+						break
+					}
+					if !yield(Slice{
+						Digest:   digest,
+						Bytes:    bytes,
+						Position: pos,
+						Location: loc,
+					}, nil) {
+						body.Close()
+						return
+					}
+					if i < len(batch)-1 {
+						// read space between if there is any
+						nextPos := slices.Get(batch[i+1])
+						spaceBetween := int(nextPos.Offset - (pos.Offset + pos.Length))
+						if spaceBetween > 0 {
+							_, err := io.ReadAtLeast(body, scratch[:spaceBetween], spaceBetween)
+							if err != nil {
+								fetchErr = fmt.Errorf("reading space between slice %d in batch: %w", i, err)
+								break
+							}
+						}
+					}
+				}
+				body.Close()
+
+				if fetchErr != nil {
+					continue
+				}
+				fetchErr = nil
+				break
+			}
+			if fetchErr != nil {
+				if !yield(Slice{}, fetchErr) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func batchSlices(items bytemap.ByteMap[multihash.Multihash, blobindex.Position]) [][]multihash.Multihash {
+	byteOrderedDigests := slices.Collect(items.Keys())
+	slices.SortFunc(byteOrderedDigests, func(a, b multihash.Multihash) int {
+		ap := items.Get(a)
+		bp := items.Get(b)
+		return int(ap.Offset) - int(bp.Offset)
+	})
+	batches := [][]multihash.Multihash{}
+	batch := []multihash.Multihash{}
+	var offset uint64
+	for _, digest := range byteOrderedDigests {
+		pos := items.Get(digest)
+		if len(batch) == 0 {
+			batch = append(batch, digest)
+			offset = pos.Offset + pos.Length
+		} else if offset+maxSpaceBetween >= pos.Offset {
+			batch = append(batch, digest)
+			offset = pos.Offset + pos.Length
+		} else {
+			batches = append(batches, batch)
+			batch = []multihash.Multihash{digest}
+			offset = pos.Offset + pos.Length
+		}
+	}
+	if len(batch) > 0 {
+		batches = append(batches, batch)
+	}
+	return batches
+}
+
+func authorizedFetch(ctx context.Context, id principal.Signer, getProofs ContentRetrieveProofGetterFunc, shard multihash.Multihash, shardLocation Location, byteRange contentcap.Range) (io.ReadCloser, error) {
 	if shardLocation.Caveats.Space == did.Undef {
-		return nil, fmt.Errorf("missing space DID in location commitment for shard: %s", digestutil.Format(shardLocation.Caveats.Content.Hash()))
+		return nil, fmt.Errorf("missing space DID in location commitment for shard: %s", digestutil.Format(shard))
 	}
 
 	var reqErr error
@@ -186,7 +324,7 @@ func authorizedFetch(ctx context.Context, id principal.Signer, getProofs Content
 			return nil, fmt.Errorf("creating retrieval connection to %q: %w", url.String(), err)
 		}
 
-		body, err := backoff.Retry(ctx, func() ([]byte, error) {
+		body, err := backoff.Retry(ctx, func() (io.ReadCloser, error) {
 			proofs, err := getProofs(shardLocation.Caveats.Space)
 			if err != nil {
 				return nil, fmt.Errorf("getting proofs for retrieval to %q: %w", url.String(), err)
@@ -197,13 +335,8 @@ func authorizedFetch(ctx context.Context, id principal.Signer, getProofs Content
 				shardLocation.Commitment.Issuer(),
 				shardLocation.Caveats.Space.String(),
 				contentcap.RetrieveCaveats{
-					Blob: contentcap.BlobDigest{
-						Digest: shardLocation.Caveats.Content.Hash(),
-					},
-					Range: contentcap.Range{
-						Start: slicePosition.Offset,
-						End:   slicePosition.Offset + slicePosition.Length - 1,
-					},
+					Blob:  contentcap.BlobDigest{Digest: shard},
+					Range: byteRange,
 				},
 				delegation.WithProof(proofs...),
 			)
@@ -215,13 +348,11 @@ func authorizedFetch(ctx context.Context, id principal.Signer, getProofs Content
 			if err != nil {
 				return nil, fmt.Errorf("executing retrieve invocation for retrieval to %q: %w", url.String(), err)
 			}
-			defer hres.Body().Close()
-
-			body, err := io.ReadAll(hres.Body())
-			if err != nil {
-				return nil, fmt.Errorf("reading response body for request to %q: %w", url.String(), err)
+			if hres.Status() != http.StatusOK && hres.Status() != http.StatusPartialContent {
+				hres.Body().Close()
+				return nil, fmt.Errorf("unexpected status code %d for request to %q", hres.Status(), url.String())
 			}
-			return body, nil
+			return hres.Body(), nil
 		}, backoff.WithMaxTries(3))
 		if err != nil {
 			reqErr = err
@@ -233,7 +364,7 @@ func authorizedFetch(ctx context.Context, id principal.Signer, getProofs Content
 	return nil, reqErr
 }
 
-func fetch(ctx context.Context, shardLocation Location, slicePosition blobindex.Position) ([]byte, error) {
+func fetch(ctx context.Context, shardLocation Location, byteRange contentcap.Range) (io.ReadCloser, error) {
 	var reqErr error
 	for _, url := range shardLocation.Caveats.Location {
 		req, err := http.NewRequestWithContext(ctx, "GET", url.String(), nil)
@@ -241,21 +372,19 @@ func fetch(ctx context.Context, shardLocation Location, slicePosition blobindex.
 			reqErr = fmt.Errorf("creating request for block %q: %w", url.String(), err)
 			continue
 		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", slicePosition.Offset, slicePosition.Offset+slicePosition.Length-1))
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", byteRange.Start, byteRange.End))
 
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			reqErr = fmt.Errorf("performing request for block %q: %w", url.String(), err)
 			continue
 		}
-		defer res.Body.Close()
-
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			reqErr = fmt.Errorf("reading response body for block %q: %w", url.String(), err)
+		if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+			res.Body.Close()
+			reqErr = fmt.Errorf("unexpected status code %d for request to %q", res.StatusCode, url.String())
 			continue
 		}
-		return body, nil
+		return res.Body, nil
 	}
 	return nil, reqErr
 }
