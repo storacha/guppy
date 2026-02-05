@@ -10,7 +10,6 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
-	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/cmd/upload/source"
@@ -46,20 +45,16 @@ var Cmd = &cobra.Command{
 	Long: wordwrap.WrapString(
 		"Uploads data to a Storacha space. By default, this will upload all sources "+
 			"added to the space. You can optionally specify one or more source paths "+
-			"or names to upload only those specific sources.",
+			"or names to upload only those specific sources. The space can be specified "+
+			"by DID or by name.",
 		80),
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		space := args[0]
-		if space == "" {
+		spaceArg := args[0]
+		if spaceArg == "" {
 			cmd.SilenceUsage = false
 			return fmt.Errorf("space required")
-		}
-		spaceDID, err := did.Parse(space)
-		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("parsing space DID: %w", err)
 		}
 
 		useUI, err := cmd.Parent().PersistentFlags().GetBool("ui")
@@ -89,7 +84,13 @@ var Cmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(cfg.Repo.Dir),
+		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
+		if err != nil {
+			return err
+		}
+
+		api := preparation.NewAPI(repo, client,
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
 			preparation.WithEventBus(eb),
 		)

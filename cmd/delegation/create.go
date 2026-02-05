@@ -31,17 +31,14 @@ func init() {
 }
 
 var createCmd = &cobra.Command{
-	Use:   "create <space-did> <audience-did>",
+	Use:   "create <space> <audience-did>",
 	Short: "Delegate capabilities for a space to others.",
 	Long: wordwrap.WrapString(
-		"Output a CAR encoded UCAN that delegates capabilities for a space to the audience.",
+		"Output a CAR encoded UCAN that delegates capabilities for a space to the audience. "+
+			"The space can be specified by DID or by name.",
 		80),
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		space, err := did.Parse(args[0])
-		if err != nil {
-			return fmt.Errorf("parsing space DID: %w", err)
-		}
 		aud, err := did.Parse(args[1])
 		if err != nil {
 			return fmt.Errorf("parsing audience DID: %w", err)
@@ -55,6 +52,11 @@ var createCmd = &cobra.Command{
 			return err
 		}
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+
+		space, err := cmdutil.ResolveSpace(c, args[0])
+		if err != nil {
+			return err
+		}
 		caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(createFlags.can))
 		proofs := map[string]delegation.Proof{}
 		for _, can := range createFlags.can {

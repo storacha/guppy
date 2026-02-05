@@ -7,7 +7,6 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
-	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
@@ -33,7 +32,8 @@ var AddCmd = &cobra.Command{
 			"filesystem, but this may be expanded in the future to include other "+
 			"types of data sources. `upload` will upload data from all sources "+
 			"associated with a space. Sources are associated with the space locally "+
-			"for future local upload commands; no association is made remotely.",
+			"for future local upload commands; no association is made remotely. "+
+			"The space can be specified by DID or by name.",
 		80),
 	Args: cobra.ExactArgs(2),
 
@@ -50,8 +50,8 @@ var AddCmd = &cobra.Command{
 		}
 		defer repo.Close()
 
-		space := cmd.Flags().Arg(0)
-		if space == "" {
+		spaceArg := cmd.Flags().Arg(0)
+		if spaceArg == "" {
 			cmd.SilenceUsage = false
 			return errors.New("space cannot be empty")
 		}
@@ -67,13 +67,13 @@ var AddCmd = &cobra.Command{
 			return fmt.Errorf("resolving absolute path: %w", err)
 		}
 
-		spaceDID, err := did.Parse(space)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("parsing space DID: %w", err)
+			return err
 		}
 
-		api := preparation.NewAPI(repo, cmdutil.MustGetClient(cfg.Repo.Dir))
+		api := preparation.NewAPI(repo, client)
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption

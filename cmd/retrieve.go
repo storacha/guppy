@@ -32,8 +32,8 @@ var retrieveCmd = &cobra.Command{
 	Short:   "Get a file or directory by its CID",
 	Long: wordwrap.WrapString(
 		"Retrieves a file or directory from a space. The specified file or "+
-			"directory will be written to <output-path>. <content-path> can take "+
-			"several forms:\n\n"+
+			"directory will be written to <output-path>. The space can be specified "+
+			"by DID or by name. <content-path> can take several forms:\n\n"+
 			"* /ipfs/<cid>[/<subpath>]\n"+
 			"* ipfs://<cid>[/<subpath>]\n"+
 			"* <cid>[/<subpath>]",
@@ -53,10 +53,9 @@ var retrieveCmd = &cobra.Command{
 		defer repo.Close()
 
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
-		space, err := did.Parse(args[0])
+		space, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("invalid space DID: %w", err)
+			return err
 		}
 
 		pathCID, subpath, err := cmdutil.ContentPath(args[1])

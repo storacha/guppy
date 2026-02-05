@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 )
@@ -14,7 +14,7 @@ var ListCmd = &cobra.Command{
 	Use:     "list <space>",
 	Aliases: []string{"ls"},
 	Short:   "List sources added to a space",
-	Long:    `Lists the sources added to a space.`,
+	Long:    `Lists the sources added to a space. The space can be specified by DID or by name.`,
 	Args:    cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -30,16 +30,15 @@ var ListCmd = &cobra.Command{
 		}
 		defer repo.Close()
 
-		space := cmd.Flags().Arg(0)
-		if space == "" {
+		spaceArg := cmd.Flags().Arg(0)
+		if spaceArg == "" {
 			cmd.SilenceUsage = false
-			return fmt.Errorf("space connot be empty")
+			return fmt.Errorf("space cannot be empty")
 		}
 
-		spaceDID, err := did.Parse(space)
+		spaceDID, err := cmdutil.ResolveSpace(cmdutil.MustGetClient(cfg.Repo.Dir), spaceArg)
 		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("parsing space DID: %w", err)
+			return err
 		}
 
 		sourceIDs, err := repo.ListSpaceSources(ctx, spaceDID)
