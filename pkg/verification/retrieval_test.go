@@ -192,9 +192,7 @@ func TestStatBlocks(t *testing.T) {
 			stats = append(stats, stat)
 		}
 
-		require.Len(t, stats, 1, "first block should succeed")
-		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
-
+		require.Len(t, stats, 0, "first block not expected to succeed because shard for second block is missing")
 		require.Error(t, gotError)
 		require.Contains(t, gotError.Error(), "finding shard")
 	})
@@ -248,9 +246,7 @@ func TestStatBlocks(t *testing.T) {
 			stats = append(stats, stat)
 		}
 
-		require.Len(t, stats, 1, "first block should succeed")
-		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
-
+		require.Len(t, stats, 0, "first block not expected to succeed because shard for second block is missing")
 		require.Error(t, gotError)
 		require.Contains(t, gotError.Error(), "finding location")
 	})
