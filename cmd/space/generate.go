@@ -2,6 +2,7 @@ package space
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"slices"
 
@@ -36,11 +37,13 @@ var spaceAccess = []string{
 var generateFlags struct {
 	grantTo     string
 	provisionTo string
+	outputKey   bool
 }
 
 func init() {
 	generateCmd.Flags().StringVar(&generateFlags.grantTo, "grant-to", "", "Account DID to grant space access to. Must be logged in already. (optional when exactly one account is logged in)")
 	generateCmd.Flags().StringVar(&generateFlags.provisionTo, "provision-to", "", "Account DID to provision space to. Must be logged in already. (optional when exactly one account is logged in)")
+	generateCmd.Flags().BoolVarP(&generateFlags.outputKey, "output-key", "k", false, "Output the space key (WARNING: sensitive data)")
 }
 
 var generateCmd = &cobra.Command{
@@ -56,6 +59,17 @@ var generateCmd = &cobra.Command{
 		if err != nil {
 			cmd.SilenceUsage = false
 			return fmt.Errorf("generating signer for space: %w", err)
+		}
+
+		// Output space key if requested
+		if generateFlags.outputKey {
+			// Export the private key as base64
+			keyBytes := space.Raw()
+			keyBase64 := base64.StdEncoding.EncodeToString(keyBytes)
+			cmd.PrintErrln("\nWARNING: This is your space private key. Keep it secret and secure!")
+			cmd.PrintErrln("Space Key (base64):")
+			fmt.Println(keyBase64)
+			cmd.PrintErrln()
 		}
 
 		cfg, err := config.Load[config.Config]()
