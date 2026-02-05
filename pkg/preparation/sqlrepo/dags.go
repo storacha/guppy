@@ -185,41 +185,6 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 	return links, nil
 }
 
-type nodeFinder struct {
-	r    *Repo
-	stmt *sql.Stmt
-	ctx  context.Context
-}
-
-func (n nodeFinder) Find(spaceDID did.DID, c cid.Cid, tx *sql.Tx) (model.Node, error) {
-	stmt := n.stmt
-	if tx != nil {
-		stmt = tx.StmtContext(n.ctx, stmt)
-	}
-	row := stmt.QueryRowContext(n.ctx, util.DbCID(&c), util.DbDID(&spaceDID))
-	return n.r.getNodeFromRow(row)
-}
-
-func (r *Repo) nodeFinder(ctx context.Context) (nodeFinder, error) {
-	stmt, err := r.prepareStmt(ctx, `
-		SELECT
-			cid,
-			size,
-			space_did,
-			ufsdata,
-			path,
-			source_id,
-			offset
-		FROM nodes
-		WHERE cid = ?
-		AND space_did = ?
-	`)
-	if err != nil {
-		return nodeFinder{}, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	return nodeFinder{r: r, stmt: stmt, ctx: ctx}, nil
-}
-
 // RowScanner can scan a row into a set of destinations. It should not be
 // confused with [sql.Scanner], which is used to scan a single value.
 type RowScanner interface {
@@ -306,8 +271,7 @@ func (n nodeCreator) Create(node model.Node, uploadID id.UploadID, tx *sql.Tx) e
 		uploadID,
 	)
 	var dummy int
-	err = row.Scan(&dummy)
-	if err == nil {
+	if err := row.Scan(&dummy); err == nil {
 		return nil // Record already exists, nothing to do
 	}
 	createNodeUploadStmt := n.createNodeUploadStmt
@@ -325,7 +289,7 @@ func (n nodeCreator) Create(node model.Node, uploadID id.UploadID, tx *sql.Tx) e
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
 func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
-	// First, check if the node is already fully processed for this specific upload.
+	// Check if the node is already linked to this upload.
 	var existsInUpload bool
 	err := r.db.QueryRowContext(ctx, `
         SELECT EXISTS (
@@ -345,6 +309,11 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 		}
 		return node, false, nil
 	}
+	nc, err := r.nodeCreator(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
@@ -356,14 +325,9 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 		return nil, false, err
 	}
 
-	_, err = tx.ExecContext(ctx, `
-        INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(cid, space_did) DO NOTHING
-    `, util.DbCID(&cid), size, util.DbDID(&spaceDID), nil, path, util.DbID(&sourceID), &offset)
-
+	err = nc.Create(newNode, uploadID, tx)
 	if err != nil {
-		return nil, false, fmt.Errorf("inserting node: %w", err)
+		return nil, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -377,7 +341,7 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 // If a node with the same CID, size, and ufsdata already exists, it returns that node.
 // If not, it creates a new UnixFS node with the provided parameters.
 func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, ufsdata []byte, linkParams []model.LinkParams) (*model.UnixFSNode, bool, error) {
-	// Check if the node is already processed for this upload.
+	// Check if complete
 	var existsInUpload bool
 	err := r.db.QueryRowContext(ctx, `
         SELECT EXISTS (
@@ -398,24 +362,23 @@ func (r *Repo) FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uin
 		return newNode, false, nil
 	}
 
+	nc, err := r.nodeCreator(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
 	}
 	defer tx.Rollback()
 
-	// Insert into nodes
-	_, err = tx.ExecContext(ctx, `
-        INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, offset)
-        VALUES (?, ?, ?, ?, NULL, NULL, NULL)
-        ON CONFLICT(cid, space_did) DO NOTHING
-    `, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata))
-
+	newNode, err := model.NewUnixFSNode(cid, size, spaceDID, ufsdata)
 	if err != nil {
-		return nil, false, fmt.Errorf("inserting unixfs node: %w", err)
+		return nil, false, err
 	}
 
-	newNode, err := model.NewUnixFSNode(cid, size, spaceDID, ufsdata)
+	err = nc.Create(newNode, uploadID, tx)
 	if err != nil {
 		return nil, false, err
 	}
