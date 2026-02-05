@@ -34,10 +34,9 @@ Guppy provides several enterprise-focused features that set it apart:
 
 * **Parallel Processing**: Built-in parallel processing and concurrent data pulling capabilities to maximize throughput for large uploads.
 
+## Usage
 
-### Usage
-
-#### Login
+### Login
 
 Guppy will automatically generate an identity for you. First, you'll need to authorize that identity to act on behalf of your account:
 
@@ -49,7 +48,7 @@ This will ask Storacha to send you an email with a link to click. Clicking that 
 
 Your identity, authorizing proofs, and other state is kept in `~/.storacha/guppy` by default. You can set a different directory with `--data-dir`.
 
-#### Spaces
+### Spaces
 
 Before you can upload data, you'll need a Storacha space to put it in. To create one:
 
@@ -65,7 +64,7 @@ You can get a list of all spaces you are known to have access to with:
 $ guppy space list
 ```
 
-#### Uploading
+### Uploading
 
 Guppy's uploader is where most of the work happens. To upload data, you first associate one or more **sources** with a **space**, and then run the uploader for that space.
 
@@ -77,7 +76,7 @@ $ guppy upload <space>
 > [!WARNING]  
 > Multiple sources for the same space are not well supported yet, mainly by the UI. This will improve shortly.
 
-The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--guppy-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
+The uploader will scan the data source, break up its data into UnixFS nodes, pack those nodes into shards, and store those shards on the Storacha network within the space. Along the way, everything is tracked in a database file in the `--data-dir`. If at any time the process is interrupted, it can be restarted by simply running the same command again:
 
 ```sh
 $ guppy upload <space>
@@ -85,9 +84,9 @@ $ guppy upload <space>
 
 The uploader will pick up where it left off, quickly scanning to make sure it's aware of any changes to the underlying source data. This ensures that the final root CID returned will point to a complete, consistent view of the data source.
 
-#### Retrieving
+### Retrieving
 
-Guppy can then be used to retrieve content from the network. 
+Guppy can then be used to retrieve content from the network.
 
 ```sh
 $ guppy retrieve <space> <content-path> <output-path>
@@ -103,7 +102,7 @@ The `<content-path>` can take any of these forms:
 
 The named content will be written to `<output-path>`.
 
-#### IPFS Gateway
+### IPFS Gateway
 
 Guppy can be used to retrieve content from the network via an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/). Start an IPFS Gateway that serves content from a specific space with the following command:
 
@@ -139,7 +138,7 @@ Defaults shown in the following configuration TOML template:
 #
 # Using both paths and subdomains for a single domain is not supported for
 # security reasons ([Origin isolation]).
-# 
+#
 # [Subdomain Gateway]: https://specs.ipfs.tech/http-gateways/subdomain-gateway/
 # [Origin isolation]: https://en.wikipedia.org/wiki/Same-origin_policy
 [gateway.subdomain]
@@ -153,6 +152,18 @@ Defaults shown in the following configuration TOML template:
   # Serves content at `http(s)://bafyHash.ipfs.gateway.example.com` and will
   # redirect `http(s)://gateway.example.com/ipfs/bafyHash` to it.
   hosts = ["gateway.example.com"]
+```
+
+### Using different networks
+
+Guppy can be pointed to different Storacha Forge networks (e.g. a testing network). You can do that by setting the following environment variables:
+
+```sh
+export STORACHA_SERVICE_URL="https://up.forge.storacha.network"
+export STORACHA_SERVICE_DID="did:web:up.forge.storacha.network"
+export STORACHA_RECEIPTS_URL="https://up.forge.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://indexer.forge.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:indexer.forge.storacha.network"
 ```
 
 ## Client library

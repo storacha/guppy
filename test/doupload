@@ -150,6 +150,14 @@ main () {
 	diff -r "$dataDir/small-files" "$outDir2"
 	diff -r "$dataDir" "$outDir3"
 	echo "✅ Data verified!"
+
+	jq -n \
+		--arg account "$account" \
+		--arg space "$space" \
+		--arg rootCID "$rootCID" \
+		--arg dataDir "$dataDir" \
+		--arg subdir "subdir" \
+		'{$account, $space, $rootCID, $dataDir, $subdir}' > "$sandbox/test-params.json"
 }
 
 log_in() {
