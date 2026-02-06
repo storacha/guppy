@@ -88,12 +88,13 @@ func init() {
 }
 
 var serveCmd = &cobra.Command{
-	Use:   "serve [space-did...]",
+	Use:   "serve [space...]",
 	Short: "Start a Storacha Network gateway",
 	Long: wordwrap.WrapString(
 		"Start an IPFS Gateway that operates on the Storacha Network. By default "+
-			"it serves data from all authorized spaces. One or more space DIDs can "+
-			"be specified to restrict content served to those spaces only.",
+			"it serves data from all authorized spaces. One or more spaces can "+
+			"be specified to restrict content served to those spaces only. "+
+			"Spaces can be specified by DID or by name.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load[config.Config]()
@@ -131,9 +132,9 @@ var serveCmd = &cobra.Command{
 
 		var spaces []did.DID
 		for _, arg := range args {
-			space, err := did.Parse(arg)
+			space, err := cmdutil.ResolveSpace(c, arg)
 			if err != nil {
-				return fmt.Errorf("invalid space DID: %q", arg)
+				return err
 			}
 			if _, ok := authdSpaces[space]; !ok {
 				return fmt.Errorf("missing %q proof for space: %s", contentcap.RetrieveAbility, space)
@@ -141,7 +142,7 @@ var serveCmd = &cobra.Command{
 			spaces = append(spaces, space)
 		}
 		if len(spaces) == 0 {
-			log.Info("no space DIDs specified, serving content from all authorized spaces")
+			log.Info("no spaces specified, serving content from all authorized spaces")
 			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 

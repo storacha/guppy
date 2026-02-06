@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/delegation"
-	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
@@ -25,23 +24,18 @@ func init() {
 }
 
 var lsCmd = &cobra.Command{
-	Use:     "ls <space-did>",
+	Use:     "ls <space>",
 	Aliases: []string{"list"},
 	Short:   "List uploads in a space",
 	Long: wordwrap.WrapString(
 		"Lists all uploads in the given space as CIDs, one on each line. With "+
-			"`--shards` flag, lists shard CIDs below each upload root CID, indented.",
+			"`--shards` flag, lists shard CIDs below each upload root CID, indented. "+
+			"The space can be specified by DID or by name.",
 		80),
-	Example: fmt.Sprintf("  %s ls did:key:z6MksCX5PdUgHv83cmDE2DfCrR1WHG9MmZPRKSvTi8Ca297V", rootCmd.Name()),
+	Example: fmt.Sprintf("  %s ls did:key:z6MksCX5PdUgHv83cmDE2DfCrR1WHG9MmZPRKSvTi8Ca297V\n  %s ls \"my space\"", rootCmd.Name(), rootCmd.Name()),
 	Args:    cobra.ExactArgs(1),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spaceDID, err := did.Parse(cmd.Flags().Arg(0))
-		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("parsing space DID: %w", err)
-		}
-
 		proofs := []delegation.Delegation{}
 		if lsFlags.proofsPath != "" {
 			proof := cmdutil.MustGetProof(lsFlags.proofsPath)
@@ -53,6 +47,11 @@ var lsCmd = &cobra.Command{
 			return err
 		}
 		c := cmdutil.MustGetClient(cfg.Repo.Dir, client.WithAdditionalProofs(proofs...))
+
+		spaceDID, err := cmdutil.ResolveSpace(c, args[0])
+		if err != nil {
+			return err
+		}
 
 		var cursor *string
 		for {

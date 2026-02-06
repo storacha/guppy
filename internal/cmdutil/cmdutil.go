@@ -188,3 +188,31 @@ type HandledCliError struct {
 func (e HandledCliError) Unwrap() error {
 	return e.error
 }
+
+// ResolveSpace resolves a space identifier, which can be either a DID or a name.
+// If the identifier is a valid DID, it returns that DID directly.
+// Otherwise, it looks up the space by name using the provided client.
+// Returns an error if the name matches no spaces or multiple spaces.
+func ResolveSpace(c *client.Client, identifier string) (did.DID, error) {
+	// First, try to parse as a DID
+	spaceDID, err := did.Parse(identifier)
+	if err == nil {
+		return spaceDID, nil
+	}
+
+	// Not a valid DID, try to look up by name
+	space, err := c.SpaceNamed(identifier)
+	if err != nil {
+		var notFoundErr client.SpaceNotFoundError
+		if errors.As(err, &notFoundErr) {
+			return did.DID{}, fmt.Errorf("no space found with name %q", identifier)
+		}
+		var multipleErr client.MultipleSpacesFoundError
+		if errors.As(err, &multipleErr) {
+			return did.DID{}, fmt.Errorf("multiple spaces found with name %q; use DID to specify which one", identifier)
+		}
+		return did.DID{}, err
+	}
+
+	return space.DID(), nil
+}

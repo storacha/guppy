@@ -5,7 +5,6 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
-	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
@@ -13,23 +12,16 @@ import (
 )
 
 var provisionCmd = &cobra.Command{
-	Use:   "provision <space-did> <email-address>",
+	Use:   "provision <space> <email-address>",
 	Short: "Provision a space with a customer account",
 	Long: wordwrap.WrapString(
 		"Provisions a space by associating it with a customer account which will "+
-			"be billed for the space's usage.",
+			"be billed for the space's usage. The space can be specified by DID or "+
+			"by name.",
 		80),
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spaceDIDStr := args[0]
 		customerEmail := args[1]
-
-		// Parse the space DID
-		spaceDID, err := did.Parse(spaceDIDStr)
-		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("invalid space DID: %w", err)
-		}
 
 		// Convert email to did:mailto
 		customerDID, err := didmailto.FromInput(customerEmail)
@@ -43,6 +35,11 @@ var provisionCmd = &cobra.Command{
 			return err
 		}
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+
+		spaceDID, err := cmdutil.ResolveSpace(c, args[0])
+		if err != nil {
+			return err
+		}
 
 		fmt.Printf("Provisioning space %s with customer %s...\n", spaceDID, customerEmail)
 

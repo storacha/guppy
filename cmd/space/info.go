@@ -6,7 +6,6 @@ import (
 
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
-	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
@@ -21,28 +20,24 @@ func init() {
 }
 
 var infoCmd = &cobra.Command{
-	Use:   "info <space-did>",
+	Use:   "info <space>",
 	Short: "Get information about a space",
 	Long: wordwrap.WrapString(
 		"Gets information about a space, including which providers are associated with it. "+
-			"This shows the space's provisioning status.",
+			"This shows the space's provisioning status. The space can be specified by DID or by name.",
 		80),
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		spaceDIDStr := args[0]
-
-		// Parse the space DID
-		spaceDID, err := did.Parse(spaceDIDStr)
-		if err != nil {
-			cmd.SilenceUsage = false
-			return fmt.Errorf("invalid space DID: %w", err)
-		}
-
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return err
 		}
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+
+		spaceDID, err := cmdutil.ResolveSpace(c, args[0])
+		if err != nil {
+			return err
+		}
 
 		result, err := c.SpaceInfo(cmd.Context(), spaceDID)
 		if err != nil {
