@@ -112,9 +112,14 @@ CREATE TABLE IF NOT EXISTS uploads (
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS shards (
+ -- UUID identifying the shard locally
   id BLOB PRIMARY KEY,
+  -- The upload this shard belongs to
   upload_id BLOB NOT NULL,
   size INTEGER NOT NULL,
+  -- The multihash digest of the completed shard
+  -- If NULL, has not yet been calculated (and maybe cannot be, if still
+  -- accepting new nodes)
   digest BLOB,
   state TEXT NOT NULL,
   FOREIGN KEY (upload_id) REFERENCES uploads(id)
@@ -134,10 +139,14 @@ CREATE TABLE IF NOT EXISTS dag_scans (
   FOREIGN KEY (space_did) REFERENCES spaces(did)
 ) STRICT;
 
+-- The fact that a node has been assigned to a shard.
 CREATE TABLE IF NOT EXISTS nodes_in_shards (
+  -- Which node we're talking about
   node_cid BLOB NOT NULL,
   space_did BLOB NOT NULL,
+ -- Which shard this node is in
   shard_id BLOB NOT NULL,
+ -- Offset of the node in the shard
   shard_offset INTEGER NOT NULL,
   FOREIGN KEY (node_cid, space_did) REFERENCES nodes(cid, space_did) ON DELETE CASCADE,
   FOREIGN KEY (shard_id) REFERENCES shards(id) ON DELETE CASCADE,
