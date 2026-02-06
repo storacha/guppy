@@ -2,7 +2,13 @@
 
 # Performs an upload and retrieval test using the guppy client CLI.
 #
-# Usage: test/doupload.sh
+# Usage: test/doupload [--database-url <url>]
+#
+# Options:
+#   --database-url <url>  Use PostgreSQL instead of SQLite. The URL can either
+#                         include a database name (e.g., postgres://localhost/mydb)
+#                         or omit it (e.g., postgres://localhost), in which case a
+#                         temporary database is created and dropped on exit.
 #
 # The test will:
 # 1. Create a temporary email inbox using maildrop.cc
@@ -16,6 +22,60 @@
 
 set -e
 set -o pipefail
+
+# Parse arguments
+database_url=""
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--database-url)
+			database_url="$2"
+			shift 2
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: test/doupload [--database-url <url>]"
+			exit 1
+			;;
+	esac
+done
+
+# If a database URL was provided, set up the database.
+created_db_name=""
+if [[ -n "$database_url" ]]; then
+	# Check for psql
+	if ! command -v psql &> /dev/null; then
+		echo "psql could not be found, please install it to use --database-url."
+		exit 1
+	fi
+
+	# Parse the URL to check if a database name is included.
+	# Split off query string first, then check the path component.
+	# postgres://user:pass@host:port/dbname?sslmode=disable -> has db name
+	# postgres://user:pass@host:port?sslmode=disable        -> no db name
+	# postgres://user:pass@host:port/?sslmode=disable       -> no db name
+	# postgres://user:pass@host:port                        -> no db name
+	url_base="${database_url%%\?*}"        # everything before ?
+	url_query=""
+	if [[ "$database_url" == *"?"* ]]; then
+		url_query="?${database_url#*\?}"   # ?sslmode=disable&...
+	fi
+
+	# After the scheme (postgres://), find the path after the host
+	after_scheme="${url_base#*://}"         # user:pass@host:port/dbname
+	db_path="${after_scheme#*/}"            # dbname (or same as after_scheme if no /)
+
+	# No db name if: no / found (db_path == after_scheme), or path is empty
+	if [[ "$db_path" == "$after_scheme" ]] || [[ -z "$db_path" ]]; then
+		# No database name provided; create a temporary one
+		created_db_name="guppy_test_$(head -c 8 < /dev/urandom | xxd -p)"
+		# Strip trailing slash from base
+		url_base="${url_base%/}"
+		# Connect to the default 'postgres' database to create ours
+		psql "${url_base}/postgres${url_query}" -c "CREATE DATABASE ${created_db_name};" >/dev/null
+		database_url="${url_base}/${created_db_name}${url_query}"
+		echo "Created temporary database: ${created_db_name}"
+	fi
+fi
 
 export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
 export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
@@ -44,7 +104,11 @@ sandbox="doupload-dir"
 
 # Function wrapper to properly invoke guppy with word splitting
 guppy() {
-	go run .. --data-dir ./$sandbox/storacha "$@"
+	local db_args=()
+	if [[ -n "$database_url" ]]; then
+		db_args+=(--database-url "$database_url")
+	fi
+	go run .. --data-dir ./$sandbox/storacha "${db_args[@]}" "$@"
 }
 
 dataDir="$sandbox/data"
@@ -73,6 +137,19 @@ cleanup() {
 			fi
 		fi
 	done
+
+	# Drop temporary database if we created one
+	if [[ -n "$created_db_name" ]]; then
+		echo "Dropping temporary database: ${created_db_name}"
+		local drop_url_base="${database_url%%\?*}"
+		drop_url_base="${drop_url_base%/${created_db_name}}"
+		local drop_url_query=""
+		if [[ "$database_url" == *"?"* ]]; then
+			drop_url_query="?${database_url#*\?}"
+		fi
+		psql "${drop_url_base}/postgres${drop_url_query}" -c "DROP DATABASE IF EXISTS ${created_db_name};" >/dev/null 2>&1 || true
+		
+	fi
 }
 
 # Set up trap to cleanup on EXIT, INT, TERM

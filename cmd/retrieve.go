@@ -23,7 +23,6 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
-	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -46,11 +45,6 @@ var retrieveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
-		if err != nil {
-			return err
-		}
-		defer repo.Close()
 
 		c := cmdutil.MustGetClient(cfg.Repo.Dir)
 		space, err := cmdutil.ResolveSpace(c, args[0])

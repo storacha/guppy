@@ -3,20 +3,22 @@ package sqlrepo
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	logging "github.com/ipfs/go-log/v2"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/storacha/guppy/pkg/bus"
 )
 
-//go:embed schema.sql
-var Schema string
+// Dialect represents the SQL dialect being used.
+type Dialect int
 
-//go:embed migrations/*.sql
-var MigrationsFS embed.FS
+const (
+	DialectSQLite Dialect = iota
+	DialectPostgres
+)
 
 var log = logging.Logger("preparation/sqlrepo")
 
@@ -48,14 +50,20 @@ const DefaultCheckpointInterval = 5 * time.Minute
 const DefaultPreparedStmtCacheSize = 128
 
 // New creates a new Repo instance with the given database connection.
+// Defaults to SQLite dialect.
 func New(db *sql.DB, opts ...Option) (*Repo, error) {
+	return NewWithDialect(db, DialectSQLite, opts...)
+}
+
+// NewWithDialect creates a new Repo instance with the given database connection and dialect.
+func NewWithDialect(db *sql.DB, dialect Dialect, opts ...Option) (*Repo, error) {
 	cache, err := lru.NewWithEvict(DefaultPreparedStmtCacheSize, func(key string, stmt *sql.Stmt) {
 		stmt.Close()
 	})
 	if err != nil {
 		return nil, err
 	}
-	r := &Repo{db: db, bus: &bus.NoopBus{}, preparedStmts: cache}
+	r := &Repo{db: db, dialect: dialect, bus: &bus.NoopBus{}, preparedStmts: cache}
 
 	for _, opt := range opts {
 		opt(r)
@@ -65,15 +73,34 @@ func New(db *sql.DB, opts ...Option) (*Repo, error) {
 
 type Repo struct {
 	db             *sql.DB
+	dialect        Dialect
 	bus            bus.Publisher
 	preparedStmts  *lru.Cache[string, *sql.Stmt]
 	checkpointStop chan struct{}
 }
 
+// Dialect returns the SQL dialect used by this Repo.
+func (r *Repo) Dialect() Dialect {
+	return r.dialect
+}
+
+// rebind converts a query with ? placeholders to the appropriate dialect.
+// For SQLite, it's a no-op. For Postgres, ? becomes $1, $2, etc.
+func (r *Repo) rebind(query string) string {
+	if r.dialect == DialectPostgres {
+		return sqlx.Rebind(sqlx.DOLLAR, query)
+	}
+	return query
+}
+
 // StartPeriodicCheckpoint starts a background goroutine that periodically
 // checkpoints the WAL to prevent unbounded growth during long operations.
 // Call StopPeriodicCheckpoint to stop it, or it will be stopped when Close is called.
+// This is a no-op for PostgreSQL, which manages WAL internally.
 func (r *Repo) StartPeriodicCheckpoint(ctx context.Context, interval time.Duration) {
+	if r.dialect == DialectPostgres {
+		return
+	}
 	if r.checkpointStop != nil {
 		return // already running
 	}
@@ -102,7 +129,7 @@ func (r *Repo) prepareStmt(ctx context.Context, query string) (*sql.Stmt, error)
 	if stmt, ok := r.preparedStmts.Get(query); ok {
 		return stmt, nil
 	}
-	stmt, err := r.db.PrepareContext(ctx, query)
+	stmt, err := r.db.PrepareContext(ctx, r.rebind(query))
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +155,11 @@ func (r *Repo) Close() error {
 // to the main database file. This should be called periodically during long
 // operations to prevent unbounded WAL growth. The RESTART mode runs until the WAL
 // is fully checkpointed, so that write can start from the beginning of the file.
+// This is a no-op for PostgreSQL.
 func (r *Repo) Checkpoint(ctx context.Context) error {
+	if r.dialect == DialectPostgres {
+		return nil
+	}
 	_, err := r.db.ExecContext(ctx, "PRAGMA wal_checkpoint(RESTART)")
 	return err
 }
