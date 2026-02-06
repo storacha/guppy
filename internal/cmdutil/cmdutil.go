@@ -12,6 +12,7 @@ import (
 
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
+	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/transport/car"
