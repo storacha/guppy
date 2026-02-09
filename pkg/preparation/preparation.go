@@ -66,23 +66,29 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
 		blobUploadParallelism: defaultBlobUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
-			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
-			// a single file, where opening `"."` gives you the file. `os.DirFS()`
-			// gets grumpy if it's pointing at a file, using `fs.Sub()` over it works
-			// just fine. So by being a little roundabout here, we can support both
-			// single files and directories transparently.
-			path, err := filepath.Rel("/", path)
+			absPath, err := filepath.Abs(path)
 			if err != nil {
-				return nil, fmt.Errorf("getting relative path: %w", err)
+				return nil, fmt.Errorf("resolving absolute path: %w", err)
 			}
-			fsys, err := fs.Sub(os.DirFS("/"), path)
+			info, err := os.Stat(absPath)
+			if err != nil {
+				return nil, fmt.Errorf("statting path: %w", err)
+			}
+			// `os.DirFS()` only accepts directories, so fall back to a sub-FS when
+			// the target is a single file.
+			if info.IsDir() {
+				return os.DirFS(absPath), nil
+			}
+			dir := filepath.Dir(absPath)
+			base := filepath.Base(absPath)
+			fsys, err := fs.Sub(os.DirFS(dir), base)
 			if err != nil {
 				return nil, fmt.Errorf("getting sub fs: %w", err)
 			}
 			return fsys, nil
 		},
 		maxNodesPerIndex: defaultMaxNodesPerIndex,
-		bus:              &bus.NoopBus{},
+		bus: &bus.NoopBus{},
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
