@@ -11,6 +11,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/storacha/guppy/cmd/blob"
 	"github.com/storacha/guppy/cmd/unixfs"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -94,6 +95,7 @@ func init() {
 		gateway.Cmd,
 		delegation.Cmd,
 		account.Cmd,
+		blob.Cmd,
 	)
 }
 
