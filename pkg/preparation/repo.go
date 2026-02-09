@@ -94,6 +94,18 @@ func openPostgresRepo(ctx context.Context, connURL string, opts ...sqlrepo.Optio
 }
 
 func migrate(ctx context.Context, db *sql.DB, dialect sqlrepo.Dialect) error {
+	// Migration 20240101000000 was added later, containing what used to be a
+	// separate base `schema.sql` file, which means it wasn't recorded as a
+	// migration. But any DB which has a `goose_db_version` table effectively has
+	// that migration applied. If it was applied as `schema.sql` and didn't get a
+	// `goose_db_version` entry, add one now and make Goose less confused.
+	_, _ = db.ExecContext(ctx, `
+		INSERT INTO goose_db_version (version_id, is_applied)
+		SELECT 20240101000000, true
+		WHERE EXISTS (SELECT 1 FROM goose_db_version)
+		  AND NOT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id = 20240101000000)
+	`)
+
 	var gooseDialect goose.Dialect
 	if dialect == sqlrepo.DialectPostgres {
 		gooseDialect = goose.DialectPostgres
