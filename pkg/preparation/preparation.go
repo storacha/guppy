@@ -88,7 +88,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 			return fsys, nil
 		},
 		maxNodesPerIndex: defaultMaxNodesPerIndex,
-		bus: &bus.NoopBus{},
+		bus:              &bus.NoopBus{},
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
