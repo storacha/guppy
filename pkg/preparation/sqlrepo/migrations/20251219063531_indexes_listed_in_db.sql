@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS indexes (
   state TEXT NOT NULL,
   -- The location commitment from space/blob/add
   location_inv BLOB,
-  -- The PDP accept invocation from space/blob/add
+  -- The PDP accept invocation from space/blob/add 1
   pdp_accept_inv BLOB
 ) STRICT;
 

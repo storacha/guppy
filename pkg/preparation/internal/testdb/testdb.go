@@ -1,6 +1,7 @@
 package testdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -32,14 +33,13 @@ func CreateTestDB(t *testing.T) *sql.DB {
 		db.Close()
 	})
 
-	_, err = db.ExecContext(t.Context(), sqlrepo.Schema)
-	require.NoError(t, err, "failed to execute schema")
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, nil,
+		goose.WithGoMigrations(sqlrepo.GooseMigrations(sqlrepo.DialectSQLite)...),
+	)
+	require.NoError(t, err, "failed to create goose provider")
 
-	goose.SetBaseFS(sqlrepo.MigrationsFS)
-
-	require.NoError(t, goose.SetDialect("sqlite3"), "failed to set goose dialect")
-
-	require.NoError(t, goose.Up(db, "migrations"), "failed to apply migrations")
+	_, err = provider.Up(context.Background())
+	require.NoError(t, err, "failed to apply migrations")
 
 	// Disable foreign key checks to simplify test.
 	_, err = db.ExecContext(t.Context(), "PRAGMA foreign_keys = OFF;")
