@@ -43,7 +43,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/storacha/go-ds-arc v0.0.1
-	github.com/storacha/go-libstoracha v0.7.2-0.20260209134102-74025a374356
+	github.com/storacha/go-libstoracha v0.7.2
 	github.com/storacha/go-ucanto v0.7.2-0.20251119232529-559b0a57d38f
 	github.com/storacha/indexing-service v1.12.2
 	github.com/stretchr/testify v1.11.1
