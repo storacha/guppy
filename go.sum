@@ -792,8 +792,8 @@ github.com/storacha/go-ds-arc v0.0.1 h1:jp7T+qWA4S8Umlug3W/ifl7GVjSbbygl0zYh1RAd
 github.com/storacha/go-ds-arc v0.0.1/go.mod h1:RhCClGz+QFbO8jCXw0VRFbld7WFLyJGRCWT3isoacII=
 github.com/storacha/go-fil-commp-hashhash v0.0.0-20251204184521-dc48123eb846 h1:/mICeyOJtQDRhzJ2SFY2GrdlfSgXQv/xGTtP4tJWlNI=
 github.com/storacha/go-fil-commp-hashhash v0.0.0-20251204184521-dc48123eb846/go.mod h1:YbWvDVjuho1gx+xQNrbM95NNWnJ4oAy067mY5t5F0Bw=
-github.com/storacha/go-libstoracha v0.6.7 h1:1UWPPGqRio72wRDvtiY+ufFDjGWiWfhM+//68oYmZ0k=
-github.com/storacha/go-libstoracha v0.6.7/go.mod h1:htUh/VZ0qHRLPJKWZsgXv9mCOqlAFGTVS//ApvQVNf0=
+github.com/storacha/go-libstoracha v0.7.3 h1:4X9XI0djmURhhabakvmRUy2NUq40Z04ns6NLTY8TmQ8=
+github.com/storacha/go-libstoracha v0.7.3/go.mod h1:htUh/VZ0qHRLPJKWZsgXv9mCOqlAFGTVS//ApvQVNf0=
 github.com/storacha/go-ucanto v0.7.2-0.20251119232529-559b0a57d38f h1:WvlIwpfk/sCu9tF2+ILIiZ9uZfDd1uHXG656qMrlmnY=
 github.com/storacha/go-ucanto v0.7.2-0.20251119232529-559b0a57d38f/go.mod h1:DZlWyzuSkXk3phAuJpGDyhxYWpJogW1RFqp/VfldT64=
 github.com/storacha/indexing-service v1.12.2 h1:DrcIzvM36Ux7i0UmGoSZiU8lR8WjVIqsTULSE1kA+7I=
