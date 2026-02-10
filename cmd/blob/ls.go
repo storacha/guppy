@@ -1,9 +1,10 @@
 package blob
 
 import (
-	"encoding/base64"
+	"bytes"
 
 	"github.com/dustin/go-humanize"
+	"github.com/ipld/go-ipld-prime/codec/dagjson"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	spaceblobcap "github.com/storacha/go-libstoracha/capabilities/space/blob"
@@ -71,7 +72,12 @@ var lsCmd = &cobra.Command{
 
 			for _, r := range listOk.Results {
 				if lsFlags.json {
-					cmd.Printf(`{"blob":{"digest":{"/":%q},"size":%d}}%s`, base64.StdEncoding.EncodeToString(r.Blob.Digest), r.Blob.Size, "\n")
+					n, err := r.ToIPLD()
+					cobra.CheckErr(err)
+					var buf bytes.Buffer
+					err = dagjson.Encode(n, &buf)
+					cobra.CheckErr(err)
+					cmd.Println(buf.String())
 				} else if lsFlags.long {
 					if lsFlags.human {
 						cmd.Printf("%s\t%s\n", digestutil.Format(r.Blob.Digest), humanize.IBytes(r.Blob.Size))
