@@ -32,6 +32,7 @@ func TestSpaceBlobList(t *testing.T) {
 					Digest: testutil.MultihashFromBytes(t, blobBytes),
 					Size:   uint64(len(blobBytes)),
 				},
+				Cause:      testutil.RandomCID(t),
 				InsertedAt: time.Unix(time.Now().Unix(), 0).UTC(),
 			},
 		}
