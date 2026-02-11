@@ -308,10 +308,27 @@ func (c *Checker) checkNodeCompleteness(ctx context.Context, uploadID id.UploadI
 		Passed: true,
 	}
 
-	// TODO: Implement
-	// 1. Call repo.NodesNotInShards(uploadID)
-	// 2. If any returned, add issues
-	// 3. No automatic repair (re-running upload will shard them)
+	// Get the upload to get spaceDID
+	upload, err := c.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("getting upload: %w", err)
+	}
+
+	// Check for nodes not yet assigned to shards
+	unshardedCIDs, err := c.Repo.NodesNotInShards(ctx, uploadID, upload.SpaceDID())
+	if err != nil {
+		return result, fmt.Errorf("checking for unsharded nodes: %w", err)
+	}
+
+	if len(unshardedCIDs) > 0 {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: fmt.Sprintf("Found %d node(s) not assigned to shards", len(unshardedCIDs)),
+			Details:     "Re-run the upload to shard these nodes",
+		})
+		// No automatic repair - re-running upload will shard them
+	}
 
 	return result, nil
 }
