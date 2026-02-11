@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ipfs/go-cid"
+
 	"github.com/storacha/guppy/pkg/preparation"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -131,14 +133,115 @@ func (c *Checker) checkUploadScanned(ctx context.Context, uploadID id.UploadID, 
 		Passed: true,
 	}
 
-	// TODO: Implement
-	// 1. Get upload
-	// 2. Check root_fs_entry_id is not NULL
-	// 3. If not NULL, verify FSEntry exists (query fs_entries)
-	// 4. If missing, add issue and optionally repair (set to NULL)
-	// 5. Check root_cid is not NULL
-	// 6. If not NULL, verify node exists (query nodes)
-	// 7. If missing, add issue and optionally repair (set to NULL)
+	// Get the upload
+	upload, err := c.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("getting upload: %w", err)
+	}
+
+	// Track if upload has been started at all
+	fsEntryIsNull := upload.RootFSEntryID() == id.Nil
+	cidIsNull := upload.RootCID() == cid.Undef
+
+	// Special case: upload never started (both NULL)
+	if fsEntryIsNull && cidIsNull {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeWarning,
+			Description: "Upload has not been started",
+			Details:     "Both filesystem scan and DAG scan are incomplete. Run 'guppy upload' to begin.",
+		})
+		return result, nil
+	}
+
+	// Check root_fs_entry_id
+	if fsEntryIsNull {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: "Filesystem scan incomplete",
+			Details:     "root_fs_entry_id is NULL",
+		})
+	} else {
+		// Verify FSEntry exists (could be file or directory)
+		// GetFileByID returns (nil, nil) if entry doesn't exist,
+		// or (nil, err) if it exists but is a directory (which is fine)
+		file, err := c.Repo.GetFileByID(ctx, upload.RootFSEntryID())
+		if file == nil && err == nil {
+			// Entry doesn't exist
+			result.Passed = false
+			result.Issues = append(result.Issues, Issue{
+				Type:        IssueTypeError,
+				Description: "root_fs_entry_id points to non-existent entry",
+				Details:     fmt.Sprintf("FSEntry ID: %s", upload.RootFSEntryID()),
+			})
+
+			// Attempt repair if enabled
+			if cfg.applyRepairs {
+				repair := Repair{
+					Description: "Set root_fs_entry_id to NULL to trigger rescan",
+				}
+
+				if err := upload.SetRootFSEntryID(id.Nil); err != nil {
+					repair.Applied = false
+					repair.Error = fmt.Errorf("failed to set root_fs_entry_id: %w", err)
+				} else if err := c.Repo.UpdateUpload(ctx, upload); err != nil {
+					repair.Applied = false
+					repair.Error = fmt.Errorf("failed to update upload: %w", err)
+				} else {
+					repair.Applied = true
+				}
+
+				result.Repairs = append(result.Repairs, repair)
+			}
+		}
+		// If err != nil, it's likely "found entry is not a file" (i.e., it's a directory)
+		// which is fine - the entry exists
+	}
+
+	// Check root_cid
+	if cidIsNull {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: "DAG scan incomplete",
+			Details:     "root_cid is NULL",
+		})
+	} else {
+		// Verify node exists
+		node, err := c.Repo.FindNodeByCIDAndSpaceDID(ctx, upload.RootCID(), upload.SpaceDID())
+		if err != nil {
+			return result, fmt.Errorf("checking if root node exists: %w", err)
+		}
+
+		if node == nil {
+			result.Passed = false
+			result.Issues = append(result.Issues, Issue{
+				Type:        IssueTypeError,
+				Description: "root_cid points to non-existent node",
+				Details:     fmt.Sprintf("Node CID: %s", upload.RootCID()),
+			})
+
+			// Attempt repair if enabled
+			if cfg.applyRepairs {
+				repair := Repair{
+					Description: "Set root_cid to NULL to trigger DAG rescan",
+				}
+
+				if err := upload.SetRootCID(cid.Undef); err != nil {
+					repair.Applied = false
+					repair.Error = fmt.Errorf("failed to set root_cid: %w", err)
+				} else if err := c.Repo.UpdateUpload(ctx, upload); err != nil {
+					repair.Applied = false
+					repair.Error = fmt.Errorf("failed to update upload: %w", err)
+				} else {
+					repair.Applied = true
+				}
+
+				result.Repairs = append(result.Repairs, repair)
+			}
+		}
+	}
 
 	return result, nil
 }
