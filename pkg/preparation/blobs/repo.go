@@ -17,6 +17,7 @@ import (
 type Repo interface {
 	CreateShard(ctx context.Context, uploadID id.UploadID, size uint64, digestState, pieceCidState []byte) (*model.Shard, error)
 	UpdateShard(ctx context.Context, shard *model.Shard) error
+	ShardsForUpload(ctx context.Context, uploadID id.UploadID) ([]*model.Shard, error)
 	ShardsForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Shard, error)
 	GetShardByID(ctx context.Context, shardID id.ShardID) (*model.Shard, error)
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID, offset uint64, options ...AddNodeToShardOption) error

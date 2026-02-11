@@ -7,6 +7,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/storacha/guppy/pkg/preparation"
+	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -343,12 +344,43 @@ func (c *Checker) checkShardCompleteness(ctx context.Context, uploadID id.Upload
 		Passed: true,
 	}
 
-	// TODO: Implement
-	// 1. Get all shards for upload
-	// 2. Check each shard.state == BlobStateAdded
-	// 3. If not, add issue (no auto-repair, re-running upload will retry)
-	// 4. Call repo.ShardsNotInIndexes(uploadID)
-	// 5. If any returned, add issues
+	// Get all shards for upload
+	shards, err := c.Repo.ShardsForUpload(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("getting shards for upload: %w", err)
+	}
+
+	// Check each shard's state
+	incompleteCount := 0
+	for _, shard := range shards {
+		if shard.State() != blobsmodel.BlobStateAdded {
+			incompleteCount++
+		}
+	}
+
+	if incompleteCount > 0 {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: fmt.Sprintf("%d shard(s) not fully uploaded", incompleteCount),
+			Details:     "Re-run the upload to complete shard uploads",
+		})
+	}
+
+	// Check for shards not yet assigned to indexes
+	unindexedShardIDs, err := c.Repo.ShardsNotInIndexes(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("checking for unindexed shards: %w", err)
+	}
+
+	if len(unindexedShardIDs) > 0 {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: fmt.Sprintf("%d shard(s) not assigned to indexes", len(unindexedShardIDs)),
+			Details:     "Re-run the upload to index these shards",
+		})
+	}
 
 	return result, nil
 }
