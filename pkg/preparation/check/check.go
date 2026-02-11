@@ -393,10 +393,28 @@ func (c *Checker) checkIndexCompleteness(ctx context.Context, uploadID id.Upload
 		Passed: true,
 	}
 
-	// TODO: Implement
-	// 1. Get all indexes for upload
-	// 2. Check each index.state == BlobStateAdded
-	// 3. If not, add issue (no auto-repair, re-running upload will retry)
+	// Get all indexes for upload
+	indexes, err := c.Repo.IndexesForUpload(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("getting indexes for upload: %w", err)
+	}
+
+	// Check each index's state
+	incompleteCount := 0
+	for _, index := range indexes {
+		if index.State() != blobsmodel.BlobStateAdded {
+			incompleteCount++
+		}
+	}
+
+	if incompleteCount > 0 {
+		result.Passed = false
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: fmt.Sprintf("%d index(es) not fully uploaded", incompleteCount),
+			Details:     "Re-run the upload to complete index uploads",
+		})
+	}
 
 	return result, nil
 }
