@@ -87,6 +87,26 @@ func (r *Repo) dagScanScanner(sqlScanner sqlScanner) model.DAGScanScanner {
 	}
 }
 
+func (r *Repo) GetDAGScanByFSEntryID(ctx context.Context, fsEntryID id.FSEntryID) (model.DAGScan, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind
+		FROM dag_scans
+		WHERE fs_entry_id = ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, fsEntryID)
+	ds, err := model.ReadDAGScanFromDatabase(r.dagScanScanner(row))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil // Not found
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading DAG scan: %w", err)
+	}
+	return ds, nil
+}
+
 func (r *Repo) IncompleteDAGScansForUpload(ctx context.Context, uploadID id.UploadID) ([]model.DAGScan, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT fs_entry_id, upload_id, space_did, created_at, updated_at, cid, kind

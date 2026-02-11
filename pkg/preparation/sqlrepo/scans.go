@@ -171,6 +171,32 @@ func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	return nil, errors.New("found entry is not a file")
 }
 
+// GetDirectoryByID retrieves a directory by its unique ID from the repository.
+func (r *Repo) GetDirectoryByID(ctx context.Context, dirID id.FSEntryID) (*scanmodel.Directory, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT id, path, last_modified, "mode", size, "checksum", source_id, space_did
+		FROM fs_entries
+		WHERE id = ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, dirID)
+	entry, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error {
+		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := entry.(*scanmodel.Directory); ok {
+		return d, nil
+	}
+	return nil, errors.New("found entry is not a directory")
+}
+
 func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, bool, error) {
 	newID := id.New()
 	// On a conflict we do a no-op DO UPDATE SET path = excluded.path only to enable RETURNING,
