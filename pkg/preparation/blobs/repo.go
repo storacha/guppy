@@ -23,6 +23,10 @@ type Repo interface {
 	AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID, offset uint64, options ...AddNodeToShardOption) error
 	// NodesNotInShards returns CIDs of nodes for the given upload that are not yet assigned to shards.
 	NodesNotInShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]cid.Cid, error)
+	// NodeUploadExists checks if a node_uploads record exists for the given node, space, and upload.
+	NodeUploadExists(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) (bool, error)
+	// CreateNodeUpload creates a node_uploads record with shard_id = NULL.
+	CreateNodeUpload(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
 	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
 	// NodesByShard fetches all the nodes for a given shard, returned in the order

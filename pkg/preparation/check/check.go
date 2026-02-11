@@ -292,11 +292,86 @@ func (c *Checker) checkNodeIntegrity(ctx context.Context, uploadID id.UploadID, 
 		Passed: true,
 	}
 
-	// TODO: Implement
-	// 1. Get upload.root_cid
-	// 2. Traverse DAG from root (follow links recursively)
-	// 3. For each node CID, check if node_uploads record exists
-	// 4. If missing, add issue and optionally create record
+	// Get the upload
+	upload, err := c.Repo.GetUploadByID(ctx, uploadID)
+	if err != nil {
+		return result, fmt.Errorf("getting upload: %w", err)
+	}
+
+	// If root_cid is not set, skip this check
+	if upload.RootCID() == cid.Undef {
+		return result, nil
+	}
+
+	// Traverse DAG and collect all node CIDs
+	visited := make(map[cid.Cid]struct{})
+	var missingNodeUploads []cid.Cid
+
+	var traverse func(nodeCID cid.Cid) error
+	traverse = func(nodeCID cid.Cid) error {
+		// Skip if already visited
+		if _, ok := visited[nodeCID]; ok {
+			return nil
+		}
+		visited[nodeCID] = struct{}{}
+
+		// Check if node_uploads record exists
+		hasRecord, err := c.Repo.NodeUploadExists(ctx, nodeCID, upload.SpaceDID(), uploadID)
+		if err != nil {
+			return fmt.Errorf("checking node_uploads for %s: %w", nodeCID, err)
+		}
+
+		if !hasRecord {
+			missingNodeUploads = append(missingNodeUploads, nodeCID)
+
+			// Attempt repair if enabled
+			if cfg.applyRepairs {
+				if err := c.Repo.CreateNodeUpload(ctx, nodeCID, upload.SpaceDID(), uploadID); err != nil {
+					result.Repairs = append(result.Repairs, Repair{
+						Description: fmt.Sprintf("Create node_uploads record for node %s", nodeCID),
+						Applied:     false,
+						Error:       err,
+					})
+				} else {
+					result.Repairs = append(result.Repairs, Repair{
+						Description: fmt.Sprintf("Create node_uploads record for node %s", nodeCID),
+						Applied:     true,
+					})
+				}
+			}
+		}
+
+		// Get links and traverse children
+		links, err := c.Repo.LinksForCID(ctx, nodeCID, upload.SpaceDID())
+		if err != nil {
+			return fmt.Errorf("getting links for %s: %w", nodeCID, err)
+		}
+
+		for _, link := range links {
+			if err := traverse(link.Hash()); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	if err := traverse(upload.RootCID()); err != nil {
+		return result, err
+	}
+
+	if len(missingNodeUploads) > 0 {
+		result.Passed = false
+		details := "This indicates database inconsistency."
+		if !cfg.applyRepairs {
+			details += " Use --repair to create missing records."
+		}
+		result.Issues = append(result.Issues, Issue{
+			Type:        IssueTypeError,
+			Description: fmt.Sprintf("Found %d node(s) without node_uploads records", len(missingNodeUploads)),
+			Details:     details,
+		})
+	}
 
 	return result, nil
 }
