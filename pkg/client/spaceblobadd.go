@@ -597,7 +597,7 @@ func (c *Client) sendPutReceipt(ctx context.Context, putTask invocation.Invocati
 
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{httpPutConcludeInvocation}, c.Connection())
 	if err != nil {
-		return fmt.Errorf("executing conclude invocation: %w", err)
+		return fmt.Errorf("executing conclude invocation: %w", ctxutil.ErrorWithCause(err, ctx))
 	}
 
 	rcptlnk, ok := resp.Get(httpPutConcludeInvocation.Link())
