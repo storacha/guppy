@@ -71,12 +71,12 @@ func (c *Client) Fetch(ctx context.Context, task ucan.Link) (receipt.AnyReceipt,
 	receiptURL := c.endpoint.JoinPath(task.String())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, receiptURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating get request: %w", err)
+		return nil, fmt.Errorf("creating get request: %w", ctxutil.ErrorWithCause(err, ctx))
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("doing receipts request: %w", err)
+		return nil, fmt.Errorf("doing receipts request: %w", ctxutil.ErrorWithCause(err, ctx))
 	}
 	defer resp.Body.Close()
 
