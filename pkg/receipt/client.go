@@ -21,6 +21,7 @@ import (
 	ucanhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
+	"github.com/storacha/guppy/internal/ctxutil"
 )
 
 var ErrNotFound = errors.New("receipt not found")
@@ -214,7 +215,7 @@ func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return nil, err
+			return nil, ctxutil.ErrorWithCause(err, ctx)
 		}
 		return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, *conf.retries+1)
 	}
