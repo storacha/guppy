@@ -1,22 +1,33 @@
 package check
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ipfs/boxo/ipld/unixfs"
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-unixfsnode"
+	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime/datamodel"
+	"github.com/ipld/go-ipld-prime/linking"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/pkg/preparation"
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
+type OpenNodeReaderFunc func() (nodereader.NodeReader, error)
+
 // Checker provides methods for checking upload integrity and completeness.
 type Checker struct {
-	Repo preparation.Repo
+	OpenNodeReader OpenNodeReaderFunc
+	Repo           preparation.Repo
 }
 
 // Option configures the check behavior.
@@ -613,39 +624,68 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 		}
 	}
 
-	// Get the directory's UnixFS node
-	dirNode, err := c.Repo.FindNodeByCIDAndSpaceDID(ctx, dagRootCID, spaceDID)
+	nodeReader, err := c.OpenNodeReader()
 	if err != nil {
-		return false, fmt.Errorf("finding directory node: %w", err)
-	}
-	if dirNode == nil {
-		// Node doesn't exist - this should have been caught by validateDAG
-		return true, nil
+		return false, fmt.Errorf("opening node reader: %w", err)
 	}
 
-	// Check if it's a UnixFS node
-	_, ok := dirNode.(*dagsmodel.UnixFSNode)
-	if !ok {
-		// Not a UnixFS node - might be a raw node directory, skip validation
-		return false, nil
+	// we'll use the database and the node reader to convert CIDs to their block representation
+	// go-ipld-prime's link system + unixfsnode.Reify will then allow us to traverse the dag transparently, reading "blocks" as needed,
+	// and presenting an abstracted view of the directory as a map of names -> links, transparently
+	// handling simple directories vs HAMTS
+	lsys := cidlink.DefaultLinkSystem()
+	lsys.StorageReadOpener = func(lctx linking.LinkContext, lnk datamodel.Link) (io.Reader, error) {
+		ctx := lctx.Ctx
+		cidLink, ok := lnk.(cidlink.Link)
+		if !ok {
+			return nil, fmt.Errorf("unexpected link type: %T", lnk)
+		}
+		dirNode, err := c.Repo.FindNodeByCIDAndSpaceDID(ctx, cidLink.Cid, spaceDID)
+		if err != nil {
+			return nil, fmt.Errorf("finding node for link %s: %w", cidLink.Cid, err)
+		}
+		if dirNode == nil {
+			return nil, fmt.Errorf("linked node not found: %s", cidLink.Cid)
+		}
+		data, err := nodeReader.GetData(ctx, dirNode)
+		if err != nil {
+			return nil, fmt.Errorf("getting data for node %s: %w", cidLink.Cid, err)
+		}
+		return bytes.NewReader(data), nil
 	}
 
-	// Get the links for this directory
-	links, err := c.Repo.LinksForCID(ctx, dagRootCID, spaceDID)
+	nd, err := lsys.Load(linking.LinkContext{Ctx: ctx}, cidlink.Link{Cid: dagRootCID}, dagpb.Type.PBNode)
 	if err != nil {
-		return false, fmt.Errorf("getting links for directory: %w", err)
+		return false, fmt.Errorf("loading root DAG node: %w", err)
+	}
+	// modify the interface to reify the node to a UnixFS node, which will enable us to treat the directory as a map of paths
+	nd, err = unixfsnode.Reify(linking.LinkContext{Ctx: ctx}, nd, &lsys)
+	if err != nil {
+		return false, fmt.Errorf("reifying root DAG node to UnixFS: %w", err)
 	}
 
-	// Decode the UnixFS data to validate it's a directory
-	// We'll use the links we already have from the database
-	// The UFSData contains the UnixFS metadata, links are stored separately in our DB
-
+	// has orphans is used to track if there are nodes in the dag not contained in the FS children
 	hasOrphans := false
-
+	iter := nd.MapIterator()
+	// need to verify there are no orphans from the FS children that are not represented in
+	// in the dag -- which we do by insuring every single FS node is matched
+	matched := map[string]struct{}{}
 	// Check each link in the DAG
-	for _, link := range links {
-		linkName := link.Name()
-		linkCID := link.Hash()
+	for !iter.Done() {
+		nameNode, lnkNode, err := iter.Next()
+		if err != nil {
+			return false, fmt.Errorf("iterating directory DAG: %w", err)
+		}
+
+		linkName, err := nameNode.AsString()
+		if err != nil {
+			return false, fmt.Errorf("getting link name as string: %w", err)
+		}
+		lnk, err := lnkNode.AsLink()
+		if err != nil {
+			return false, fmt.Errorf("getting link from node: %w", err)
+		}
+		linkCID := lnk.(cidlink.Link).Cid
 
 		// Check if this link exists in filesystem
 		if fsChild, exists := fsChildMap[linkName]; exists {
@@ -653,6 +693,8 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 			if !fsChild.dagCID.Equals(linkCID) {
 				// CID mismatch - this is an error
 				hasOrphans = true
+			} else {
+				matched[linkName] = struct{}{}
 			}
 		} else {
 			// Link not in filesystem - this is an orphan
@@ -660,7 +702,7 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 		}
 	}
 
-	return hasOrphans, nil
+	return hasOrphans && len(matched) == len(fsChildMap), nil
 }
 
 // checkNodeIntegrity ensures all nodes in the upload have node_uploads records.
