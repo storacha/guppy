@@ -3,6 +3,8 @@ package check
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
 	prepcheck "github.com/storacha/guppy/pkg/preparation/check"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
+	"github.com/storacha/guppy/pkg/preparation/sources"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -108,16 +112,73 @@ var Cmd = &cobra.Command{
 			fmt.Printf("Checking upload for space %s, source %s...\n", spaceDID, sourceArg)
 		}
 
-		// Run checks
-		checker := &prepcheck.Checker{Repo: repo}
+		// Initialize checker with proper access to the original files on disk
+		// Create sources API with default local FS accessor
+		sourcesAPI := sources.API{
+			Repo: repo,
+			GetLocalFSForPathFn: func(path string) (fs.FS, error) {
+				absPath, err := filepath.Abs(path)
+				if err != nil {
+					return nil, fmt.Errorf("resolving absolute path: %w", err)
+				}
+				info, err := os.Stat(absPath)
+				if err != nil {
+					return nil, fmt.Errorf("statting path: %w", err)
+				}
+				// os.DirFS() only accepts directories, so fall back to a sub-FS for files
+				if info.IsDir() {
+					return os.DirFS(absPath), nil
+				}
+				dir := filepath.Dir(absPath)
+				base := filepath.Base(absPath)
+				fsys, err := fs.Sub(os.DirFS(dir), base)
+				if err != nil {
+					return nil, fmt.Errorf("getting sub fs: %w", err)
+				}
+				return fsys, nil
+			},
+		}
+
+		// Create node reader opener with the sources API
+		nodeReaderOpener, err := nodereader.NewNodeReaderOpener(
+			repo.LinksForCID,
+			func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
+				source, err := repo.GetSourceByID(ctx, sourceID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get source by ID %s: %w", sourceID, err)
+				}
+
+				fsys, err := sourcesAPI.Access(source)
+				if err != nil {
+					return nil, fmt.Errorf("failed to access source %s: %w", sourceID, err)
+				}
+
+				f, err := fsys.Open(path)
+				if err != nil {
+					return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
+				}
+				return f, nil
+			},
+			true, // checkReads - validate data integrity
+		)
+		if err != nil {
+			return fmt.Errorf("creating node reader opener: %w", err)
+		}
+
+		// Create checker with initialized OpenNodeReader
+		checker := &prepcheck.Checker{
+			Repo:           repo,
+			OpenNodeReader: nodeReaderOpener.OpenNodeReader,
+		}
+
 		var opts []prepcheck.Option
 		if checkFlags.repair {
 			opts = append(opts, prepcheck.WithRepairs())
 		}
 
+		// Run checks
 		allPassed := true
 		totalRepairs := 0
-
 		for i, uploadInfo := range uploadsToCheck {
 			if len(uploadsToCheck) > 1 {
 				fmt.Printf("\n[%d/%d] ", i+1, len(uploadsToCheck))
@@ -149,10 +210,6 @@ var Cmd = &cobra.Command{
 			if totalRepairs > 0 {
 				fmt.Printf("Applied %d repair(s)\n", totalRepairs)
 			}
-		}
-
-		if !allPassed {
-			fmt.Println("\nRecommendation: Re-run 'guppy upload <space>' to complete any incomplete uploads")
 		}
 
 		return nil
