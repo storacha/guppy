@@ -290,6 +290,12 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			return false, fmt.Errorf("error checking FSEntry %s: %w", fsEntryID, err)
 		}
 
+		// Handle case where FSEntry doesn't exist (shouldn't happen with FK constraints,
+		// but could occur with disabled FK constraints in tests or database corruption)
+		if entry == nil {
+			return true, nil // Entry doesn't exist - mark as having errors
+		}
+
 		_, isDirectory := entry.(*scansmodel.Directory)
 		hadErrors := false
 

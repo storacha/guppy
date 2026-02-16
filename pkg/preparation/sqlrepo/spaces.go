@@ -142,7 +142,7 @@ func (r *Repo) ListSpaces(ctx context.Context) ([]*spacesmodel.Space, error) {
 	var spaces []*spacesmodel.Space
 	for rows.Next() {
 		space, err := spacesmodel.ReadSpaceFromDatabase(func(did *did.DID, name *string, createdAt *time.Time, shardSize *uint64) error {
-			return rows.Scan(util.DbDID(did), name, createdAt, shardSize)
+			return rows.Scan(util.DbDID(did), name, util.TimestampScanner(createdAt), shardSize)
 		})
 		if err != nil {
 			return nil, err
