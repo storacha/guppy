@@ -17,8 +17,8 @@ type Repo interface {
 	UpdateUpload(ctx context.Context, upload *uploadmodel.Upload) error
 	FindOrCreateDirectory(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (*model.Directory, bool, error)
 	CreateDirectoryChildren(ctx context.Context, parent *model.Directory, children []model.FSEntry) error
-	DirectoryChildren(ctx context.Context, dir *model.Directory) ([]model.FSEntry, error)
+	DirectoryChildren(ctx context.Context, dirID id.FSEntryID) ([]model.FSEntry, error)
+	GetFSEntryByID(ctx context.Context, fsEntryID id.FSEntryID) (model.FSEntry, error)
 	GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error)
-	GetDirectoryByID(ctx context.Context, dirID id.FSEntryID) (*model.Directory, error)
 	DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
 }

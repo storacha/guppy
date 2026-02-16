@@ -98,7 +98,7 @@ func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 }
 
 // DirectoryChildren retrieves the children of a directory from the repository.
-func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
+func (r *Repo) DirectoryChildren(ctx context.Context, dirID id.FSEntryID) ([]scanmodel.FSEntry, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT fse.id, fse.path, fse.last_modified, fse."mode", fse.size, fse."checksum", fse.source_id, fse.space_did
 		FROM directory_children dc
@@ -108,7 +108,7 @@ func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	rows, err := stmt.QueryContext(ctx, dir.ID())
+	rows, err := stmt.QueryContext(ctx, dirID)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +145,8 @@ func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) 
 	return entries, nil
 }
 
-// GetFileByID retrieves a file by its unique ID from the repository.
-func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
+// GetFSEntryByID retrieves an FSEntry (file or directory) by its unique ID from the repository.
+func (r *Repo) GetFSEntryByID(ctx context.Context, fsEntryID id.FSEntryID) (scanmodel.FSEntry, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT id, path, last_modified, "mode", size, "checksum", source_id, space_did
 		FROM fs_entries
@@ -155,33 +155,7 @@ func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	row := stmt.QueryRowContext(ctx, fileID)
-	file, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error {
-		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if f, ok := file.(*scanmodel.File); ok {
-		return f, nil
-	}
-	return nil, errors.New("found entry is not a file")
-}
-
-// GetDirectoryByID retrieves a directory by its unique ID from the repository.
-func (r *Repo) GetDirectoryByID(ctx context.Context, dirID id.FSEntryID) (*scanmodel.Directory, error) {
-	stmt, err := r.prepareStmt(ctx, `
-		SELECT id, path, last_modified, "mode", size, "checksum", source_id, space_did
-		FROM fs_entries
-		WHERE id = ?
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	row := stmt.QueryRowContext(ctx, dirID)
+	row := stmt.QueryRowContext(ctx, fsEntryID)
 	entry, err := scanmodel.ReadFSEntryFromDatabase(func(id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode, size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID) error {
 		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
 	})
@@ -191,10 +165,20 @@ func (r *Repo) GetDirectoryByID(ctx context.Context, dirID id.FSEntryID) (*scanm
 	if err != nil {
 		return nil, err
 	}
-	if d, ok := entry.(*scanmodel.Directory); ok {
-		return d, nil
+
+	return entry, nil
+}
+
+// GetFileByID retrieves a file by its unique ID from the repository.
+func (r *Repo) GetFileByID(ctx context.Context, fileID id.FSEntryID) (*scanmodel.File, error) {
+	file, err := r.GetFSEntryByID(ctx, fileID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("found entry is not a directory")
+	if f, ok := file.(*scanmodel.File); ok {
+		return f, nil
+	}
+	return nil, errors.New("found entry is not a file")
 }
 
 func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified time.Time, mode fs.FileMode, size uint64, checksum []byte, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, bool, error) {

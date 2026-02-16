@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ipfs/boxo/ipld/unixfs"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-unixfsnode"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -19,6 +18,7 @@ import (
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
+	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -154,35 +154,21 @@ func (c *Checker) checkUploadScanned(ctx context.Context, uploadID id.UploadID, 
 		return result, fmt.Errorf("getting upload: %w", err)
 	}
 
-	// Track if upload has been started at all
-	fsEntryIsNull := upload.RootFSEntryID() == id.Nil
-	cidIsNull := upload.RootCID() == cid.Undef
-
-	// Special case: upload never started (both NULL)
-	if fsEntryIsNull && cidIsNull {
-		result.Passed = false
-		result.Issues = append(result.Issues, Issue{
-			Type:        IssueTypeWarning,
-			Description: "Upload has not been started",
-			Details:     "Both filesystem scan and DAG scan are incomplete. Run 'guppy upload' to begin.",
-		})
-		return result, nil
-	}
+	rootFSEntryID := upload.RootFSEntryID()
+	rootCID := upload.RootCID()
 
 	// Check root_fs_entry_id
-	if fsEntryIsNull {
+	if rootFSEntryID == id.Nil {
 		result.Passed = false
 		result.Issues = append(result.Issues, Issue{
 			Type:        IssueTypeError,
-			Description: "Filesystem scan incomplete",
+			Description: "Filesystem scan not started or incomplete. Re-run the upload to start scanning.",
 			Details:     "root_fs_entry_id is NULL",
 		})
 	} else {
 		// Verify FSEntry exists (could be file or directory)
-		// GetFileByID returns (nil, nil) if entry doesn't exist,
-		// or (nil, err) if it exists but is a directory (which is fine)
-		file, err := c.Repo.GetFileByID(ctx, upload.RootFSEntryID())
-		if file == nil && err == nil {
+		entry, err := c.Repo.GetFSEntryByID(ctx, upload.RootFSEntryID())
+		if entry == nil && err == nil {
 			// Entry doesn't exist
 			result.Passed = false
 			result.Issues = append(result.Issues, Issue{
@@ -210,16 +196,14 @@ func (c *Checker) checkUploadScanned(ctx context.Context, uploadID id.UploadID, 
 				result.Repairs = append(result.Repairs, repair)
 			}
 		}
-		// If err != nil, it's likely "found entry is not a file" (i.e., it's a directory)
-		// which is fine - the entry exists
 	}
 
 	// Check root_cid
-	if cidIsNull {
+	if rootCID == cid.Undef {
 		result.Passed = false
 		result.Issues = append(result.Issues, Issue{
 			Type:        IssueTypeError,
-			Description: "DAG scan incomplete",
+			Description: "DAG scan incomplete. Re-run the upload to start scanning",
 			Details:     "root_cid is NULL",
 		})
 	} else {
@@ -274,7 +258,7 @@ func (c *Checker) checkUploadScanned(ctx context.Context, uploadID id.UploadID, 
 // - If DAGScan complete and no child errors, validate directory DAG
 // - If directory DAG invalid, clear the CID from DAGScan
 //
-// If root directory DAG is invalid, remove root_cid from upload.
+// If root FSEntry DAG is invalid, remove root_cid from upload.
 func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.UploadID, cfg *config) (CheckResult, error) {
 	result := CheckResult{
 		Name:   "File System Integrity Check",
@@ -301,29 +285,19 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 	// Returns: (hadErrors bool, error)
 	var checkFSEntry func(fsEntryID id.FSEntryID) (bool, error)
 	checkFSEntry = func(fsEntryID id.FSEntryID) (bool, error) {
-		// Try to get as file first
-		file, err := c.Repo.GetFileByID(ctx, fsEntryID)
+		entry, err := c.Repo.GetFSEntryByID(ctx, fsEntryID)
 		if err != nil {
 			return false, fmt.Errorf("error checking FSEntry %s: %w", fsEntryID, err)
 		}
 
-		isDirectory := (file == nil)
+		_, isDirectory := entry.(*scansmodel.Directory)
 		hadErrors := false
 
 		if isDirectory {
-			// Handle directory entry
-			dir, err := c.Repo.GetDirectoryByID(ctx, fsEntryID)
-			if err != nil {
-				return false, fmt.Errorf("getting directory %s: %w", fsEntryID, err)
-			}
-			if dir == nil {
-				return false, fmt.Errorf("FSEntry %s is neither file nor directory", fsEntryID)
-			}
-
 			// Recursively check all children first
-			children, err := c.Repo.DirectoryChildren(ctx, dir)
+			children, err := c.Repo.DirectoryChildren(ctx, entry.ID())
 			if err != nil {
-				return false, fmt.Errorf("getting children of directory %s: %w", fsEntryID, err)
+				return false, fmt.Errorf("getting children of directory %s: %w", entry.ID(), err)
 			}
 
 			for _, child := range children {
@@ -338,28 +312,28 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 		}
 
 		// Check if DAGScan exists
-		dagScan, err := c.Repo.GetDAGScanByFSEntryID(ctx, fsEntryID)
+		dagScan, err := c.Repo.GetDAGScanByFSEntryID(ctx, entry.ID())
 		if err != nil {
-			return false, fmt.Errorf("checking DAGScan for FSEntry %s: %w", fsEntryID, err)
+			return false, fmt.Errorf("checking DAGScan for FSEntry %s: %w", entry.ID(), err)
 		}
 
 		if dagScan == nil {
 			// No DAGScan exists
-			missingDAGScans = append(missingDAGScans, fsEntryID)
+			missingDAGScans = append(missingDAGScans, entry.ID())
 			hadErrors = true
 
 			// Attempt repair if enabled
 			if cfg.applyRepairs {
-				_, err := c.Repo.CreateDAGScan(ctx, fsEntryID, isDirectory, uploadID, upload.SpaceDID())
+				_, err := c.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, upload.SpaceDID())
 				if err != nil {
 					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", fsEntryID),
+						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", entry.ID()),
 						Applied:     false,
 						Error:       err,
 					})
 				} else {
 					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", fsEntryID),
+						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", entry.ID()),
 						Applied:     true,
 					})
 				}
@@ -368,25 +342,33 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			// DAGScan exists and is complete - validate the DAG
 			dagInvalid := false
 
-			if isDirectory && hadErrors {
-				// Directory with child errors - mark as invalid
-				dagInvalid = true
+			if isDirectory {
+				if hadErrors {
+					// Directory with child errors - mark as invalid
+					dagInvalid = true
+				} else {
+					// Validate DAG structure (check all nodes exist)
+					dagInvalid, err = c.validateDAG(ctx, dagScan.CID(), upload.SpaceDID())
+					if err != nil {
+						return false, fmt.Errorf("validating DAG for FSEntry %s: %w", fsEntryID, err)
+					}
+
+					if !dagInvalid {
+						// For directories without child errors, also validate UnixFS entries
+						hasOrphans, err := c.validateDirectoryDAG(ctx, fsEntryID, dagScan.CID(), upload.SpaceDID())
+						if err != nil {
+							return false, fmt.Errorf("validating directory DAG for FSEntry %s: %w", fsEntryID, err)
+						}
+						if hasOrphans {
+							dagInvalid = true
+						}
+					}
+				}
 			} else {
 				// Validate DAG structure (check all nodes exist)
 				dagInvalid, err = c.validateDAG(ctx, dagScan.CID(), upload.SpaceDID())
 				if err != nil {
 					return false, fmt.Errorf("validating DAG for FSEntry %s: %w", fsEntryID, err)
-				}
-
-				// For directories without child errors, also validate UnixFS entries
-				if isDirectory && !dagInvalid {
-					hasOrphans, err := c.validateDirectoryDAG(ctx, fsEntryID, dagScan.CID(), upload.SpaceDID())
-					if err != nil {
-						return false, fmt.Errorf("validating directory DAG for FSEntry %s: %w", fsEntryID, err)
-					}
-					if hasOrphans {
-						dagInvalid = true
-					}
 				}
 			}
 
@@ -435,12 +417,12 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 		return result, err
 	}
 
-	// Handle root directory DAG invalidity
+	// Handle root FSEntry DAG invalidity
 	if rootInvalid && cfg.applyRepairs {
 		// Clear the root CID from the upload to trigger re-DAG
 		if err := upload.SetRootCID(cid.Undef); err != nil {
 			result.Repairs = append(result.Repairs, Repair{
-				Description: "Clear root CID from upload due to invalid root directory DAG",
+				Description: "Clear root CID from upload due to invalid root FSEntry DAG",
 				Applied:     false,
 				Error:       err,
 			})
@@ -448,13 +430,13 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			// Update the upload in the database
 			if err := c.Repo.UpdateUpload(ctx, upload); err != nil {
 				result.Repairs = append(result.Repairs, Repair{
-					Description: "Clear root CID from upload due to invalid root directory DAG",
+					Description: "Clear root CID from upload due to invalid root FSEntry DAG",
 					Applied:     false,
 					Error:       fmt.Errorf("failed to update upload: %w", err),
 				})
 			} else {
 				result.Repairs = append(result.Repairs, Repair{
-					Description: "Clear root CID from upload due to invalid root directory DAG",
+					Description: "Clear root CID from upload due to invalid root FSEntry DAG",
 					Applied:     true,
 				})
 			}
@@ -481,12 +463,12 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 		if cfg.applyRepairs {
 			details = "Invalid DAGs detected - CIDs have been cleared from DAGScans to trigger rescan. Re-run the upload to rebuild DAGs."
 			if rootInvalid {
-				details += " Root directory DAG was invalid - upload.root_cid has also been cleared."
+				details += " Root FSEntry DAG was invalid - upload.root_cid has also been cleared."
 			}
 		} else {
 			details = "Invalid DAGs detected. Use --repair to clear CIDs from DAGScans and trigger rescan."
 			if rootInvalid {
-				details += " Root directory DAG is invalid - use --repair to also clear upload.root_cid."
+				details += " Root FSEntry DAG is invalid - use --repair to also clear upload.root_cid."
 			}
 		}
 		result.Issues = append(result.Issues, Issue{
@@ -503,19 +485,19 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 // Returns true if invalid, false if valid
 func (c *Checker) validateDAG(ctx context.Context, rootCID cid.Cid, spaceDID did.DID) (bool, error) {
 	// Get the root node
-	node, err := c.Repo.FindNodeByCIDAndSpaceDID(ctx, rootCID, spaceDID)
+	rootNode, err := c.Repo.FindNodeByCIDAndSpaceDID(ctx, rootCID, spaceDID)
 	if err != nil {
 		return false, fmt.Errorf("finding root node %s: %w", rootCID, err)
 	}
-	if node == nil {
+	if rootNode == nil {
 		// Node doesn't exist - DAG is invalid
 		return true, nil
 	}
 
 	// Check node structure recursively
 	visited := make(map[cid.Cid]struct{})
-	var checkNode func(nodeCID cid.Cid) (bool, error)
-	checkNode = func(nodeCID cid.Cid) (bool, error) {
+	var checkNode func(nodeCID cid.Cid, expectedSize uint64) (bool, error)
+	checkNode = func(nodeCID cid.Cid, expectedSize uint64) (bool, error) {
 		if _, ok := visited[nodeCID]; ok {
 			return false, nil
 		}
@@ -530,73 +512,45 @@ func (c *Checker) validateDAG(ctx context.Context, rootCID cid.Cid, spaceDID did
 			return true, nil
 		}
 
-		// Get links for this node
-		links, err := c.Repo.LinksForCID(ctx, nodeCID, spaceDID)
-		if err != nil {
-			return false, fmt.Errorf("getting links for node %s: %w", nodeCID, err)
-		}
-
-		// For UnixFS nodes, validate that they have the expected number of children
-		if unixfsNode, ok := node.(*dagsmodel.UnixFSNode); ok {
-			// Decode UnixFS metadata
-			fsNode, err := unixfs.FSNodeFromBytes(unixfsNode.UFSData())
+		if _, ok := node.(*dagsmodel.UnixFSNode); ok {
+			// Get links for this node
+			links, err := c.Repo.LinksForCID(ctx, node.CID(), spaceDID)
 			if err != nil {
-				// If we can't decode the metadata, consider it invalid
-				return true, nil
+				return false, fmt.Errorf("getting links for node %s: %w", node.CID(), err)
 			}
 
-			// Strict validation: child count must exactly match metadata
-			expectedChildren := fsNode.NumChildren()
-			actualChildren := len(links)
-
-			// NumChildren() returns the number of block sizes recorded in metadata
-			// For files, this should exactly match the number of links
-			if expectedChildren != actualChildren {
-				// Mismatch between metadata and actual links - invalid
-				// This catches:
-				// - Missing children (expected > actual)
-				// - Extra unexpected links (expected < actual)
-				// - Complete absence when expected (expected > 0, actual == 0)
-				return true, nil
+			// Check links recursively
+			actualSize := uint64(0)
+			for _, link := range links {
+				actualSize += link.TSize()
+				invalid, err := checkNode(link.Hash(), link.TSize())
+				if err != nil {
+					return false, err
+				}
+				if invalid {
+					return true, nil
+				}
 			}
+
+			return actualSize != expectedSize, nil
+		} else {
+			// Raw node
+			return node.Size() != expectedSize, nil
 		}
-
-		// Check that all linked nodes exist
-		// Note: Deeper UnixFS validation (matching directory entries to filesystem)
-		// is done separately by validateDirectoryDAG
-		for _, link := range links {
-			invalid, err := checkNode(link.Hash())
-			if err != nil {
-				return false, err
-			}
-			if invalid {
-				return true, nil
-			}
-		}
-
-		return false, nil
 	}
 
-	return checkNode(rootCID)
+	return checkNode(rootNode.CID(), rootNode.Size())
 }
 
 // validateDirectoryDAG validates that a directory's UnixFS DAG entries match filesystem children.
-// Checks for orphaned/mismatched entries:
-// - DAG references non-existent children → Error
-// - DAG has wrong CIDs for children → Error
-// - DAG missing new children → OK (expected staleness)
-// Returns (hasOrphans bool, error)
+// Returns true (invalid) if:
+// - DAG has entries not in filesystem (orphans)
+// - DAG has entries with wrong CIDs (mismatches)
+// - DAG is missing filesystem children (stale - needs rebuild)
+// Returns (isInvalid bool, error)
 func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEntryID, dagRootCID cid.Cid, spaceDID did.DID) (bool, error) {
 	// Get filesystem children
-	dir, err := c.Repo.GetDirectoryByID(ctx, dirFsEntryID)
-	if err != nil {
-		return false, fmt.Errorf("getting directory: %w", err)
-	}
-	if dir == nil {
-		return false, fmt.Errorf("directory not found: %s", dirFsEntryID)
-	}
-
-	fsChildren, err := c.Repo.DirectoryChildren(ctx, dir)
+	fsChildren, err := c.Repo.DirectoryChildren(ctx, dirFsEntryID)
 	if err != nil {
 		return false, fmt.Errorf("getting directory children: %w", err)
 	}
@@ -664,7 +618,7 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 		return false, fmt.Errorf("reifying root DAG node to UnixFS: %w", err)
 	}
 
-	// has orphans is used to track if there are nodes in the dag not contained in the FS children
+	// hasOrphans tracks if there are DAG entries not in FS or with mismatched CIDs
 	hasOrphans := false
 	iter := nd.MapIterator()
 	// need to verify there are no orphans from the FS children that are not represented in
@@ -702,7 +656,10 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 		}
 	}
 
-	return hasOrphans && len(matched) == len(fsChildMap), nil
+	// Invalid if:
+	// 1. DAG has orphans (entries not in FS or with wrong CIDs), OR
+	// 2. DAG is missing FS children (stale - needs rebuild)
+	return hasOrphans || len(matched) != len(fsChildMap), nil
 }
 
 // checkNodeIntegrity ensures all nodes in the upload have node_uploads records.
