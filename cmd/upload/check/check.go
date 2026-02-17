@@ -74,10 +74,10 @@ var Cmd = &cobra.Command{
 				return fmt.Errorf("getting all uploads: %w", err)
 			}
 			if len(uploadsToCheck) == 0 {
-				fmt.Println("No uploads found.")
+				cmd.Println("No uploads found.")
 				return nil
 			}
-			fmt.Printf("Checking %d upload(s)...\n", len(uploadsToCheck))
+			cmd.Printf("Checking %d upload(s)...\n", len(uploadsToCheck))
 
 		case 1:
 			// Check uploads for specified space
@@ -91,10 +91,10 @@ var Cmd = &cobra.Command{
 				return fmt.Errorf("getting uploads for space %s: %w", spaceDID, err)
 			}
 			if len(uploadsToCheck) == 0 {
-				fmt.Printf("No uploads found for space %s.\n", spaceDID)
+				cmd.Printf("No uploads found for space %s.\n", spaceDID)
 				return nil
 			}
-			fmt.Printf("Checking %d upload(s) for space %s...\n", len(uploadsToCheck), spaceDID)
+			cmd.Printf("Checking %d upload(s) for space %s...\n", len(uploadsToCheck), spaceDID)
 
 		case 2:
 			// Check specific upload for space and source
@@ -109,7 +109,7 @@ var Cmd = &cobra.Command{
 				return fmt.Errorf("getting upload for space %s and source %s: %w", spaceDID, sourceArg, err)
 			}
 			uploadsToCheck = []uploadInfo{upload}
-			fmt.Printf("Checking upload for space %s, source %s...\n", spaceDID, sourceArg)
+			cmd.Printf("Checking upload for space %s, source %s...\n", spaceDID, sourceArg)
 		}
 
 		// Initialize checker with proper access to the original files on disk
@@ -181,16 +181,16 @@ var Cmd = &cobra.Command{
 		totalRepairs := 0
 		for i, uploadInfo := range uploadsToCheck {
 			if len(uploadsToCheck) > 1 {
-				fmt.Printf("\n[%d/%d] ", i+1, len(uploadsToCheck))
+				cmd.Printf("\n[%d/%d] ", i+1, len(uploadsToCheck))
 			}
-			fmt.Printf("Upload: %s\n", uploadInfo.displayName)
+			cmd.Printf("Upload: %s\n", uploadInfo.displayName)
 
 			report, err := checker.CheckUpload(ctx, uploadInfo.uploadID, opts...)
 			if err != nil {
 				return fmt.Errorf("checking upload %s: %w", uploadInfo.uploadID, err)
 			}
 
-			printReport(report)
+			printReport(cmd, report)
 
 			if !report.OverallPass {
 				allPassed = false
@@ -200,15 +200,15 @@ var Cmd = &cobra.Command{
 
 		// Summary
 		if len(uploadsToCheck) > 1 {
-			fmt.Println("\n" + strings.Repeat("=", 60))
-			fmt.Printf("Summary: Checked %d upload(s)\n", len(uploadsToCheck))
+			cmd.Println("\n" + strings.Repeat("=", 60))
+			cmd.Printf("Summary: Checked %d upload(s)\n", len(uploadsToCheck))
 			if allPassed {
-				fmt.Println("✓ All uploads passed all checks")
+				cmd.Println("✓ All uploads passed all checks")
 			} else {
-				fmt.Println("✗ Some uploads have issues")
+				cmd.Println("✗ Some uploads have issues")
 			}
 			if totalRepairs > 0 {
-				fmt.Printf("Applied %d repair(s)\n", totalRepairs)
+				cmd.Printf("Applied %d repair(s)\n", totalRepairs)
 			}
 		}
 
@@ -330,45 +330,45 @@ func getUploadForSpaceAndSource(ctx context.Context, repo preparation.Repo, spac
 	return uploadInfo{}, fmt.Errorf("source %q not found in space %s", sourceArg, spaceDID)
 }
 
-func printReport(report *prepcheck.CheckReport) {
-	fmt.Println(strings.Repeat("-", 60))
+func printReport(cmd *cobra.Command, report *prepcheck.CheckReport) {
+	cmd.Println(strings.Repeat("-", 60))
 
 	for _, checkResult := range report.Checks {
 		status := "✓ PASS"
 		if !checkResult.Passed {
 			status = "✗ FAIL"
 		}
-		fmt.Printf("%s: %s\n", checkResult.Name, status)
+		cmd.Printf("%s: %s\n", checkResult.Name, status)
 
 		if len(checkResult.Issues) > 0 {
-			fmt.Println("  Issues:")
+			cmd.Println("  Issues:")
 			for _, issue := range checkResult.Issues {
 				symbol := "⚠"
 				if issue.Type == prepcheck.IssueTypeError {
 					symbol = "✗"
 				}
-				fmt.Printf("    %s %s\n", symbol, issue.Description)
+				cmd.Printf("    %s %s\n", symbol, issue.Description)
 				if issue.Details != "" {
-					fmt.Printf("      %s\n", issue.Details)
+					cmd.Printf("      %s\n", issue.Details)
 				}
 			}
 		}
 
 		if len(checkResult.Repairs) > 0 {
-			fmt.Println("  Repairs:")
+			cmd.Println("  Repairs:")
 			for _, repair := range checkResult.Repairs {
 				status := "✓ applied"
 				if !repair.Applied {
 					status = fmt.Sprintf("✗ failed: %v", repair.Error)
 				}
-				fmt.Printf("    [%s] %s\n", status, repair.Description)
+				cmd.Printf("    [%s] %s\n", status, repair.Description)
 			}
 		}
 	}
 
-	fmt.Println(strings.Repeat("-", 60))
+	cmd.Println(strings.Repeat("-", 60))
 	if report.OverallPass {
-		fmt.Println("✓ All checks passed")
+		cmd.Println("✓ All checks passed")
 	} else {
 		failedCount := 0
 		for _, checkResult := range report.Checks {
@@ -376,10 +376,10 @@ func printReport(report *prepcheck.CheckReport) {
 				failedCount++
 			}
 		}
-		fmt.Printf("✗ %d check(s) failed\n", failedCount)
+		cmd.Printf("✗ %d check(s) failed\n", failedCount)
 	}
 
 	if report.RepairsApplied > 0 {
-		fmt.Printf("Applied %d repair(s)\n", report.RepairsApplied)
+		cmd.Printf("Applied %d repair(s)\n", report.RepairsApplied)
 	}
 }
