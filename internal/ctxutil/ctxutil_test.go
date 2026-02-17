@@ -14,12 +14,12 @@ import (
 
 func TestCausedError(t *testing.T) {
 	t.Run("returns nil when context is not done", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		assert.Nil(t, ctxutil.CausedError(ctx))
 	})
 
 	t.Run("returns context.Canceled when canceled with no explicit cause", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		err := ctxutil.CausedError(ctx)
 		assert.ErrorIs(t, err, context.Canceled)
@@ -28,7 +28,7 @@ func TestCausedError(t *testing.T) {
 
 	t.Run("returns error wrapping both canceled and cause", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := ctxutil.CausedError(ctx)
 		require.NotNil(t, err)
@@ -38,7 +38,7 @@ func TestCausedError(t *testing.T) {
 	})
 
 	t.Run("returns context.DeadlineExceeded when deadline exceeded with no explicit cause", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
 		defer cancel()
 		<-ctx.Done()
 		err := ctxutil.CausedError(ctx)
@@ -49,7 +49,7 @@ func TestCausedError(t *testing.T) {
 	t.Run("returns error wrapping both deadline exceeded and cause", func(t *testing.T) {
 		cause := errors.New("query too slow")
 		// Simulate deadline exceeded by using WithDeadlineCause
-		ctx, cancel := context.WithDeadlineCause(context.Background(), time.Now().Add(-time.Second), cause)
+		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(-time.Second), cause)
 		defer cancel()
 		err := ctxutil.CausedError(ctx)
 		require.NotNil(t, err)
@@ -61,19 +61,19 @@ func TestCausedError(t *testing.T) {
 
 func TestErrorWithCause(t *testing.T) {
 	t.Run("returns nil when err is nil and context is not done", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		assert.Nil(t, ctxutil.ErrorWithCause(nil, ctx))
 	})
 
 	t.Run("returns nil when err is nil and context is canceled with cause", func(t *testing.T) {
 		cause := errors.New("shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		assert.Nil(t, ctxutil.ErrorWithCause(nil, ctx))
 	})
 
 	t.Run("returns err unchanged when canceled with no explicit cause", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		err := context.Canceled
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -82,7 +82,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("wraps context.Canceled with cause when canceled with explicit cause", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := context.Canceled
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -94,7 +94,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("wraps error that wraps context.Canceled", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := fmt.Errorf("query failed: %w", context.Canceled)
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -106,7 +106,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("returns err unchanged when it already wraps both ctx.Err and cause", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := fmt.Errorf("%w: %w", context.Canceled, cause)
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -115,7 +115,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("returns unrelated error unchanged when context is canceled", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := errors.New("disk full")
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -124,7 +124,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("wraps context.DeadlineExceeded with cause", func(t *testing.T) {
 		cause := errors.New("query too slow")
-		ctx, cancel := context.WithDeadlineCause(context.Background(), time.Now().Add(-time.Second), cause)
+		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(-time.Second), cause)
 		defer cancel()
 		err := context.DeadlineExceeded
 		result := ctxutil.ErrorWithCause(err, ctx)
@@ -136,7 +136,7 @@ func TestErrorWithCause(t *testing.T) {
 
 	t.Run("is idempotent: calling twice does not double-wrap", func(t *testing.T) {
 		cause := errors.New("server shutting down")
-		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := context.Canceled
 		first := ctxutil.ErrorWithCause(err, ctx)
