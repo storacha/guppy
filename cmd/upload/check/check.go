@@ -32,20 +32,23 @@ func init() {
 var Cmd = &cobra.Command{
 	Use:   "check [space] [source-path-or-name]",
 	Short: "Check upload integrity and completeness",
-	Long: wordwrap.WrapString(
-		"Checks uploads for data inconsistencies and incompleteness that may have occurred "+
-			"due to interrupted uploads or shutdowns. Performs the following checks:\n\n"+
-			"1. Upload Scanned Check - Verifies FS and DAG scans completed\n"+
-			"2. File System Integrity Check - Validates FS structure and DAG integrity\n"+
-			"3. Node Integrity Check - Ensures all nodes have upload records\n"+
-			"4. Node Completeness Check - Verifies all nodes are in shards\n"+
-			"5. Shard Completeness Check - Verifies all shards are uploaded and indexed\n"+
-			"6. Index Completeness Check - Verifies all indexes are uploaded\n\n"+
-			"By default, runs in dry-run mode (reports issues without fixing). "+
-			"Use --repair to automatically fix issues where possible.\n\n"+
-			"If no arguments are provided, checks all uploads. "+
-			"Specify a space to check only uploads for that space. "+
-			"Specify both space and source to check a specific upload.",
+	Long: wordwrap.WrapString(`
+Checks uploads for data inconsistencies and incompleteness that may have
+occurred due to interrupted uploads or shutdowns. Performs the following checks:
+
+	1. Upload Scanned Check - Verifies FS and DAG scans completed
+	2. File System Integrity Check - Validates FS structure and DAG integrity
+	3. Node Integrity Check - Ensures all nodes have upload records
+	4. Node Completeness Check - Verifies all nodes are in shards
+	5. Shard Completeness Check - Verifies all shards are uploaded and indexed
+	6. Index Completeness Check - Verifies all indexes are uploaded
+
+By default, runs in dry-run mode (reports issues without fixing).
+Use --repair to automatically fix issues where possible.
+
+If no arguments are provided, checks all uploads.
+Specify a space to check only uploads for that space.
+Specify both space and source to check a specific upload.`,
 		80),
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
