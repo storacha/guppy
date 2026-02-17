@@ -17,6 +17,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -99,7 +100,7 @@ func (r *Repo) GetDAGScanByFSEntryID(ctx context.Context, fsEntryID id.FSEntryID
 	row := stmt.QueryRowContext(ctx, fsEntryID)
 	ds, err := model.ReadDAGScanFromDatabase(r.dagScanScanner(row))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil // Not found
+		return nil, types.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading DAG scan: %w", err)

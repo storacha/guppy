@@ -3,6 +3,7 @@ package check
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -19,6 +20,7 @@ import (
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
 	scansmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -319,7 +321,7 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 
 		// Check if DAGScan exists
 		dagScan, err := c.Repo.GetDAGScanByFSEntryID(ctx, entry.ID())
-		if err != nil {
+		if err != nil && !errors.Is(err, types.ErrNotFound) {
 			return false, fmt.Errorf("checking DAGScan for FSEntry %s: %w", entry.ID(), err)
 		}
 
@@ -568,7 +570,7 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 	})
 	for _, child := range fsChildren {
 		dagScan, err := c.Repo.GetDAGScanByFSEntryID(ctx, child.ID())
-		if err != nil {
+		if err != nil && !errors.Is(err, types.ErrNotFound) {
 			return false, fmt.Errorf("getting DAGScan for child %s: %w", child.ID(), err)
 		}
 
