@@ -73,6 +73,10 @@ type API struct {
 
 	// Publishes events observation
 	Publisher bus.Publisher
+
+	// AssumeUnchangedSources skips the filesystem scan when a completed scan
+	// already exists, assuming the filesystem hasn't changed since the last run.
+	AssumeUnchangedSources bool
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -371,6 +375,18 @@ func runScanWorker(
 
 		// doWork
 		func() error {
+			if api.AssumeUnchangedSources {
+				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
+				if err != nil {
+					return fmt.Errorf("checking upload for existing scan: %w", err)
+				}
+				if upload.HasRootFSEntryID() {
+					log.Infow("Skipping FS rescan (--assume-unchanged-sources): scan already exists", "upload", uploadID)
+					return nil
+				}
+				log.Infow("No existing scan found, performing FS scan despite --assume-unchanged-sources", "upload", uploadID)
+			}
+
 			err := api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
 				_, isDirectory := entry.(*scanmodel.Directory)
 				_, err := api.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, spaceDID)
