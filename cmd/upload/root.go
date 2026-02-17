@@ -26,15 +26,17 @@ import (
 var log = logging.Logger("cmd/upload")
 
 var rootFlags struct {
-	all         bool
-	retry       bool
-	parallelism uint64
+	all                    bool
+	retry                  bool
+	parallelism            uint64
+	assumeUnchangedSources bool
 }
 
 func init() {
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
+	Cmd.Flags().BoolVar(&rootFlags.assumeUnchangedSources, "assume-unchanged-sources", false, "When resuming, skip filesystem rescan if a completed scan already exists")
 
 	Cmd.AddCommand(source.Cmd)
 }
@@ -91,6 +93,7 @@ var Cmd = &cobra.Command{
 
 		api := preparation.NewAPI(repo, cmdutil.MustGetClient(cfg.Repo.Dir),
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
+			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)

@@ -57,6 +57,7 @@ type config struct {
 	getLocalFSForPathFn   func(path string) (fs.FS, error)
 	maxNodesPerIndex      int
 	blobUploadParallelism int
+	assumeUnchangedSources bool
 	bus                   bus.Bus
 }
 
@@ -153,6 +154,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 
 	uploadsAPI = uploads.API{
 		Repo:                       repo,
+		AssumeUnchangedSources:     cfg.assumeUnchangedSources,
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
 		AddNodesToUploadShards:     blobsAPI.AddNodesToUploadShards,
@@ -198,6 +200,13 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
 	return func(cfg *config) error {
 		cfg.maxNodesPerIndex = maxNodesPerIndex
+		return nil
+	}
+}
+
+func WithAssumeUnchangedSources(assume bool) Option {
+	return func(cfg *config) error {
+		cfg.assumeUnchangedSources = assume
 		return nil
 	}
 }
