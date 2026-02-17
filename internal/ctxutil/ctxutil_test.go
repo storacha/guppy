@@ -48,13 +48,10 @@ func TestCausedError(t *testing.T) {
 
 	t.Run("returns error wrapping both deadline exceeded and cause", func(t *testing.T) {
 		cause := errors.New("query too slow")
-		ctx, cancel := context.WithCancelCause(context.Background())
-		cancel(cause)
 		// Simulate deadline exceeded by using WithDeadlineCause
-		ctx2, cancel2 := context.WithDeadlineCause(context.Background(), time.Now().Add(-time.Second), cause)
-		defer cancel2()
-		_ = ctx // just to use cancel
-		err := ctxutil.CausedError(ctx2)
+		ctx, cancel := context.WithDeadlineCause(context.Background(), time.Now().Add(-time.Second), cause)
+		defer cancel()
+		err := ctxutil.CausedError(ctx)
 		require.NotNil(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.ErrorIs(t, err, cause)
