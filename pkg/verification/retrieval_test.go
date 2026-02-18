@@ -72,15 +72,21 @@ func TestStatBlocks(t *testing.T) {
 
 		require.Len(t, stats, 2)
 
-		require.Equal(t, uint64(cid.Raw), stats[0].Codec)
-		require.Equal(t, uint64(len(block1Data)), stats[0].Size)
-		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
-		require.Empty(t, stats[0].Links, "raw blocks have no links")
-
-		require.Equal(t, uint64(cid.Raw), stats[1].Codec)
-		require.Equal(t, uint64(len(block2Data)), stats[1].Size)
-		require.Equal(t, block2Hash, multihash.Multihash(stats[1].Digest))
-		require.Empty(t, stats[1].Links, "raw blocks have no links")
+		// StatBlocks iterates shards from a bytemap (map-backed), so order is non-deterministic
+		for _, stat := range stats {
+			switch stat.Digest.String() {
+			case block1Hash.String():
+				require.Equal(t, uint64(cid.Raw), stat.Codec)
+				require.Equal(t, uint64(len(block1Data)), stat.Size)
+				require.Empty(t, stat.Links, "raw blocks have no links")
+			case block2Hash.String():
+				require.Equal(t, uint64(cid.Raw), stat.Codec)
+				require.Equal(t, uint64(len(block2Data)), stat.Size)
+				require.Empty(t, stat.Links, "raw blocks have no links")
+			default:
+				t.Errorf("unexpected block stat with digest %s", stat.Digest.String())
+			}
+		}
 	})
 
 	t.Run("fails integrity check when data does not match hash", func(t *testing.T) {
@@ -141,8 +147,12 @@ func TestStatBlocks(t *testing.T) {
 			stats = append(stats, stat)
 		}
 
-		require.Len(t, stats, 1, "first block should succeed")
-		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
+		// Shard iteration order is non-deterministic: if the tampered block is verified first, an error will
+		// be returned and no more blocks will be verified.
+		require.LessOrEqual(t, len(stats), 1, "at most one block succeeds before the integrity error")
+		if len(stats) == 1 {
+			require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest), "only the valid block should succeed")
+		}
 
 		require.Error(t, gotError)
 		require.Contains(t, gotError.Error(), "integrity check failed")

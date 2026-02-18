@@ -825,7 +825,8 @@ func TestSpaceNamed(t *testing.T) {
 		require.ErrorAs(t, err, &multipleErr)
 		require.Equal(t, "shared name", multipleErr.Name)
 		require.Len(t, multipleErr.Spaces, 2)
-		require.Equal(t, space1.DID(), multipleErr.Spaces[0].DID())
-		require.Equal(t, space2.DID(), multipleErr.Spaces[1].DID())
+		dids := []string{multipleErr.Spaces[0].DID().String(), multipleErr.Spaces[1].DID().String()}
+		require.Contains(t, dids, space1.DID().String())
+		require.Contains(t, dids, space2.DID().String())
 	})
 }
