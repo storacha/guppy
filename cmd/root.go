@@ -65,7 +65,7 @@ func init() {
 		&guppyDirPath,
 		"guppy-dir",
 		"",
-		"Guupy Directory",
+		"Guppy Directory",
 	)
 
 	unixfs.StorePathP = &guppyDirPath
