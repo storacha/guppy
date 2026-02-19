@@ -292,17 +292,19 @@ func (a API) addBlob(ctx context.Context, blob model.Blob, spaceDID did.DID) err
 		if err := blob.SpaceBlobAdded(addedBlob); err != nil {
 			return fmt.Errorf("failed to record `space/blob/add` for blob %s: %w", blob, err)
 		}
-
-		if err := a.updateBlob(ctx, blob); err != nil {
-			return fmt.Errorf("failed to update blob %s after `space/blob/add`: %w", blob, err)
-		}
 	} else {
-		// this is a just a legacy case where the blob was added to the space but didn't record the state change
-		log.Infof("blob %s already has location and PDP accept, skipping `space/blob/add`", blob.ID())
+		// If we have a location, the blob has been uploaded. If we called this function,
+		// the blob record is probably not marked as BlobStateUploaded like it
+		// should be, so mark it now.
+		log.Infof("blob %s already has location; skipping `space/blob/add` and updating blob record", blob.ID())
 		if err := blob.SpaceBlobAdded(client.AddedBlob{Location: blob.Location(), PDPAccept: blob.PDPAccept(),
 			Digest: blob.Digest(), Size: blob.Size()}); err != nil {
 			return fmt.Errorf("failed to record `space/blob/add` for blob %s: %w", blob, err)
 		}
+	}
+
+	if err := a.updateBlob(ctx, blob); err != nil {
+		return fmt.Errorf("failed to update blob %s after `space/blob/add`: %w", blob, err)
 	}
 	return nil
 }
