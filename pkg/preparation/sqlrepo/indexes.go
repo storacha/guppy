@@ -103,6 +103,59 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 	return index, nil
 }
 
+func (r *Repo) IndexesForUpload(ctx context.Context, uploadID id.UploadID) ([]*model.Index, error) {
+	rows, err := r.db.QueryContext(ctx, r.rebind(`
+		SELECT
+			id,
+			upload_id,
+			size,
+			slice_count,
+			digest,
+			piece_cid,
+			state,
+			location_inv,
+			pdp_accept_inv
+		FROM indexes
+		WHERE upload_id = ?`),
+		uploadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var indexes []*model.Index
+	for rows.Next() {
+		index, err := model.ReadIndexFromDatabase(func(
+			id *id.IndexID,
+			uploadID *id.UploadID,
+			size *uint64,
+			sliceCount *int,
+			digest *multihash.Multihash,
+			pieceCID *cid.Cid,
+			state *model.BlobState,
+			location *invocation.Invocation,
+			pdpAccept *invocation.Invocation,
+		) error {
+			return rows.Scan(id, uploadID, size, sliceCount, util.DbBytes(digest), util.DbCID(pieceCID), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
+		})
+		if err != nil {
+			return nil, err
+		}
+		if index == nil {
+			continue
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return indexes, nil
+}
+
 func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Index, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT

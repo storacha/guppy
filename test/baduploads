@@ -1,0 +1,414 @@
+#!/bin/zsh
+
+# Test script for the upload check command
+#
+# This script creates uploads with various inconsistent states in a test database.
+# This database can then be used to manually test the "guppy upload check" command.
+#
+# Usage: test/baduploads [--cleanup]
+#
+# Options:
+#   --cleanup  Remove an existing test directory and exit
+#
+
+set -e
+set -o pipefail
+
+# Parse arguments
+do_cleanup=false
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--cleanup)
+			do_cleanup=true
+			shift
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: test/baduploads [--cleanup]"
+			exit 1
+			;;
+	esac
+done
+
+# Check for dependencies
+if ! command -v sqlite3 &> /dev/null; then
+	echo "sqlite3 could not be found, please install it to run this script."
+	exit 1
+fi
+
+# Change to the directory of this script
+cd "$(dirname "$0")"
+
+sandbox="baduploads-dir"
+dataDir="$sandbox/storacha"
+dbFile=""  # Will be set in main() after we know the absolute path
+
+# If --cleanup was specified, just remove the test directory and exit
+if [ "$do_cleanup" = true ]; then
+	if [ -d "$sandbox" ]; then
+		echo "🧹 Removing test directory: $sandbox"
+		rm -rf "$sandbox"
+		echo "✅ Test directory removed"
+	else
+		echo "ℹ️  Test directory does not exist: $sandbox"
+	fi
+	exit 0
+fi
+
+# Track the last command for error reporting
+last_command=""
+trap 'last_command=$ZSH_DEBUG_CMD' DEBUG
+
+# Error handler
+handle_error() {
+	local exit_code=$1
+	local failed_command=$2
+	echo
+	echo "❌ Test failed with exit code $exit_code: $failed_command"
+}
+
+trap 'handle_error $? "$last_command"' ERR
+
+# Function wrapper to properly invoke guppy
+guppy() {
+	local abs_data_dir="$(pwd)/$sandbox/storacha"
+	go run .. --data-dir "$abs_data_dir" "$@"
+}
+
+# Function to run SQL against the database
+run_sql() {
+	sqlite3 "$dbFile" "$1"
+}
+
+# Valid test DID: did:key:z6MkvcpcpaHLDyDgTh4mE7dkMJF4FLv2bah2PtDgHTaionvh
+# Encoded as hex bytes for database storage
+TEST_SPACE_DID_HEX="ed01f02e0c65e65ab2c2a8fa1ef136ae0b9018144e6dd36eceaaedc8ce66d075255e"
+
+# Function to generate a UUID (16 bytes = 32 hex chars) from a string seed
+generate_id() {
+	# Take MD5 hash of the input (16 bytes) and use as UUID
+	echo -n "$1" | md5 | tr -d '\n'
+}
+
+# Function to generate a valid test CID from a seed number
+generate_fake_cid() {
+	go run generate_test_cid.go "$1"
+}
+
+# Function to create a minimal test upload with inconsistencies
+create_test_upload() {
+	local space_did="$1"
+	local source_id="$2"
+	local upload_id="$3"
+	local issue_type="$4"
+
+	echo "  Creating upload with issue: $issue_type"
+
+	# Insert space
+	run_sql "INSERT OR IGNORE INTO spaces (did, name, created_at, shard_size)
+	         VALUES (X'$TEST_SPACE_DID_HEX', 'test-space', $(date +%s), 1048576);"
+
+	# Insert source
+	run_sql "INSERT OR IGNORE INTO sources (id, name, kind, path, created_at, updated_at)
+	         VALUES (X'$(generate_id "$source_id")', 'test-source-$issue_type', 'local', '/tmp/test-$issue_type', $(date +%s), $(date +%s));"
+
+	# Link space and source
+	run_sql "INSERT OR IGNORE INTO space_sources (source_id, space_did)
+	         VALUES (X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX');"
+
+	case "$issue_type" in
+		"missing-root-fs-entry")
+			# Upload with NULL root_fs_entry_id (incomplete scan)
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), NULL, NULL);"
+			;;
+
+		"missing-root-cid")
+			# Upload with root_fs_entry_id but NULL root_cid (DAG scan incomplete)
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', NULL);"
+			;;
+
+		"invalid-root-fs-entry")
+			# Upload with root_fs_entry_id pointing to non-existent entry
+			local fake_fs_id=$(generate_id "fake-fs-$upload_id")
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fake_fs_id', NULL);"
+			;;
+
+		"invalid-root-cid")
+			# Upload with root_cid pointing to non-existent node
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local fake_cid=$(generate_fake_cid 999)
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$fake_cid');"
+			;;
+
+		"missing-dag-scan")
+			# Upload with fs_entry but no DAGScan
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', NULL);"
+			# No dag_scans entry created
+			;;
+
+		"invalid-dag")
+			# Upload with DAGScan pointing to node, but node's link points to non-existent node
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 1)
+			local missing_child_cid=$(generate_fake_cid 2)
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 2048, X'1220$(generate_fake_cid 0)');"
+
+			# Create root node (UnixFS node with ufsdata)
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 2048, X'0a00');"
+
+			# Create a link to a non-existent child node
+			run_sql "INSERT INTO links (name, t_size, hash, parent_id, space_did, ordering)
+			         VALUES ('child', 1024, X'$missing_child_cid', X'$root_cid', X'$TEST_SPACE_DID_HEX', 0);"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+			;;
+
+		"missing-node-upload")
+			# Upload with nodes in DAG but missing node_uploads records
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 10)
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+
+			# Create node
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 1024, X'0a00');"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+			# No node_uploads entry created
+			;;
+
+		"node-not-in-shard")
+			# Upload with node_uploads but node not assigned to shard
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 20)
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+
+			# Create node
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 1024, X'0a00');"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+
+			# Create node_uploads but node is not in any shard
+			run_sql "INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$upload_id")', NULL);"
+			;;
+
+		"shard-not-uploaded")
+			# Upload with shard in "closed" state (not uploaded)
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 30)
+			local shard_id=$(generate_id "shard-$upload_id")
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+
+			# Create node
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 1024, X'0a00');"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+
+			# Create shard in "closed" state (not yet uploaded)
+			run_sql "INSERT INTO shards (id, upload_id, size, digest, state, slice_count, digest_state_up_to)
+			         VALUES (X'$shard_id', X'$(generate_id "$upload_id")', 1024, X'1220$(generate_fake_cid 31)', 'closed', 1, 1024);"
+
+			# Create node_uploads entry with shard assignment and offset
+			run_sql "INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$upload_id")', X'$shard_id', 0);"
+			;;
+
+		"shard-not-indexed")
+			# Upload with shard in "added" state but not in any index
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 40)
+			local shard_id=$(generate_id "shard-$upload_id")
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+
+			# Create node
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 1024, X'0a00');"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+
+			# Create shard in "added" state
+			run_sql "INSERT INTO shards (id, upload_id, size, digest, state, slice_count, digest_state_up_to)
+			         VALUES (X'$shard_id', X'$(generate_id "$upload_id")', 1024, X'1220$(generate_fake_cid 41)', 'added', 1, 1024);"
+
+			# Create node_uploads entry with shard assignment and offset
+			run_sql "INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$upload_id")', X'$shard_id', 0);"
+			# No index_shards entry created
+			;;
+
+		"index-not-uploaded")
+			# Upload with index in "closed" state (not uploaded)
+			local fs_entry_id=$(generate_id "fs-$upload_id")
+			local root_cid=$(generate_fake_cid 50)
+			local shard_id=$(generate_id "shard-$upload_id")
+			local index_id=$(generate_id "index-$upload_id")
+
+			run_sql "INSERT INTO fs_entries (id, source_id, space_did, path, last_modified, mode, size, checksum)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$source_id")', X'$TEST_SPACE_DID_HEX', '.', $(date +%s), 33188, 1024, X'1220$(generate_fake_cid 0)');"
+
+			# Create node
+			run_sql "INSERT INTO nodes (cid, space_did, size, ufsdata)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', 1024, X'0a00');"
+
+			run_sql "INSERT INTO dag_scans (fs_entry_id, upload_id, created_at, updated_at, cid, space_did, kind)
+			         VALUES (X'$fs_entry_id', X'$(generate_id "$upload_id")', $(date +%s), $(date +%s), X'$root_cid', X'$TEST_SPACE_DID_HEX', 'file');"
+
+			run_sql "INSERT INTO uploads (id, space_did, source_id, created_at, updated_at, root_fs_entry_id, root_cid)
+			         VALUES (X'$(generate_id "$upload_id")', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$source_id")', $(date +%s), $(date +%s), X'$fs_entry_id', X'$root_cid');"
+
+			# Create shard in "added" state
+			run_sql "INSERT INTO shards (id, upload_id, size, digest, state, slice_count, digest_state_up_to)
+			         VALUES (X'$shard_id', X'$(generate_id "$upload_id")', 1024, X'1220$(generate_fake_cid 51)', 'added', 1, 1024);"
+
+			# Create node_uploads entry with shard assignment and offset
+			run_sql "INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+			         VALUES (X'$root_cid', X'$TEST_SPACE_DID_HEX', X'$(generate_id "$upload_id")', X'$shard_id', 0);"
+
+			# Create index in "closed" state
+			run_sql "INSERT INTO indexes (id, upload_id, size, digest, state, slice_count)
+			         VALUES (X'$index_id', X'$(generate_id "$upload_id")', 512, NULL, 'closed', 1);"
+
+			# Link shard to index
+			run_sql "INSERT INTO shards_in_indexes (shard_id, index_id)
+			         VALUES (X'$shard_id', X'$index_id');"
+			;;
+	esac
+}
+
+main() {
+	echo "🧪 Seeding test database with bad uploads"
+	echo
+
+	rm -rf "$sandbox"
+	mkdir -p "$dataDir"
+
+	# Set absolute path for dbFile now that we know the working directory
+	dbFile="$(pwd)/$dataDir/preparation.db"
+
+	echo "📦 Initializing empty database"
+	echo "   Database will be created at: $dbFile"
+
+	# Create an empty database with schema by running a command that opens the repo
+	# The check command will trigger repo initialization
+	# We can safely ignore errors here as we just need the DB to be created
+	guppy upload check > /dev/null 2>&1 || true
+
+	# Verify database was created
+	if [ ! -f "$dbFile" ]; then
+		echo "❌ Database was not created at $dbFile"
+		echo "   Attempted to create database using 'guppy upload check'"
+		exit 1
+	fi
+
+	echo "✓ Database initialized"
+
+	echo
+	echo "💉 Injecting test data with inconsistencies"
+
+	# Create test uploads with various issues
+	# Using the same space DID for all uploads (more realistic)
+	local test_space_did="did:key:z6MkvcpcpaHLDyDgTh4mE7dkMJF4FLv2bah2PtDgHTaionvh"
+
+	create_test_upload "$test_space_did" "source-1" "upload-1" "missing-root-fs-entry"
+	create_test_upload "$test_space_did" "source-2" "upload-2" "missing-root-cid"
+	create_test_upload "$test_space_did" "source-3" "upload-3" "invalid-root-fs-entry"
+	create_test_upload "$test_space_did" "source-4" "upload-4" "invalid-root-cid"
+	create_test_upload "$test_space_did" "source-5" "upload-5" "missing-dag-scan"
+	create_test_upload "$test_space_did" "source-6" "upload-6" "invalid-dag"
+	create_test_upload "$test_space_did" "source-7" "upload-7" "missing-node-upload"
+	create_test_upload "$test_space_did" "source-8" "upload-8" "node-not-in-shard"
+	create_test_upload "$test_space_did" "source-9" "upload-9" "shard-not-uploaded"
+	create_test_upload "$test_space_did" "source-10" "upload-10" "shard-not-indexed"
+	create_test_upload "$test_space_did" "source-11" "upload-11" "index-not-uploaded"
+
+	echo
+	echo "📊 Database state before checks:"
+	echo "=================================="
+	echo "  - Total uploads: $(run_sql 'SELECT COUNT(*) FROM uploads;')"
+	echo "  - Uploads with NULL root_fs_entry_id: $(run_sql 'SELECT COUNT(*) FROM uploads WHERE root_fs_entry_id IS NULL;')"
+	echo "  - Uploads with NULL root_cid: $(run_sql 'SELECT COUNT(*) FROM uploads WHERE root_cid IS NULL;')"
+	echo "  - DAG scans: $(run_sql 'SELECT COUNT(*) FROM dag_scans;')"
+	echo "  - Node uploads: $(run_sql 'SELECT COUNT(*) FROM node_uploads;')"
+	echo "  - Shards: $(run_sql 'SELECT COUNT(*) FROM shards;')"
+	echo "  - Indexes: $(run_sql 'SELECT COUNT(*) FROM indexes;')"
+
+	echo
+	echo "🔍 Testing the check command:"
+	echo "=============================="
+	echo
+	echo "You can now run the check command to detect and repair issues:"
+	echo "  guppy --data-dir $dataDir upload check                  # dry-run mode"
+	echo "  guppy --data-dir $dataDir upload check --repair         # apply repairs"
+	echo
+	echo "   The check command tests these conditions:"
+	echo "     ✓ Missing root_fs_entry_id (1 upload)"
+	echo "     ✓ Missing root_cid (3 uploads + above)"
+	echo "     ✓ Invalid root_fs_entry_id (1 upload)"
+	echo "     ✓ Invalid root_cid (1 upload)"
+	echo "     ✓ Missing DAG scans (1 upload)"
+	echo "     ✓ Invalid DAG structure (1 upload)"
+	echo "     ✓ Missing node_uploads records (1 upload)"
+	echo "     ✓ Nodes not in shards (1 upload)"
+	echo "     ✓ Shards not uploaded (1 upload)"
+	echo "     ✓ Shards not indexed (1 upload)"
+	echo "     ✓ Indexes not uploaded (1 upload)"
+
+	echo
+	echo "✅ Test database created successfully!"
+	echo
+	echo "📁 Test artifacts:"
+	echo "   - Database: $sandbox/storacha/preparation.db"
+	echo "   - Contains 11 uploads with various inconsistent states"
+	echo
+	echo "You can use this database to manually test the 'guppy upload check' command and verify that it detects and repairs issues as expected."
+	echo
+}
+
+main

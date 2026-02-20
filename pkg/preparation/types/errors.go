@@ -8,6 +8,9 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
+// ErrNotFound is returned when a requested entity is not found in the repository.
+var ErrNotFound = fmt.Errorf("not found")
+
 type EmptyError struct {
 	Field string
 }
