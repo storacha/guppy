@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
+	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/bus"
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/preparation"
@@ -88,6 +89,27 @@ var Cmd = &cobra.Command{
 		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
 			return err
+		}
+
+		// Pre-flight authorization check: verify we have necessary capabilities before starting work
+		requiredCaps := []string{"space/blob/add", "space/index/add", "upload/add"}
+		for _, capName := range requiredCaps {
+			proofs, err := client.Proofs(agentstore.CapabilityQuery{
+				Can:  capName,
+				With: spaceDID.String(),
+			})
+			if err != nil {
+				return fmt.Errorf("checking authorization: %w", err)
+			}
+			if len(proofs) == 0 {
+				return cmdutil.NewHandledCliError(fmt.Errorf("access denied: missing required authorization %q for space %s", capName, spaceDID))
+			}
+		}
+
+		// Verify space exists and is accessible by fetching its info
+		_, err = client.SpaceInfo(ctx, spaceDID)
+		if err != nil {
+			return fmt.Errorf("verifying space access: %w", err)
 		}
 
 		api := preparation.NewAPI(repo, client,

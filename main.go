@@ -49,6 +49,9 @@ func main() {
 	}()
 
 	err = cmd.ExecuteContext(ctx)
+	if err != nil {
+		err = cmdutil.TranslateError(err)
+	}
 }
 
 func startPprofServer() {
