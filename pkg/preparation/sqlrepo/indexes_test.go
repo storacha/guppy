@@ -50,13 +50,7 @@ func TestShardsNotInIndexes(t *testing.T) {
 		err = repo.AddNodeToShard(t.Context(), shard3.ID(), nodeCID3, spaceDID, uploadID, 0)
 		require.NoError(t, err)
 
-		// All three should be returned as not in indexes
-		shardIDs, err := repo.ShardsNotInIndexes(t.Context(), uploadID)
-		require.NoError(t, err)
-		require.ElementsMatch(t, []id.ShardID{shard1.ID(), shard2.ID(), shard3.ID()}, shardIDs)
-
-		// Create an index and add shard1 and shard2 to it
-		// First close the shards (required before adding to index)
+		// Close all three shards (ShardsNotInIndexes only returns closed shards)
 		digest1, err := multihash.Encode([]byte("shard1"), multihash.IDENTITY)
 		require.NoError(t, err)
 		err = shard1.Close(digest1, testutil.RandomCID(t).(cidlink.Link).Cid)
@@ -71,6 +65,19 @@ func TestShardsNotInIndexes(t *testing.T) {
 		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
 
+		digest3, err := multihash.Encode([]byte("shard3"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard3.Close(digest3, testutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard3)
+		require.NoError(t, err)
+
+		// All three closed shards should be returned as not in indexes
+		shardIDs, err := repo.ShardsNotInIndexes(t.Context(), uploadID)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []id.ShardID{shard1.ID(), shard2.ID(), shard3.ID()}, shardIDs)
+
+		// Create an index and add shard1 and shard2 to it
 		index, err := repo.CreateIndex(t.Context(), uploadID)
 		require.NoError(t, err)
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard1.ID())
@@ -82,6 +89,47 @@ func TestShardsNotInIndexes(t *testing.T) {
 		shardIDs, err = repo.ShardsNotInIndexes(t.Context(), uploadID)
 		require.NoError(t, err)
 		require.Equal(t, []id.ShardID{shard3.ID()}, shardIDs)
+	})
+
+	t.Run("does not return open shards", func(t *testing.T) {
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
+
+		spaceDID, err := did.Parse("did:storacha:space:example")
+		require.NoError(t, err)
+
+		uploadID := id.New()
+
+		// Create nodes
+		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
+		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
+
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		require.NoError(t, err)
+
+		// Create one closed shard
+		shard1, err := repo.CreateShard(t.Context(), uploadID, 0, nil, nil)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, uploadID, 0)
+		require.NoError(t, err)
+		digest1, err := multihash.Encode([]byte("shard1"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard1.Close(digest1, testutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard1)
+		require.NoError(t, err)
+
+		// Create one open shard
+		shard2, err := repo.CreateShard(t.Context(), uploadID, 0, nil, nil)
+		require.NoError(t, err)
+		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, uploadID, 0)
+		require.NoError(t, err)
+
+		// Only the closed shard should be returned
+		shardIDs, err := repo.ShardsNotInIndexes(t.Context(), uploadID)
+		require.NoError(t, err)
+		require.Equal(t, []id.ShardID{shard1.ID()}, shardIDs)
 	})
 
 	t.Run("returns empty when all shards are assigned", func(t *testing.T) {
@@ -140,15 +188,27 @@ func TestShardsNotInIndexes(t *testing.T) {
 		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID2, "dir/file2", id.New(), 0)
 		require.NoError(t, err)
 
-		// Create shards for different uploads
+		// Create and close shards for different uploads
 		shard1, err := repo.CreateShard(t.Context(), uploadID1, 0, nil, nil)
 		require.NoError(t, err)
 		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, uploadID1, 0)
+		require.NoError(t, err)
+		digest1, err := multihash.Encode([]byte("shard1"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard1.Close(digest1, testutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard1)
 		require.NoError(t, err)
 
 		shard2, err := repo.CreateShard(t.Context(), uploadID2, 0, nil, nil)
 		require.NoError(t, err)
 		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, uploadID2, 0)
+		require.NoError(t, err)
+		digest2, err := multihash.Encode([]byte("shard2"), multihash.IDENTITY)
+		require.NoError(t, err)
+		err = shard2.Close(digest2, testutil.RandomCID(t).(cidlink.Link).Cid)
+		require.NoError(t, err)
+		err = repo.UpdateShard(t.Context(), shard2)
 		require.NoError(t, err)
 
 		// ShardsNotInIndexes for upload1 should only return shard1
