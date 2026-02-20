@@ -109,9 +109,9 @@ func executePlanRequest(
 			name, _ := errMap["name"].(string)
 
 			if msg == "billing profile not found" || msg == "record not found" || name == "PlanNotFound" {
-				return nil, fmt.Errorf("billing profile not found") 
+				return nil, fmt.Errorf("billing profile not found")
 			}
-			
+
 			if msg != "" {
 				return nil, fmt.Errorf("server error: %s", msg)
 			}

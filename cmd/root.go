@@ -23,6 +23,7 @@ import (
 	"github.com/storacha/guppy/cmd/proof"
 	"github.com/storacha/guppy/cmd/space"
 	"github.com/storacha/guppy/cmd/upload"
+	"github.com/storacha/guppy/cmd/usage"
 )
 
 var (
@@ -105,6 +106,7 @@ func init() {
 		account.Cmd,
 		blob.Cmd,
 		plan.Cmd,
+		usage.Cmd,
 	)
 }
 
