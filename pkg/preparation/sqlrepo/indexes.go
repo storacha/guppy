@@ -17,6 +17,7 @@ func (r *Repo) ShardsNotInIndexes(ctx context.Context, uploadID id.UploadID) ([]
 		SELECT id
 		FROM shards
 		WHERE upload_id = ?
+		AND state = 'closed'
 		AND NOT EXISTS (
 			SELECT 1
 			FROM shards_in_indexes si
