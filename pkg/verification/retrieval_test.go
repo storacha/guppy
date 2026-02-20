@@ -64,23 +64,27 @@ func TestStatBlocks(t *testing.T) {
 			},
 		}
 
-		var stats []verification.BlockStat
+		// StatBlocks iterates shards from a bytemap (map-backed), so order is non-deterministic
+		var hashes []string
 		for stat, err := range verification.StatBlocks(ctx, nil, nil, stub, []cid.Cid{block1CID, block2CID}) {
 			require.NoError(t, err)
-			stats = append(stats, stat)
+			hashes = append(hashes, stat.Digest.String())
+
+			switch stat.Digest.String() {
+			case block1Hash.String():
+				require.Equal(t, uint64(cid.Raw), stat.Codec)
+				require.Equal(t, uint64(len(block1Data)), stat.Size)
+				require.Empty(t, stat.Links, "raw blocks have no links")
+			case block2Hash.String():
+				require.Equal(t, uint64(cid.Raw), stat.Codec)
+				require.Equal(t, uint64(len(block2Data)), stat.Size)
+				require.Empty(t, stat.Links, "raw blocks have no links")
+			default:
+				t.Errorf("unexpected block stat with digest %s", stat.Digest.String())
+			}
 		}
 
-		require.Len(t, stats, 2)
-
-		require.Equal(t, uint64(cid.Raw), stats[0].Codec)
-		require.Equal(t, uint64(len(block1Data)), stats[0].Size)
-		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
-		require.Empty(t, stats[0].Links, "raw blocks have no links")
-
-		require.Equal(t, uint64(cid.Raw), stats[1].Codec)
-		require.Equal(t, uint64(len(block2Data)), stats[1].Size)
-		require.Equal(t, block2Hash, multihash.Multihash(stats[1].Digest))
-		require.Empty(t, stats[1].Links, "raw blocks have no links")
+		require.ElementsMatch(t, []string{block1Hash.String(), block2Hash.String()}, hashes)
 	})
 
 	t.Run("fails integrity check when data does not match hash", func(t *testing.T) {
@@ -136,15 +140,15 @@ func TestStatBlocks(t *testing.T) {
 		for stat, err := range verification.StatBlocks(ctx, nil, nil, stub, []cid.Cid{block1CID, block2CID}) {
 			if err != nil {
 				gotError = err
-				break
+				continue
 			}
 			stats = append(stats, stat)
 		}
 
-		require.Len(t, stats, 1, "first block should succeed")
+		require.Len(t, stats, 1, "only the valid block should succeed")
 		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
 
-		require.Error(t, gotError)
+		require.Error(t, gotError, "the tampered block should fail")
 		require.Contains(t, gotError.Error(), "integrity check failed")
 	})
 

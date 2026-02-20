@@ -824,8 +824,8 @@ func TestSpaceNamed(t *testing.T) {
 		var multipleErr client.MultipleSpacesFoundError
 		require.ErrorAs(t, err, &multipleErr)
 		require.Equal(t, "shared name", multipleErr.Name)
-		require.Len(t, multipleErr.Spaces, 2)
-		require.Equal(t, space1.DID(), multipleErr.Spaces[0].DID())
-		require.Equal(t, space2.DID(), multipleErr.Spaces[1].DID())
+		expected := []string{space1.DID().String(), space2.DID().String()}
+		actual := []string{multipleErr.Spaces[0].DID().String(), multipleErr.Spaces[1].DID().String()}
+		require.ElementsMatch(t, expected, actual)
 	})
 }
