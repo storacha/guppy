@@ -172,8 +172,6 @@ func (o *UploadObserver) init(ctx context.Context) error {
 
 func (o *UploadObserver) Subscribe() error {
 	for uid, state := range o.states {
-		state := state
-
 		// subscribe to client upload events (guppy -> piri(s))
 		if err := o.sub.Subscribe(events.TopicClientPut(uid), func(evt events.PutProgress) {
 			o.statesMu.Lock()
