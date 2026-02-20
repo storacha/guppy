@@ -11,6 +11,7 @@ import (
 	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 	"github.com/ipfs/go-cid"
 	ipldfmt "github.com/ipfs/go-ipld-format"
+	"github.com/storacha/guppy/internal/ctxutil"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -61,7 +62,7 @@ func (dfs *dagFS) open(ctx context.Context, fullPath string) (fs.File, error) {
 		// Open root directory
 		rootNode, err := dfs.dagService.Get(ctx, dfs.rootCID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get root node: %w", err)
+			return nil, fmt.Errorf("failed to get root node: %w", ctxutil.ErrorWithCause(err, ctx))
 		}
 		return dfs.openNode(ctx, rootNode, fullPath)
 	} else {
@@ -91,7 +92,7 @@ func (dfs *dagFS) open(ctx context.Context, fullPath string) (fs.File, error) {
 			return nil, &fs.PathError{
 				Op:   "open",
 				Path: fullPath,
-				Err:  err,
+				Err:  ctxutil.ErrorWithCause(err, ctx),
 			}
 		}
 
@@ -127,7 +128,7 @@ func (dfs *dagFS) openNode(ctx context.Context, node ipldfmt.Node, name string) 
 		} else {
 			dagReader, err := uio.NewDagReader(ctx, node, dfs.dagService)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create file reader: %w", err)
+				return nil, fmt.Errorf("failed to create file reader: %w", ctxutil.ErrorWithCause(err, ctx))
 			}
 			return &ufsFile{
 				name:      name,
@@ -139,7 +140,7 @@ func (dfs *dagFS) openNode(ctx context.Context, node ipldfmt.Node, name string) 
 	case *merkledag.RawNode:
 		dagReader, err := uio.NewDagReader(ctx, node, dfs.dagService)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create file reader: %w", err)
+			return nil, fmt.Errorf("failed to create file reader: %w", ctxutil.ErrorWithCause(err, ctx))
 		}
 		return &rawFile{
 			name:      name,

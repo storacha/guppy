@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/internal/ctxutil"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
@@ -406,7 +407,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		case <-ctx.Done():
 			// Stop writing, but continue draining results so workers can exit.
 			drainOnly = true
-			closeErr = ctx.Err()
+			closeErr = ctxutil.CausedError(ctx)
 			continue
 		case res, ok = <-results:
 			if !ok {
