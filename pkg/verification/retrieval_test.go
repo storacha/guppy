@@ -140,19 +140,15 @@ func TestStatBlocks(t *testing.T) {
 		for stat, err := range verification.StatBlocks(ctx, nil, nil, stub, []cid.Cid{block1CID, block2CID}) {
 			if err != nil {
 				gotError = err
-				break
+				continue
 			}
 			stats = append(stats, stat)
 		}
 
-		// Shard iteration order is non-deterministic: if the tampered block is verified first, an error will
-		// be returned and no more blocks will be verified.
-		require.LessOrEqual(t, len(stats), 1, "at most one block succeeds before the integrity error")
-		if len(stats) == 1 {
-			require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest), "only the valid block should succeed")
-		}
+		require.Len(t, stats, 1, "only the valid block should succeed")
+		require.Equal(t, block1Hash, multihash.Multihash(stats[0].Digest))
 
-		require.Error(t, gotError)
+		require.Error(t, gotError, "the tampered block should fail")
 		require.Contains(t, gotError.Error(), "integrity check failed")
 	})
 

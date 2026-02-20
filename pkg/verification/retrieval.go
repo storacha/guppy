@@ -140,8 +140,10 @@ func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetri
 
 			shard, pos, err := indexer.FindShard(ctx, slice)
 			if err != nil {
-				yield(BlockStat{}, fmt.Errorf("finding shard for %q: %w", link, err))
-				return
+				if !yield(BlockStat{}, fmt.Errorf("finding shard for %q: %w", link, err)) {
+					return
+				}
+				continue
 			}
 
 			slices := shardSlices.Get(shard)
@@ -154,8 +156,10 @@ func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetri
 			if !shardLocations.Has(shard) {
 				locations, err := indexer.FindLocations(ctx, shard)
 				if err != nil {
-					yield(BlockStat{}, fmt.Errorf("finding location for shard %q: %w", digestutil.Format(shard), err))
-					return
+					if !yield(BlockStat{}, fmt.Errorf("finding location for shard %q: %w", digestutil.Format(shard), err)) {
+						return
+					}
+					continue
 				}
 				shardLocations.Set(shard, locations)
 			}
@@ -166,22 +170,28 @@ func StatBlocks(ctx context.Context, id principal.Signer, getProofs ContentRetri
 			locations := shardLocations.Get(shard)
 			for slice, err := range batchFetchSlices(ctx, id, getProofs, shard, locations, slices) {
 				if err != nil {
-					yield(BlockStat{}, fmt.Errorf("fetching slices for shard %q: %w", digestutil.Format(shard), err))
-					return
+					if !yield(BlockStat{}, fmt.Errorf("fetching slices for shard %q: %w", digestutil.Format(shard), err)) {
+						return
+					}
+					continue
 				}
 
 				err = verifyIntegrity(slice.Digest, slice.Bytes)
 				if err != nil {
-					yield(BlockStat{}, err)
-					return
+					if !yield(BlockStat{}, err) {
+						return
+					}
+					continue
 				}
 
 				cid := blockCIDs.Get(slice.Digest)
 				codec := cid.Prefix().Codec
 				links, err := extractLinks(codec, slice.Bytes)
 				if err != nil {
-					yield(BlockStat{}, fmt.Errorf("extracting links for block %q: %w", cid, err))
-					return
+					if !yield(BlockStat{}, fmt.Errorf("extracting links for block %q: %w", cid, err)) {
+						return
+					}
+					continue
 				}
 
 				if !yield(BlockStat{
