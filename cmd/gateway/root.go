@@ -9,4 +9,5 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.AddCommand(serveCmd)
+	Cmd.AddCommand(configCmd)
 }

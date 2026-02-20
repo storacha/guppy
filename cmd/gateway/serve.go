@@ -22,6 +22,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	arc "github.com/storacha/go-ds-arc"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
@@ -59,7 +60,7 @@ var indexHTML []byte
 var log = logging.Logger("cmd/gateway")
 
 func init() {
-	serveCmd.Flags().IntP("block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory")
+	serveCmd.Flags().IntP("block-cache-capacity", "c", blockCacheCapacity, "Number of blocks to cache in memory (~1MB per block)")
 	cobra.CheckErr(viper.BindPFlag("gateway.block_cache_capacity", serveCmd.Flags().Lookup("block-cache-capacity")))
 
 	serveCmd.Flags().IntP("port", "p", port, "Port to run the HTTP server on")
@@ -73,7 +74,7 @@ func init() {
 		80))
 	cobra.CheckErr(viper.BindPFlag("gateway.advertise-url", serveCmd.Flags().Lookup("advertise-url")))
 
-	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
+	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enable subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>); requires --host")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
 
 	serveCmd.Flags().StringSlice("host", []string{}, "Gateway host(s) for subdomain mode (required if subdomain mode is enabled)")
@@ -94,9 +95,60 @@ var serveCmd = &cobra.Command{
 		"Start an IPFS Gateway that operates on the Storacha Network. By default "+
 			"it serves data from all authorized spaces. One or more spaces can "+
 			"be specified to restrict content served to those spaces only. "+
-			"Spaces can be specified by DID or by name.",
+			"Spaces can be specified by DID or by name.\n\n"+
+			"Configuration priority: flags > env vars (GUPPY_GATEWAY_*) > config file (~/.config/guppy/config.toml) > defaults.",
 		80),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Example: `  guppy gateway serve
+
+  guppy gateway serve --subdomain --host gw.example.com  # Enable subdomain mode
+
+  guppy gateway serve --advertise-url https://gw.example.com`,
+	// DisableFlagParsing prevents Cobra from parsing flags automatically.
+	// We parse flags manually in RunE to handle command reuse where stale
+	// flag state (e.g. --help) persists across multiple Execute() calls.
+	DisableFlagParsing: true,
+	RunE: func(cmd *cobra.Command, rawArgs []string) error {
+		// Reset all flags to defaults and re-parse from current args.
+		// This handles Cobra command reuse where flag state persists.
+		resetFlags(cmd)
+		if err := cmd.Flags().Parse(rawArgs); err != nil {
+			return err
+		}
+		// Reset flags on return to prevent stale state in future Execute() calls.
+		defer resetFlags(cmd)
+		if helpVal, _ := cmd.Flags().GetBool("help"); helpVal {
+			return cmd.Help()
+		}
+		args := cmd.Flags().Args()
+
+		// Early flag validation
+		subdomain, _ := cmd.Flags().GetBool("subdomain")
+		hosts, _ := cmd.Flags().GetStringSlice("host")
+		if subdomain && len(hosts) == 0 {
+			return fmt.Errorf("--subdomain requires --host to be set (e.g. --host gw.example.com)")
+		}
+		if advURL, _ := cmd.Flags().GetString("advertise-url"); advURL != "" {
+			parsed, err := url.Parse(advURL)
+			if err != nil {
+				return fmt.Errorf("invalid --advertise-url: %w", err)
+			}
+			if parsed.Scheme != "https" {
+				return fmt.Errorf("--advertise-url must use HTTPS (got %q)", advURL)
+			}
+		}
+		if level, _ := cmd.Flags().GetString("log-level"); level != "" {
+			valid := []string{"debug", "info", "warn", "error"}
+			found := false
+			for _, v := range valid {
+				if strings.EqualFold(level, v) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("invalid --log-level %q: valid levels are debug, info, warn, error", level)
+			}
+		}
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
@@ -254,6 +306,8 @@ var serveCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("parsing --advertise-url: %w", err)
 			}
+			// Note: HTTPS is also checked in early flag validation above;
+			// this catches the case when advertise-url comes from config file or env.
 			if advertiseURL.Scheme != "https" {
 				return fmt.Errorf("--advertise-url must be an HTTPS URL, got %q", cfg.Gateway.AdvertiseURL)
 			}
@@ -312,4 +366,18 @@ var serveCmd = &cobra.Command{
 
 func rootHandler(c echo.Context) error {
 	return c.Blob(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+}
+
+// resetFlags resets all flags on cmd to their default values. This is needed
+// because Cobra/pflag don't reset flag state between Execute() calls, causing
+// stale values (especially --help) to persist when commands are reused.
+func resetFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			sv.Replace([]string{})
+		} else {
+			f.Value.Set(f.DefValue)
+		}
+		f.Changed = false
+	})
 }
