@@ -19,9 +19,11 @@ import (
 	"github.com/storacha/guppy/cmd/account"
 	"github.com/storacha/guppy/cmd/delegation"
 	"github.com/storacha/guppy/cmd/gateway"
+	"github.com/storacha/guppy/cmd/plan"
 	"github.com/storacha/guppy/cmd/proof"
 	"github.com/storacha/guppy/cmd/space"
 	"github.com/storacha/guppy/cmd/upload"
+	"github.com/storacha/guppy/cmd/usage"
 )
 
 var (
@@ -103,6 +105,8 @@ func init() {
 		delegation.Cmd,
 		account.Cmd,
 		blob.Cmd,
+		plan.Cmd,
+		usage.Cmd,
 	)
 }
 
