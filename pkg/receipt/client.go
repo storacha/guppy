@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	"github.com/storacha/go-libstoracha/capabilities/types"
 	ucancap "github.com/storacha/go-libstoracha/capabilities/ucan"
 	"github.com/storacha/go-ucanto/core/invocation"
@@ -175,7 +176,8 @@ func WithRetries(n int) PollOption {
 }
 
 // Poll attempts to fetch a receipt from the endpoint until a non-404 response
-// is encountered or until the configured maximum retries are made.
+// is encountered or until the configured maximum retries are made. It uses exponential
+// backoff with configurable initial interval and retry count.
 func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption) (receipt.AnyReceipt, error) {
 	conf := pollConfig{}
 	for _, o := range options {
@@ -188,27 +190,34 @@ func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption
 		conf.retries = &PollRetries
 	}
 
-	attempts := 0
-	for {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = *conf.interval
+
+	retryOpts := []backoff.RetryOption{
+		backoff.WithBackOff(b),
+	}
+
+	if *conf.retries > -1 {
+		retryOpts = append(retryOpts, backoff.WithMaxTries(uint(*conf.retries+1)))
+	}
+
+	rcpt, err := backoff.Retry(ctx, func() (receipt.AnyReceipt, error) {
 		rcpt, err := c.Fetch(ctx, task)
 		if err != nil && !errors.Is(err, ErrNotFound) {
-			return nil, err
+			return nil, backoff.Permanent(err)
 		}
 		if err == nil {
 			return rcpt, nil
 		}
+		return nil, err
+	}, retryOpts...)
 
-		attempts++
-		if *conf.retries > -1 && (attempts-1) >= *conf.retries {
-			return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, attempts)
-		}
-
-		// wait for the configured interval, or the context to be canceled
-		sleep, cancel := context.WithTimeout(ctx, *conf.interval)
-		<-sleep.Done()
-		cancel()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	if err != nil && errors.Is(err, context.Canceled) {
+		return nil, err
 	}
+	if err != nil {
+		return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, *conf.retries+1)
+	}
+
+	return rcpt, nil
 }
