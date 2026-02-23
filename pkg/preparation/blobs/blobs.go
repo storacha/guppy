@@ -477,14 +477,14 @@ func lengthVarint(size uint64) []byte {
 }
 
 func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadCloser, error) {
-	log.Debugw("ReaderForIndex: getting index", "index", indexID)
+	log.Infow("ReaderForIndex: getting index", "index", indexID)
 	index, err := a.Repo.GetIndexByID(ctx, indexID)
 	if err != nil {
 		return nil, fmt.Errorf("getting index %s: %w", indexID, err)
 	}
 
 	// Get the upload to retrieve the root CID
-	log.Debugw("ReaderForIndex: getting upload", "index", indexID, "upload", index.UploadID())
+	log.Infow("ReaderForIndex: getting upload", "index", indexID, "upload", index.UploadID())
 	upload, err := a.Repo.GetUploadByID(ctx, index.UploadID())
 	if err != nil {
 		return nil, fmt.Errorf("getting upload for index %s: %w", indexID, err)
@@ -498,11 +498,11 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 
 	// Query all nodes across all shards in this index in a single batch query
 	nodeCount := 0
-	log.Debugw("building index", "index", indexID)
+	log.Infow("building index", "index", indexID)
 	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
 		nodeCount++
 		if nodeCount%1000 == 0 {
-			log.Debugw("building index", "index", indexID, "nodes", nodeCount)
+			log.Infow("building index", "index", indexID, "nodes", nodeCount)
 		}
 		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
 		return nil
@@ -510,7 +510,7 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	if err != nil {
 		return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 	}
-	log.Debugw("built index", "index", indexID, "nodes", nodeCount)
+	log.Infow("built index", "index", indexID, "nodes", nodeCount)
 
 	archReader, err := blobindex.Archive(indexView)
 	if err != nil {
