@@ -357,8 +357,7 @@ func (r *Repo) ForEachNodeInIndex(ctx context.Context, indexID id.IndexID, yield
 		JOIN shards s ON s.id = si.shard_id
 		JOIN node_uploads nu ON nu.shard_id = si.shard_id
 		JOIN nodes ON nodes.cid = nu.node_cid AND nodes.space_did = nu.space_did
-		WHERE si.index_id = ?
-		ORDER BY si.shard_id`)
+		WHERE si.index_id = ?`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
