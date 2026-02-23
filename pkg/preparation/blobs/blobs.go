@@ -139,7 +139,8 @@ func (a API) AddNodesToUploadShards(ctx context.Context, uploadID id.UploadID, s
 	}
 
 	// Process each node by adding it to a shard
-	for _, nodeCID := range nodeCIDs {
+	log.Infow("sharding nodes", "upload", uploadID, "total", len(nodeCIDs))
+	for i, nodeCID := range nodeCIDs {
 		// AddNodeToUploadShards handles finding/creating shards and assigns the node
 		// Note: we pass nil for data since we don't have it available in this flow.
 		// The digest state will be calculated later when reading the shard.
@@ -147,7 +148,11 @@ func (a API) AddNodesToUploadShards(ctx context.Context, uploadID id.UploadID, s
 		if err != nil {
 			return fmt.Errorf("failed to add node %s to shard for upload %s: %w", nodeCID, uploadID, err)
 		}
+		if (i+1)%1000 == 0 {
+			log.Infow("sharding nodes", "upload", uploadID, "progress", i+1, "total", len(nodeCIDs))
+		}
 	}
+	log.Infow("sharded nodes", "upload", uploadID, "total", len(nodeCIDs))
 
 	return nil
 }
