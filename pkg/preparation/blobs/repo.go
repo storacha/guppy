@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -38,6 +39,9 @@ type Repo interface {
 	AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error
 	ShardsNotInIndexes(ctx context.Context, uploadID id.UploadID) ([]id.ShardID, error)
 	ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error)
+	// ForEachNodeInIndex iterates over all nodes across all shards in an index,
+	// ordered by shard. This is a batch query that avoids per-shard round trips.
+	ForEachNodeInIndex(ctx context.Context, indexID id.IndexID, yield func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error) error
 
 	// Upload methods
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
