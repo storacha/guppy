@@ -495,13 +495,20 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
 
 	// Query all nodes across all shards in this index in a single batch query
+	nodeCount := 0
+	log.Debugw("building index", "index", indexID)
 	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+		nodeCount++
+		if nodeCount%1000 == 0 {
+			log.Debugw("building index", "index", indexID, "nodes", nodeCount)
+		}
 		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 	}
+	log.Debugw("built index", "index", indexID, "nodes", nodeCount)
 
 	archReader, err := blobindex.Archive(indexView)
 	if err != nil {
