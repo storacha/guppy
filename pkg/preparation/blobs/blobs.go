@@ -477,12 +477,14 @@ func lengthVarint(size uint64) []byte {
 }
 
 func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadCloser, error) {
+	log.Debugw("ReaderForIndex: getting index", "index", indexID)
 	index, err := a.Repo.GetIndexByID(ctx, indexID)
 	if err != nil {
 		return nil, fmt.Errorf("getting index %s: %w", indexID, err)
 	}
 
 	// Get the upload to retrieve the root CID
+	log.Debugw("ReaderForIndex: getting upload", "index", indexID, "upload", index.UploadID())
 	upload, err := a.Repo.GetUploadByID(ctx, index.UploadID())
 	if err != nil {
 		return nil, fmt.Errorf("getting upload for index %s: %w", indexID, err)
