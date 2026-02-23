@@ -161,6 +161,8 @@ func (a API) roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmode
 		return false, nil // No room in the shard
 	}
 
+	// In addition to the byte limit, limit the number of slices to what can be
+	// indexed. We always put entire shards in indexes.
 	if a.MaxNodesPerIndex > 0 && shard.SliceCount() >= a.MaxNodesPerIndex {
 		return false, nil // Shard has reached maximum node count
 	}
