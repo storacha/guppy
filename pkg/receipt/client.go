@@ -212,10 +212,10 @@ func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption
 		return nil, err
 	}, retryOpts...)
 
-	if err != nil && errors.Is(err, context.Canceled) {
-		return nil, err
-	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, *conf.retries+1)
 	}
 
