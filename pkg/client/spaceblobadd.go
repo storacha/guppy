@@ -459,7 +459,11 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 	defer func() {
 		log.Infow("put blob", "destination", url.String(), "duration", time.Since(start))
 	}()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), body)
+
+	sw := newStallWarnReader(body, url.String(), 30*time.Second)
+	defer sw.stop()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), sw)
 	if err != nil {
 		return fmt.Errorf("creating upload request: %w", ctxutil.ErrorWithCause(err, ctx))
 	}
@@ -637,4 +641,35 @@ func (p *progressReader) Read(b []byte) (int, error) {
 		p.progress(p.readSoFar)
 	}
 	return n, err
+}
+
+type stallWarnReader struct {
+	r         io.Reader
+	name      string
+	threshold time.Duration
+	timer     *time.Timer
+}
+
+func newStallWarnReader(r io.Reader, name string, threshold time.Duration) *stallWarnReader {
+	sw := &stallWarnReader{
+		r:         r,
+		name:      name,
+		threshold: threshold,
+	}
+	sw.timer = time.AfterFunc(threshold, sw.warn)
+	return sw
+}
+
+func (sw *stallWarnReader) warn() {
+	log.Warnw("blob upload stalled", "destination", sw.name, "no_read_for", sw.threshold)
+}
+
+func (sw *stallWarnReader) Read(p []byte) (int, error) {
+	sw.timer.Reset(sw.threshold)
+	n, err := sw.r.Read(p)
+	return n, err
+}
+
+func (sw *stallWarnReader) stop() {
+	sw.timer.Stop()
 }
