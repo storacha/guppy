@@ -191,6 +191,7 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	if err != nil {
 		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer hasher.reset()
 
 	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
 	if err != nil {
@@ -230,6 +231,7 @@ func (a API) closeShard(ctx context.Context, shard *model.Shard) error {
 	if err != nil {
 		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer h.reset()
 	shardDigest, pieceCID, err := h.finalize(shard.Size())
 	if err != nil {
 		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)
