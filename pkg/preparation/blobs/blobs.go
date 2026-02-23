@@ -161,6 +161,8 @@ func (a API) roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmode
 		return false, nil // No room in the shard
 	}
 
+	// In addition to the byte limit, limit the number of slices to what can be
+	// indexed. We always put entire shards in indexes.
 	if a.MaxNodesPerIndex > 0 && shard.SliceCount() >= a.MaxNodesPerIndex {
 		return false, nil // Shard has reached maximum node count
 	}
@@ -495,13 +497,20 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
 
 	// Query all nodes across all shards in this index in a single batch query
+	nodeCount := 0
+	log.Infow("building index", "index", indexID)
 	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+		nodeCount++
+		if nodeCount%10000 == 0 {
+			log.Infow("building index", "index", indexID, "nodes", nodeCount)
+		}
 		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 	}
+	log.Infow("built index", "index", indexID, "nodes", nodeCount)
 
 	archReader, err := blobindex.Archive(indexView)
 	if err != nil {
