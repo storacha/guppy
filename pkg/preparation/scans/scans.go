@@ -135,18 +135,11 @@ func (a API) RemoveBadFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID i
 		return nil
 	}
 
-	// Delete the bad entry itself
-	if err := a.Repo.DeleteFSEntry(ctx, spaceDID, fsEntryID); err != nil {
-		return fmt.Errorf("deleting bad FS entry %s: %w", fsEntryID, err)
-	}
-
-	// Delete all ancestor directory entries so the re-scan only needs to
-	// walk the dirty path from root to this file's parent.
-	ancestorPaths := computeAncestorPaths(entry.Path())
-	if len(ancestorPaths) > 0 {
-		if err := a.Repo.DeleteFSEntriesByPaths(ctx, ancestorPaths, entry.SourceID(), spaceDID); err != nil {
-			return fmt.Errorf("deleting ancestor FS entries for %s: %w", entry.Path(), err)
-		}
+	// Delete the bad entry and all ancestor directory entries so the re-scan
+	// only needs to walk the dirty path from root to this file's parent.
+	paths := append([]string{entry.Path()}, computeAncestorPaths(entry.Path())...)
+	if err := a.Repo.DeleteFSEntriesByPaths(ctx, paths, entry.SourceID(), spaceDID); err != nil {
+		return fmt.Errorf("deleting bad FS entry and ancestors for %s: %w", entry.Path(), err)
 	}
 	return nil
 }
