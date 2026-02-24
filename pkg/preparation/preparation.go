@@ -111,9 +111,10 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	scansAPI := scans.API{
-		Repo:           repo,
-		SourceAccessor: sourcesAPI.AccessByID,
-		WalkerFn:       walker.WalkDir,
+		Repo:                   repo,
+		SourceAccessor:         sourcesAPI.AccessByID,
+		WalkerFn:               walker.WalkDir,
+		AssumeUnchangedSources: cfg.assumeUnchangedSources,
 	}
 
 	dagsAPI := dags.API{
