@@ -20,4 +20,7 @@ type Repo interface {
 	DirectoryChildren(ctx context.Context, dir *model.Directory) ([]model.FSEntry, error)
 	GetFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error)
 	DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
+	GetFSEntryByID(ctx context.Context, fsEntryID id.FSEntryID) (model.FSEntry, error)
+	GetFSEntryByPath(ctx context.Context, path string, sourceID id.SourceID, spaceDID did.DID) (model.FSEntry, error)
+	DeleteFSEntriesByPaths(ctx context.Context, paths []string, sourceID id.SourceID, spaceDID did.DID) error
 }
