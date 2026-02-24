@@ -153,6 +153,11 @@ func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
 	return c.store.AddDelegations(delegations...)
 }
 
+// Receipts returns a client for fetching invocation receipts.
+func (c *Client) Receipts() *receiptclient.Client {
+	return c.receiptsClient
+}
+
 // Reset clears all delegations from the store while preserving the principal.
 func (c *Client) Reset() error {
 	return c.store.Reset()
