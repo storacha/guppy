@@ -76,6 +76,10 @@ type mockFSVisitor struct {
 	t                  *testing.T
 }
 
+func (v *mockFSVisitor) SkipEntry(path string, dirEntry fs.DirEntry) (model.FSEntry, bool) {
+	return nil, false
+}
+
 func (v *mockFSVisitor) VisitFile(path string, dirEntry fs.DirEntry) (*model.File, error) {
 	v.visitedFiles = append(v.visitedFiles, path)
 	spaceDID := testutil.RandomDID(v.t)

@@ -54,11 +54,11 @@ type API struct {
 type Option func(cfg *config) error
 
 type config struct {
-	getLocalFSForPathFn   func(path string) (fs.FS, error)
-	maxNodesPerIndex      int
-	blobUploadParallelism int
+	getLocalFSForPathFn    func(path string) (fs.FS, error)
+	maxNodesPerIndex       int
+	blobUploadParallelism  int
 	assumeUnchangedSources bool
-	bus                   bus.Bus
+	bus                    bus.Bus
 }
 
 const defaultBlobUploadParallelism = 6
@@ -105,9 +105,10 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	scansAPI := scans.API{
-		Repo:           repo,
-		SourceAccessor: sourcesAPI.AccessByID,
-		WalkerFn:       walker.WalkDir,
+		Repo:                   repo,
+		SourceAccessor:         sourcesAPI.AccessByID,
+		WalkerFn:               walker.WalkDir,
+		AssumeUnchangedSources: cfg.assumeUnchangedSources,
 	}
 
 	dagsAPI := dags.API{

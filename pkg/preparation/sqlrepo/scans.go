@@ -232,6 +232,84 @@ func (r *Repo) insertOrGetFSEntry(ctx context.Context, path string, lastModified
 	return entry, created, nil
 }
 
+// GetFSEntryByID retrieves an fs_entry by its ID.
+// Returns nil if no entry is found.
+func (r *Repo) GetFSEntryByID(ctx context.Context, fsEntryID id.FSEntryID) (scanmodel.FSEntry, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
+		FROM fs_entries
+		WHERE id = ?
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, fsEntryID)
+	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
+		id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode,
+		size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID,
+	) error {
+		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+// GetFSEntryByPath retrieves an fs_entry by path, source ID, and space DID.
+// Returns nil if no entry is found.
+func (r *Repo) GetFSEntryByPath(ctx context.Context, path string, sourceID id.SourceID, spaceDID did.DID) (scanmodel.FSEntry, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT id, path, last_modified, mode, size, checksum, source_id, space_did
+		FROM fs_entries
+		WHERE path = ? AND source_id = ? AND space_did = ?
+		LIMIT 1
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	row := stmt.QueryRowContext(ctx, path, util.DbID(&sourceID), util.DbDID(&spaceDID))
+	entry, err := scanmodel.ReadFSEntryFromDatabase(func(
+		id *id.FSEntryID, path *string, lastModified *time.Time, mode *fs.FileMode,
+		size *uint64, checksum *[]byte, sourceID *id.SourceID, spaceDID *did.DID,
+	) error {
+		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+// DeleteFSEntriesByPaths deletes all fs_entries matching any of the given paths
+// for the specified source and space. This deletes all entries for each path,
+// including any stale duplicates from prior scans.
+func (r *Repo) DeleteFSEntriesByPaths(ctx context.Context, paths []string, sourceID id.SourceID, spaceDID did.DID) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	stmt, err := r.prepareStmt(ctx, `
+		DELETE FROM fs_entries
+		WHERE path = ? AND source_id = ? AND space_did = ?
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	for _, path := range paths {
+		_, err := stmt.ExecContext(ctx, path, util.DbID(&sourceID), util.DbDID(&spaceDID))
+		if err != nil {
+			return fmt.Errorf("failed to delete FS entries for path %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
 func (r *Repo) DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
 	stmt, err := r.prepareStmt(ctx, `
 		DELETE FROM fs_entries
