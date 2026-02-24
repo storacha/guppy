@@ -69,14 +69,76 @@ func TestWalker(t *testing.T) {
 	}, "Children of directory 'subdir1' should match expected paths")
 }
 
+func TestWalkerSkipEntry(t *testing.T) {
+	memFS := afero.NewMemMapFs()
+	memFS.MkdirAll("dir1/subdir1", 0755)
+	afero.WriteFile(memFS, "file1.txt", []byte("contents of file1.txt"), 0644)
+	afero.WriteFile(memFS, "dir1/file2.txt", []byte("contents of file2.txt"), 0644)
+	afero.WriteFile(memFS, "dir1/subdir1/file3.txt", []byte("contents of file3.txt"), 0644)
+
+	t.Run("skips a file when SkipEntry returns an entry", func(t *testing.T) {
+		spaceDID := testutil.RandomDID(t)
+		skippedFile := testutil.Must(model.NewFile("dir1/file2.txt", time.Now(), fs.FileMode(0644), 0, []byte("cached"), id.New(), spaceDID))(t)
+
+		v := &mockFSVisitor{
+			visitedChildren: make(map[string][]model.FSEntry),
+			t:               t,
+			skipEntries:     map[string]model.FSEntry{"dir1/file2.txt": skippedFile},
+		}
+
+		rt, err := walker.WalkDir(afero.NewIOFS(memFS), ".", v)
+		require.NoError(t, err)
+		require.Equal(t, ".", rt.Path())
+
+		// file2.txt was skipped, so only 2 files were visited
+		require.ElementsMatch(t, []string{"file1.txt", "dir1/subdir1/file3.txt"}, v.visitedFiles)
+		// The skipped file's cached entry should appear as a child of dir1
+		dir1Children := slices.Collect(iterable.Map(func(child model.FSEntry) string {
+			return child.Path()
+		}, slices.Values(v.visitedChildren["dir1"])))
+		require.ElementsMatch(t, []string{"dir1/file2.txt", "dir1/subdir1"}, dir1Children)
+	})
+
+	t.Run("skips an entire directory subtree when SkipEntry returns an entry", func(t *testing.T) {
+		spaceDID := testutil.RandomDID(t)
+		skippedDir := testutil.Must(model.NewDirectory("dir1/subdir1", time.Now(), fs.ModeDir|fs.FileMode(0755), []byte("cached-dir"), id.New(), spaceDID))(t)
+
+		v := &mockFSVisitor{
+			visitedChildren: make(map[string][]model.FSEntry),
+			t:               t,
+			skipEntries:     map[string]model.FSEntry{"dir1/subdir1": skippedDir},
+		}
+
+		rt, err := walker.WalkDir(afero.NewIOFS(memFS), ".", v)
+		require.NoError(t, err)
+		require.Equal(t, ".", rt.Path())
+
+		// subdir1 was skipped, so file3.txt inside it was never visited
+		require.ElementsMatch(t, []string{"file1.txt", "dir1/file2.txt"}, v.visitedFiles)
+		// subdir1 itself was not visited as a directory
+		require.ElementsMatch(t, []string{".", "dir1"}, v.visitedDirectories)
+		// But the cached entry appears as a child of dir1
+		dir1Children := slices.Collect(iterable.Map(func(child model.FSEntry) string {
+			return child.Path()
+		}, slices.Values(v.visitedChildren["dir1"])))
+		require.ElementsMatch(t, []string{"dir1/file2.txt", "dir1/subdir1"}, dir1Children)
+	})
+}
+
 type mockFSVisitor struct {
 	visitedFiles       []string
 	visitedDirectories []string
 	visitedChildren    map[string][]model.FSEntry
 	t                  *testing.T
+	skipEntries        map[string]model.FSEntry
 }
 
 func (v *mockFSVisitor) SkipEntry(path string, dirEntry fs.DirEntry) (model.FSEntry, bool) {
+	if v.skipEntries != nil {
+		if entry, ok := v.skipEntries[path]; ok {
+			return entry, true
+		}
+	}
 	return nil, false
 }
 
