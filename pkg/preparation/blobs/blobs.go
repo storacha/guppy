@@ -508,7 +508,7 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	log.Infow("building index", "index", indexID)
 	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
 		nodeCount++
-		if nodeCount%1000 == 0 {
+		if nodeCount%10000 == 0 {
 			log.Infow("building index", "index", indexID, "nodes", nodeCount)
 		}
 		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
