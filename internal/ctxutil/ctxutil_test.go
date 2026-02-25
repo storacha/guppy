@@ -34,7 +34,7 @@ func TestCausedError(t *testing.T) {
 		require.NotNil(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.ErrorIs(t, err, cause)
-		assert.Equal(t, "context canceled -- Caused by: server shutting down", err.Error())
+		assert.Equal(t, "context canceled, cause: server shutting down", err.Error())
 	})
 
 	t.Run("returns context.DeadlineExceeded when deadline exceeded with no explicit cause", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestCausedError(t *testing.T) {
 		require.NotNil(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.ErrorIs(t, err, cause)
-		assert.Equal(t, "context deadline exceeded -- Caused by: query too slow", err.Error())
+		assert.Equal(t, "context deadline exceeded, cause: query too slow", err.Error())
 	})
 }
 
@@ -89,7 +89,7 @@ func TestErrorWithCause(t *testing.T) {
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.Canceled)
 		assert.ErrorIs(t, result, cause)
-		assert.Equal(t, "context canceled -- Caused by: server shutting down", result.Error())
+		assert.Equal(t, "context canceled, cause: server shutting down", result.Error())
 	})
 
 	t.Run("wraps error that wraps context.Canceled", func(t *testing.T) {
@@ -101,7 +101,7 @@ func TestErrorWithCause(t *testing.T) {
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.Canceled)
 		assert.ErrorIs(t, result, cause)
-		assert.Equal(t, "query failed: context canceled -- Caused by: server shutting down", result.Error())
+		assert.Equal(t, "query failed: context canceled, cause: server shutting down", result.Error())
 	})
 
 	t.Run("returns err unchanged when it already wraps both ctx.Err and cause", func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestErrorWithCause(t *testing.T) {
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.DeadlineExceeded)
 		assert.ErrorIs(t, result, cause)
-		assert.Equal(t, "context deadline exceeded -- Caused by: query too slow", result.Error())
+		assert.Equal(t, "context deadline exceeded, cause: query too slow", result.Error())
 	})
 
 	t.Run("is idempotent: calling twice does not double-wrap", func(t *testing.T) {
