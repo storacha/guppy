@@ -55,6 +55,78 @@ func newUploadAndScansAPI(t *testing.T) (*uploadmodel.Upload, scans.API) {
 	return upload, scansAPI
 }
 
+func TestRemoveBadFSEntry(t *testing.T) {
+	t.Run("deletes the bad entry and all ancestor directories", func(t *testing.T) {
+		sourceID := id.New()
+		spaceDID := testutil.RandomDID(t)
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
+		modTime := time.Now().UTC().Truncate(time.Second)
+
+		// Create a tree: . -> dir1 -> dir2 -> file.txt
+		_, _, err := repo.FindOrCreateDirectory(t.Context(), ".", modTime, fs.ModeDir|0755, []byte("root-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateDirectory(t.Context(), "dir1", modTime, fs.ModeDir|0755, []byte("dir1-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+		_, _, err = repo.FindOrCreateDirectory(t.Context(), "dir1/dir2", modTime, fs.ModeDir|0755, []byte("dir2-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+		badFile, _, err := repo.FindOrCreateFile(t.Context(), "dir1/dir2/file.txt", modTime, 0644, 100, []byte("bad-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+
+		// Also create a sibling that should NOT be deleted
+		sibling, _, err := repo.FindOrCreateFile(t.Context(), "dir1/dir2/sibling.txt", modTime, 0644, 200, []byte("sib-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+
+		api := scans.API{Repo: repo}
+		err = api.RemoveBadFSEntry(t.Context(), spaceDID, badFile.ID())
+		require.NoError(t, err)
+
+		// The bad file and all ancestors should be deleted
+		for _, p := range []string{"dir1/dir2/file.txt", "dir1/dir2", "dir1", "."} {
+			entry, err := repo.GetFSEntryByPath(t.Context(), p, sourceID, spaceDID)
+			require.NoError(t, err)
+			require.Nil(t, entry, "expected %s to be deleted", p)
+		}
+
+		// The sibling should still exist
+		entry, err := repo.GetFSEntryByPath(t.Context(), "dir1/dir2/sibling.txt", sourceID, spaceDID)
+		require.NoError(t, err)
+		require.NotNil(t, entry)
+		require.Equal(t, sibling.ID(), entry.ID())
+	})
+
+	t.Run("no-ops when the entry is already deleted", func(t *testing.T) {
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
+		spaceDID := testutil.RandomDID(t)
+
+		api := scans.API{Repo: repo}
+		// Remove a made-up ID that doesn't exist, should not error
+		err := api.RemoveBadFSEntry(t.Context(), spaceDID, id.New())
+		require.NoError(t, err)
+	})
+
+	t.Run("deletes a root-level file and the root directory", func(t *testing.T) {
+		sourceID := id.New()
+		spaceDID := testutil.RandomDID(t)
+		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
+		modTime := time.Now().UTC().Truncate(time.Second)
+
+		_, _, err := repo.FindOrCreateDirectory(t.Context(), ".", modTime, fs.ModeDir|0755, []byte("root-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+		badFile, _, err := repo.FindOrCreateFile(t.Context(), "top.txt", modTime, 0644, 50, []byte("top-cs"), sourceID, spaceDID)
+		require.NoError(t, err)
+
+		api := scans.API{Repo: repo}
+		err = api.RemoveBadFSEntry(t.Context(), spaceDID, badFile.ID())
+		require.NoError(t, err)
+
+		for _, p := range []string{"top.txt", "."} {
+			entry, err := repo.GetFSEntryByPath(t.Context(), p, sourceID, spaceDID)
+			require.NoError(t, err)
+			require.Nil(t, entry, "expected %s to be deleted", p)
+		}
+	})
+}
+
 func TestExecuteScan(t *testing.T) {
 	t.Run("with a successful scan", func(t *testing.T) {
 		memFS := afero.NewMemMapFs()
