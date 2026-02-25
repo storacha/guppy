@@ -39,7 +39,7 @@ func (c *Client) pollClaimWithTicker(ctx context.Context, authOk access.Authoriz
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("context canceled before delegations could be claimed: %w", ctxutil.CausedError(ctx))
+			return nil, fmt.Errorf("context canceled before delegations could be claimed: %w", ctxutil.Cause(ctx))
 		case <-tickChan:
 			dels, err := c.ClaimAccess(ctx)
 			if err != nil {

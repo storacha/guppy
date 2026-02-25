@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// CausedError returns the error and cause from the context as a single error with a
+// Cause returns the error and cause from the context as a single error with a
 // nice message. This is an ergonomic convenience. `ctx.Err()` predates causes,
 // and doesn't report them. `context.Cause(ctx)` returns the cause, but its
 // message doesn't state that it's a cause. This function will return either:
@@ -19,7 +19,7 @@ import (
 //
 // For a context with a cause, the returned error will wrap both the error and
 // the cause, so you can use `errors.Is`, `errors.As`, and `errors.Unwrap`.
-func CausedError(ctx context.Context) error {
+func Cause(ctx context.Context) error {
 	err := ctx.Err()
 	if err == nil {
 		return nil
