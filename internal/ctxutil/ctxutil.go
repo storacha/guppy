@@ -31,14 +31,14 @@ func Cause(ctx context.Context) error {
 	return fmt.Errorf("%w, cause: %w", err, cause)
 }
 
-// ErrorWithCause takes an error which should be returned from a function that
+// EnrichWithCause takes an error which should be returned from a function that
 // also takes a context, and the context itself. If the context was canceled or
 // its deadline was exceeded *with a cause*, and the error returned was the
 // `ctx.Err()` without including the cause, then this function will return a new
 // error that wraps both. This is an ergonomic convenience to adapt functions
 // which respond to `ctx.Done()` but don't include the cause in their returned
 // error, likely because they were written before context causes were added.
-func ErrorWithCause(err error, ctx context.Context) error {
+func EnrichWithCause(err error, ctx context.Context) error {
 	cause := context.Cause(ctx)
 	if cause != nil && errors.Is(err, ctx.Err()) && !errors.Is(err, cause) {
 		return fmt.Errorf("%w, cause: %w", err, cause)

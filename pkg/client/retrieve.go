@@ -78,7 +78,7 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 
 	xres, hres, err := rclient.Execute(ctx, inv, conn)
 	if err != nil {
-		return nil, fmt.Errorf("executing `space/content/retrieve` invocation: %w", ctxutil.ErrorWithCause(err, ctx))
+		return nil, fmt.Errorf("executing `space/content/retrieve` invocation: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	rcptLink, ok := xres.Get(inv.Link())

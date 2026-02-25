@@ -62,21 +62,21 @@ func TestCausedError(t *testing.T) {
 func TestErrorWithCause(t *testing.T) {
 	t.Run("returns nil when err is nil and context is not done", func(t *testing.T) {
 		ctx := t.Context()
-		assert.Nil(t, ctxutil.ErrorWithCause(nil, ctx))
+		assert.Nil(t, ctxutil.EnrichWithCause(nil, ctx))
 	})
 
 	t.Run("returns nil when err is nil and context is canceled with cause", func(t *testing.T) {
 		cause := errors.New("shutting down")
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
-		assert.Nil(t, ctxutil.ErrorWithCause(nil, ctx))
+		assert.Nil(t, ctxutil.EnrichWithCause(nil, ctx))
 	})
 
 	t.Run("returns err unchanged when canceled with no explicit cause", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		err := context.Canceled
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		assert.Equal(t, err, result)
 	})
 
@@ -85,7 +85,7 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := context.Canceled
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.Canceled)
 		assert.ErrorIs(t, result, cause)
@@ -97,7 +97,7 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := fmt.Errorf("query failed: %w", context.Canceled)
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.Canceled)
 		assert.ErrorIs(t, result, cause)
@@ -109,7 +109,7 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := fmt.Errorf("%w: %w", context.Canceled, cause)
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		assert.Equal(t, err, result)
 	})
 
@@ -118,7 +118,7 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := errors.New("disk full")
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		assert.Equal(t, err, result)
 	})
 
@@ -127,7 +127,7 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(-time.Second), cause)
 		defer cancel()
 		err := context.DeadlineExceeded
-		result := ctxutil.ErrorWithCause(err, ctx)
+		result := ctxutil.EnrichWithCause(err, ctx)
 		require.NotNil(t, result)
 		assert.ErrorIs(t, result, context.DeadlineExceeded)
 		assert.ErrorIs(t, result, cause)
@@ -139,8 +139,8 @@ func TestErrorWithCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
 		err := context.Canceled
-		first := ctxutil.ErrorWithCause(err, ctx)
-		second := ctxutil.ErrorWithCause(first, ctx)
+		first := ctxutil.EnrichWithCause(err, ctx)
+		second := ctxutil.EnrichWithCause(first, ctx)
 		assert.Equal(t, first, second)
 	})
 }

@@ -190,7 +190,7 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, digests []mh
 		for i, h := range digests {
 			hashStrings[i] = digestutil.Format(h)
 		}
-		return fmt.Errorf("querying claims for [%s]: %w", strings.Join(hashStrings, ", "), ctxutil.ErrorWithCause(err, ctx))
+		return fmt.Errorf("querying claims for [%s]: %w", strings.Join(hashStrings, ", "), ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	bs, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(result.Blocks()))
