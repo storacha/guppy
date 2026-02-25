@@ -15,13 +15,13 @@ import (
 func TestCausedError(t *testing.T) {
 	t.Run("returns nil when context is not done", func(t *testing.T) {
 		ctx := t.Context()
-		assert.Nil(t, ctxutil.CausedError(ctx))
+		assert.Nil(t, ctxutil.Cause(ctx))
 	})
 
 	t.Run("returns context.Canceled when canceled with no explicit cause", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		err := ctxutil.CausedError(ctx)
+		err := ctxutil.Cause(ctx)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, "context canceled", err.Error())
 	})
@@ -30,7 +30,7 @@ func TestCausedError(t *testing.T) {
 		cause := errors.New("server shutting down")
 		ctx, cancel := context.WithCancelCause(t.Context())
 		cancel(cause)
-		err := ctxutil.CausedError(ctx)
+		err := ctxutil.Cause(ctx)
 		require.NotNil(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.ErrorIs(t, err, cause)
@@ -41,7 +41,7 @@ func TestCausedError(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
 		defer cancel()
 		<-ctx.Done()
-		err := ctxutil.CausedError(ctx)
+		err := ctxutil.Cause(ctx)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.Equal(t, "context deadline exceeded", err.Error())
 	})
@@ -51,7 +51,7 @@ func TestCausedError(t *testing.T) {
 		// Simulate deadline exceeded by using WithDeadlineCause
 		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(-time.Second), cause)
 		defer cancel()
-		err := ctxutil.CausedError(ctx)
+		err := ctxutil.Cause(ctx)
 		require.NotNil(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.ErrorIs(t, err, cause)

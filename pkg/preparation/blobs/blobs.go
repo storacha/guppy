@@ -407,7 +407,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		case <-ctx.Done():
 			// Stop writing, but continue draining results so workers can exit.
 			drainOnly = true
-			closeErr = ctxutil.CausedError(ctx)
+			closeErr = ctxutil.Cause(ctx)
 			continue
 		case res, ok = <-results:
 			if !ok {

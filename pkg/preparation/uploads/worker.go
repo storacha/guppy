@@ -11,7 +11,7 @@ func Worker(ctx context.Context, in <-chan struct{}, doWork func() error, finali
 	for {
 		select {
 		case <-ctx.Done():
-			return ctxutil.CausedError(ctx)
+			return ctxutil.Cause(ctx)
 		case _, ok := <-in:
 			if !ok {
 				if finalize != nil {
