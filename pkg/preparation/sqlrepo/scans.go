@@ -97,6 +97,21 @@ func (r *Repo) CreateDirectoryChildren(ctx context.Context, parent *scanmodel.Di
 	return tx.Commit()
 }
 
+// HasDirectoryChildren returns true if the directory has at least one child in directory_children.
+func (r *Repo) HasDirectoryChildren(ctx context.Context, dir *scanmodel.Directory) (bool, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT EXISTS(SELECT 1 FROM directory_children WHERE directory_id = ?)
+	`)
+	if err != nil {
+		return false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	var exists bool
+	if err := stmt.QueryRowContext(ctx, dir.ID()).Scan(&exists); err != nil {
+		return false, fmt.Errorf("failed to check directory children: %w", err)
+	}
+	return exists, nil
+}
+
 // DirectoryChildren retrieves the children of a directory from the repository.
 func (r *Repo) DirectoryChildren(ctx context.Context, dir *scanmodel.Directory) ([]scanmodel.FSEntry, error) {
 	stmt, err := r.prepareStmt(ctx, `
