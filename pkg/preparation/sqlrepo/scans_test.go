@@ -102,6 +102,37 @@ func TestCreateDirectoryChildren(t *testing.T) {
 	require.ElementsMatch(t, []model.FSEntry{file, file2}, children)
 }
 
+func TestHasDirectoryChildren(t *testing.T) {
+	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
+	modTime := time.Now().UTC().Truncate(time.Second)
+	sourceId := id.New()
+	spaceDID := testutil.RandomDID(t)
+
+	t.Run("returns false for a directory with no children", func(t *testing.T) {
+		dir, _, err := repo.FindOrCreateDirectory(t.Context(), "empty/dir", modTime, fs.ModeDir|0755, []byte("cs-empty"), sourceId, spaceDID)
+		require.NoError(t, err)
+
+		has, err := repo.HasDirectoryChildren(t.Context(), dir)
+		require.NoError(t, err)
+		require.False(t, has)
+	})
+
+	t.Run("returns true for a directory with children", func(t *testing.T) {
+		dir, _, err := repo.FindOrCreateDirectory(t.Context(), "nonempty/dir", modTime, fs.ModeDir|0755, []byte("cs-nonempty"), sourceId, spaceDID)
+		require.NoError(t, err)
+
+		file, _, err := repo.FindOrCreateFile(t.Context(), "nonempty/dir/file.txt", modTime, 0644, 100, []byte("cs-file"), sourceId, spaceDID)
+		require.NoError(t, err)
+
+		err = repo.CreateDirectoryChildren(t.Context(), dir, []model.FSEntry{file})
+		require.NoError(t, err)
+
+		has, err := repo.HasDirectoryChildren(t.Context(), dir)
+		require.NoError(t, err)
+		require.True(t, has)
+	})
+}
+
 func TestGetFileByID(t *testing.T) {
 	repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 	modTime := time.Now().UTC().Truncate(time.Second)
