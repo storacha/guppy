@@ -65,7 +65,7 @@ func (d *dir) ReadDir(n int) ([]fs.DirEntry, error) {
 	if d.links == nil {
 		links, err := d.uioDir.Links(d.ctx)
 		if err != nil {
-			return nil, ctxutil.ErrorWithCause(err, d.ctx)
+			return nil, ctxutil.EnrichWithCause(err, d.ctx)
 		}
 		d.links = links
 		d.offset = 0
@@ -90,7 +90,7 @@ func (d *dir) ReadDir(n int) ([]fs.DirEntry, error) {
 		link := d.links[d.offset+i]
 		node, err := link.GetNode(d.ctx, d.dagService)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get node for link %s: %w", link.Name, ctxutil.ErrorWithCause(err, d.ctx))
+			return nil, fmt.Errorf("failed to get node for link %s: %w", link.Name, ctxutil.EnrichWithCause(err, d.ctx))
 		}
 
 		switch node := node.(type) {
