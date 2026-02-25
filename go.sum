@@ -640,6 +640,8 @@ github.com/opencontainers/runtime-spec v1.2.0/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/
 github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+1B0VhjKrZUs=
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
+github.com/patrickmn/go-cache v2.1.0+incompatible h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=
+github.com/patrickmn/go-cache v2.1.0+incompatible/go.mod h1:3Qf8kWWT7OJRJbdiICTKqZju1ZixQ/KpMGzzAfe6+WQ=
 github.com/paulmach/orb v0.11.1 h1:3koVegMC4X/WeiXYz9iswopaTwMem53NzTJuTF20JzU=
 github.com/paulmach/orb v0.11.1/go.mod h1:5mULz1xQfs3bmQm63QEJA6lNGujuRafwA5S/EnuLaLU=
 github.com/paulmach/protoscan v0.2.1/go.mod h1:SpcSwydNLrxUGSDvXvO0P7g7AuhJ7lcKfDlhJCDw2gY=
@@ -794,8 +796,6 @@ github.com/storacha/go-fil-commp-hashhash v0.0.0-20251204184521-dc48123eb846 h1:
 github.com/storacha/go-fil-commp-hashhash v0.0.0-20251204184521-dc48123eb846/go.mod h1:YbWvDVjuho1gx+xQNrbM95NNWnJ4oAy067mY5t5F0Bw=
 github.com/storacha/go-libstoracha v0.7.3 h1:4X9XI0djmURhhabakvmRUy2NUq40Z04ns6NLTY8TmQ8=
 github.com/storacha/go-libstoracha v0.7.3/go.mod h1:htUh/VZ0qHRLPJKWZsgXv9mCOqlAFGTVS//ApvQVNf0=
-github.com/storacha/go-ucanto v0.7.3-0.20260217160605-b36b2fa2b6fc h1:zojq5HkvwbPGFpPQ4QokEJlScNLZlOc4fkj/QVigYrM=
-github.com/storacha/go-ucanto v0.7.3-0.20260217160605-b36b2fa2b6fc/go.mod h1:DZlWyzuSkXk3phAuJpGDyhxYWpJogW1RFqp/VfldT64=
 github.com/storacha/indexing-service v1.12.2 h1:DrcIzvM36Ux7i0UmGoSZiU8lR8WjVIqsTULSE1kA+7I=
 github.com/storacha/indexing-service v1.12.2/go.mod h1:Yk+uHoTA6qaTE13Ptq6FArsR9hESOetzej9194KwjhM=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

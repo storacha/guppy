@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,9 +11,14 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
+	"github.com/storacha/go-libstoracha/principalresolver"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
+	edverifier "github.com/storacha/go-ucanto/principal/ed25519/verifier"
+	"github.com/storacha/go-ucanto/principal/verifier"
+	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -24,6 +30,11 @@ import (
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
 )
+
+func init() {
+	retrieveCmd.Flags().StringP("network", "n", "", "Network to retrieve content from.")
+	retrieveCmd.Flags().MarkHidden("network")
+}
 
 var retrieveCmd = &cobra.Command{
 	Use:     "retrieve <space> <content-path> <output-path>",
@@ -79,6 +90,13 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
+		networkName, _ := cmd.Flags().GetString("network")
+		network := cmdutil.MustGetNetworkConfig(networkName)
+		pruningCtx, err := buildPruningContext(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -98,6 +116,24 @@ var retrieveCmd = &cobra.Command{
 			}
 
 			// Allow the indexing service to retrieve indexes
+			// Prune proofs from the delegation to avoid sending large delegations to the indexer
+			draftDlg, err := contentcap.Retrieve.Delegate(
+				c.Issuer(),
+				indexerPrincipal,
+				space.DID().String(),
+				contentcap.RetrieveCaveats{},
+				delegation.WithProof(pfs...),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("creating delegation to indexer: %w", err)
+			}
+
+			pfs, unauth := validator.PruneProofs(ctx, draftDlg, pruningCtx)
+			if unauth != nil {
+				return nil, unauth
+			}
+
 			return delegation.Delegate(
 				c.Issuer(),
 				indexerPrincipal,
@@ -150,4 +186,41 @@ var retrieveCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func buildPruningContext(ctx context.Context, attestorDID did.DID) (validator.ValidationContext[contentcap.RetrieveCaveats], error) {
+	resolver, err := principalresolver.NewHTTPResolver([]did.DID{attestorDID})
+	if err != nil {
+		return nil, fmt.Errorf("creating principal resolver: %w", err)
+	}
+
+	resolvedKeyDID, unresolvedErr := resolver.ResolveDIDKey(ctx, attestorDID)
+	if unresolvedErr != nil {
+		return nil, fmt.Errorf("resolving attestor DID key: %w", unresolvedErr)
+	}
+
+	keyVerifier, err := edverifier.Parse(resolvedKeyDID.String())
+	if err != nil {
+		return nil, fmt.Errorf("parsing resolved key DID: %w", err)
+	}
+
+	attestor, err := verifier.Wrap(keyVerifier, attestorDID)
+	if err != nil {
+		return nil, fmt.Errorf("creating attestor verifier: %w", err)
+	}
+
+	return validator.NewValidationContext(
+		// For client evaluated chains, the authority must be the service that issued the ucan/attest
+		// delegations — e.g. the upload-service.
+		attestor,
+		contentcap.Retrieve,
+		validator.IsSelfIssued,
+		func(context.Context, validator.Authorization[any]) validator.Revoked {
+			return nil
+		},
+		validator.ProofUnavailable,
+		server.ParsePrincipal,
+		validator.FailDIDKeyResolution,
+		validator.NotExpiredNotTooEarly,
+	), nil
 }
