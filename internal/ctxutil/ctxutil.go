@@ -28,7 +28,7 @@ func Cause(ctx context.Context) error {
 	if cause == err {
 		return err
 	}
-	return fmt.Errorf("%w -- Caused by: %w", err, cause)
+	return fmt.Errorf("%w, cause: %w", err, cause)
 }
 
 // ErrorWithCause takes an error which should be returned from a function that
@@ -41,7 +41,7 @@ func Cause(ctx context.Context) error {
 func ErrorWithCause(err error, ctx context.Context) error {
 	cause := context.Cause(ctx)
 	if cause != nil && errors.Is(err, ctx.Err()) && !errors.Is(err, cause) {
-		return fmt.Errorf("%w -- Caused by: %w", err, cause)
+		return fmt.Errorf("%w, cause: %w", err, cause)
 	}
 	return err
 }
