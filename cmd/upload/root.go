@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
+	"github.com/storacha/guppy/cmd/upload/check"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/bus"
@@ -36,6 +37,7 @@ func init() {
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
 
 	Cmd.AddCommand(source.Cmd)
+	Cmd.AddCommand(check.Cmd)
 }
 
 var Cmd = &cobra.Command{
