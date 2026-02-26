@@ -89,6 +89,10 @@ var createCmd = &cobra.Command{
 			return fmt.Errorf("creating delegation: %w", err)
 		}
 
+		if err := c.AddProofs(dlg); err != nil {
+			return fmt.Errorf("saving delegation to local store: %w", err)
+		}
+
 		if createFlags.output != "" {
 			data, err := io.ReadAll(delegation.Archive(dlg))
 			if err != nil {

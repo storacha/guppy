@@ -1,9 +1,14 @@
 package nodevalue
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/codec/dagjson"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
 )
 
 // NodeValue converts an arbitrary IPLD node to a Go value. This is useful as a
@@ -65,4 +70,27 @@ func NodeValue(node ipld.Node) (res any, err error) {
 	default:
 		return nil, fmt.Errorf("unsupported node kind: %s", node.Kind())
 	}
+}
+
+// FromAny converts an arbitrary Go value (struct, map, etc) to an IPLD Node.
+func FromAny(val any) (ipld.Node, error) {
+	if val == nil {
+		nb := basicnode.Prototype.Any.NewBuilder()
+		if err := dagjson.Decode(nb, strings.NewReader("null")); err != nil {
+			return nil, fmt.Errorf("failed to create null node: %w", err)
+		}
+		return nb.Build(), nil
+	}
+
+	b, err := json.Marshal(val)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling to json: %w", err)
+	}
+
+	nb := basicnode.Prototype.Any.NewBuilder()
+	if err := dagjson.Decode(nb, bytes.NewReader(b)); err != nil {
+		return nil, fmt.Errorf("decoding json to ipld: %w", err)
+	}
+
+	return nb.Build(), nil
 }
