@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	captypes "github.com/storacha/go-libstoracha/capabilities/types"
+	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-libstoracha/testutil"
 	ed25519signer "github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/guppy/pkg/verification"
@@ -150,6 +151,7 @@ func TestStatBlocks(t *testing.T) {
 
 		require.Error(t, gotError, "the tampered block should fail")
 		require.Contains(t, gotError.Error(), "integrity check failed")
+		require.Contains(t, gotError.Error(), fmt.Sprintf("expected digest %q", digestutil.Format(block2Hash)))
 	})
 
 	t.Run("returns error when shard not found", func(t *testing.T) {
