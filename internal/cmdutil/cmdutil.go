@@ -217,3 +217,31 @@ func ResolveSpace(c *client.Client, identifier string) (did.DID, error) {
 
 	return space.DID(), nil
 }
+
+// TranslateError translates a technical error into a more user-friendly one.
+func TranslateError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// If it's already a handled error, don't translate it again.
+	var handled HandledCliError
+	if errors.As(err, &handled) {
+		return err
+	}
+
+	msg := err.Error()
+
+	switch {
+	case strings.Contains(msg, "expired"):
+		return NewHandledCliError(fmt.Errorf("session expired: please run `guppy login` again"))
+	case strings.Contains(msg, "insufficient") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "not authorized"):
+		return NewHandledCliError(fmt.Errorf("access denied: you do not have sufficient permissions in this space"))
+	case strings.Contains(msg, "missing proof") || strings.Contains(msg, "capability not found"):
+		return NewHandledCliError(fmt.Errorf("access denied: missing required authorization for this operation"))
+	case strings.Contains(msg, "quota"):
+		return NewHandledCliError(fmt.Errorf("storage quota exceeded for this space"))
+	}
+
+	return err
+}
