@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	accesscap "github.com/storacha/go-libstoracha/capabilities/access"
+	"github.com/storacha/go-ucanto/core/dag/blockstore"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
@@ -32,9 +33,16 @@ func (c *Client) AccessDelegate(ctx context.Context, space did.DID, delegations 
 	}
 
 	// Include the delegations themselves as proofs
+	// Include the delegations themselves as proofs
 	delOptions := make([]delegation.Option, 0, len(delegations))
 	for _, del := range delegations {
-		delOptions = append(delOptions, delegation.WithProof(delegation.FromDelegation(del)))
+		// Prune the delegation to remove nested proofs (blocks) to reduce header size.
+		// We use d.Root() because d.Block() does not exist on the interface.
+		pruned, err := pruneDelegation(del)
+		if err != nil {
+			return accesscap.DelegateOk{}, fmt.Errorf("pruning delegation: %w", err)
+		}
+		delOptions = append(delOptions, delegation.WithProof(delegation.FromDelegation(pruned)))
 	}
 
 	res, _, err := invokeAndExecute[accesscap.DelegateCaveats, accesscap.DelegateOk](
@@ -56,4 +64,19 @@ func (c *Client) AccessDelegate(ctx context.Context, space did.DID, delegations 
 	}
 
 	return delegateOk, nil
+}
+
+// pruneDelegation creates a shallow copy of the delegation that only contains
+// the root block in its blockstore. This prevents the entire proof chain (nested blocks)
+// from being serialized into the invocation header.
+func pruneDelegation(d delegation.Delegation) (delegation.Delegation, error) {
+	blk := d.Root()
+	bs, err := blockstore.NewBlockStore()
+	if err != nil {
+		return nil, fmt.Errorf("creating blockstore: %w", err)
+	}
+	if err := bs.Put(blk); err != nil {
+		return nil, fmt.Errorf("putting block: %w", err)
+	}
+	return delegation.NewDelegation(blk, bs)
 }
