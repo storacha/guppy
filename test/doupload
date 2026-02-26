@@ -23,6 +23,15 @@
 set -e
 set -o pipefail
 
+spinner_frames=(
+	"▱▱▱"
+	"▰▱▱"
+	"▰▰▱"
+	"▰▰▰"
+	"▱▰▰"
+	"▱▱▰"
+)
+
 # Parse arguments
 database_url=""
 while [[ $# -gt 0 ]]; do
@@ -163,8 +172,8 @@ trap 'last_command=$ZSH_DEBUG_CMD' DEBUG
 handle_error() {
 	local exit_code=$1
 	local failed_command=$2
-	echo
-	echo "❌ Command failed with exit code $exit_code: $failed_command"
+	echo >&2
+	echo "❌ Command failed with exit code $exit_code: $failed_command" >&2
 }
 
 # Handle errors with some printed output
@@ -194,9 +203,10 @@ main () {
 	guppy space info "$space"
 
 	echo
-	echo "📤 Uploading data from $dataDir to space $space"
+	echo "📤 Uploading data from $dataDir to space $space (output -> $sandbox/upload-events.jsonl)"
 	guppy upload source add "$space" "$dataDir"
-	rootCID=$(guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
+	guppy upload --json "$space" | show_progress "$sandbox/upload-events.jsonl"
+	rootCID=$(jq -r 'select(.type == "upload_complete") | .root_cid' "$sandbox/upload-events.jsonl")
 
 	echo
 	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
@@ -235,6 +245,17 @@ main () {
 		--arg dataDir "$dataDir" \
 		--arg subdir "subdir" \
 		'{$account, $space, $rootCID, $dataDir, $subdir}' > "$sandbox/test-params.json"
+}
+
+show_progress() {
+	output_file="$1"
+	current_frame=1
+	while IFS= read -r line; do
+		printf '%s\n' "$line" >> "$output_file"
+		printf '\r\033[K%.'"${COLUMNS:-80}"'s' "${spinner_frames[current_frame]} $line"
+		current_frame=$(( (current_frame % ${#spinner_frames[@]}) + 1 ))
+	done
+	printf '\r\033[K'
 }
 
 log_in() {
