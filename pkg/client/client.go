@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/storacha/guppy/internal/ctxutil"
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/nodevalue"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
@@ -219,7 +220,7 @@ func execute[Caveats, Out any](
 
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{inv}, c.Connection())
 	if err != nil {
-		return nil, nil, fmt.Errorf("sending invocation: %w", err)
+		return nil, nil, fmt.Errorf("sending invocation: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	rcptlnk, ok := resp.Get(inv.Link())

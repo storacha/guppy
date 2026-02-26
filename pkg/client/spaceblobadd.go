@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/storacha/guppy/internal/ctxutil"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
 )
 
@@ -460,7 +461,7 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 	}()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url.String(), body)
 	if err != nil {
-		return fmt.Errorf("creating upload request: %w", err)
+		return fmt.Errorf("creating upload request: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	for k, v := range headers {
@@ -469,7 +470,7 @@ func putBlob(ctx context.Context, client *http.Client, url *url.URL, headers htt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("uploading blob: %w", err)
+		return fmt.Errorf("uploading blob: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 	if err := resp.Body.Close(); err != nil {
 		log.Warnf("closing upload response body: %v", err)
@@ -596,7 +597,7 @@ func (c *Client) sendPutReceipt(ctx context.Context, putTask invocation.Invocati
 
 	resp, err := uclient.Execute(ctx, []invocation.Invocation{httpPutConcludeInvocation}, c.Connection())
 	if err != nil {
-		return fmt.Errorf("executing conclude invocation: %w", err)
+		return fmt.Errorf("executing conclude invocation: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	rcptlnk, ok := resp.Get(httpPutConcludeInvocation.Link())

@@ -3,13 +3,15 @@ package uploads
 import (
 	"context"
 	"fmt"
+
+	"github.com/storacha/guppy/internal/ctxutil"
 )
 
 func Worker(ctx context.Context, in <-chan struct{}, doWork func() error, finalize func() error) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return ctxutil.Cause(ctx)
 		case _, ok := <-in:
 			if !ok {
 				if finalize != nil {
