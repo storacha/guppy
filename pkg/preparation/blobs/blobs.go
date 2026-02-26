@@ -11,6 +11,7 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
@@ -492,32 +493,13 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	// Build the index by reading shards from the database
 	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
 
-	// Query shards that belong to this index
-	shards, err := a.Repo.ShardsForIndex(ctx, indexID)
+	// Query all nodes across all shards in this index in a single batch query
+	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("getting shards for index %s: %w", indexID, err)
-	}
-
-	// Add all shards in this index
-	for _, s := range shards {
-		shardSlices := blobindex.NewMultihashMap[blobindex.Position](-1)
-
-		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
-			position := blobindex.Position{
-				Offset: shardOffset,
-				Length: node.Size(),
-			}
-			shardSlices.Set(node.CID().Hash(), position)
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("iterating nodes in shard %s: %w", s.ID(), err)
-		}
-
-		if s.Digest() == nil || len(s.Digest()) == 0 {
-			return nil, fmt.Errorf("shard %s has no digest set", s.ID())
-		}
-		indexView.Shards().Set(s.Digest(), shardSlices)
+		return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 	}
 
 	archReader, err := blobindex.Archive(indexView)

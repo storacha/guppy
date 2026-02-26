@@ -1236,13 +1236,15 @@ func TestReaderForIndex(t *testing.T) {
 		// Create an index and add the shard to it
 		index, err := repo.CreateIndex(t.Context(), upload.ID())
 		require.NoError(t, err)
+		// NB: Because the shard is still open, this should never be done, but
+		// that's enforced at a higher level (the model, not the repo). If we *do*
+		// end up here, we should run into the error this test demonstrates.
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard.ID())
 		require.NoError(t, err)
 
 		// Try to get a reader for the index
 		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
-		require.Error(t, err)
-		require.ErrorContains(t, err, "has no digest set")
+		require.ErrorContains(t, err, fmt.Sprintf("iterating nodes in index %s: failed to iterate nodes in index %s, because shard with ID %s has no digest set", index.ID(), index.ID(), shard.ID()))
 		require.Nil(t, indexReader)
 	})
 
