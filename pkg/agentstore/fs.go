@@ -9,6 +9,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/ipfs/go-cid"
 )
 
 var _ Store = (*FsStore)(nil)
@@ -96,6 +97,26 @@ func (s *FsStore) AddDelegations(delegs ...delegation.Delegation) error {
 		return fmt.Errorf("error reading %q: %w", s.path, err)
 	}
 	data.Delegations = append(data.Delegations, delegs...)
+	return writeToFile(s.path, data)
+}
+
+func (s *FsStore) RemoveDelegation(id cid.Cid) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := readFromFile(s.path)
+	if err != nil {
+		return err
+	}
+
+	var updated []delegation.Delegation
+	for _, d := range data.Delegations {
+		if d.Link().String() != id.String() {
+			updated = append(updated, d)
+		}
+	}
+	
+	data.Delegations = updated
 	return writeToFile(s.path, data)
 }
 

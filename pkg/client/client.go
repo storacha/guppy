@@ -29,6 +29,7 @@ import (
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/nodevalue"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
+	"github.com/ipfs/go-cid"
 )
 
 var (
@@ -151,6 +152,10 @@ func (c *Client) Proofs(queries ...agentstore.CapabilityQuery) ([]delegation.Del
 // AddProofs adds the given delegations to the client's store.
 func (c *Client) AddProofs(delegations ...delegation.Delegation) error {
 	return c.store.AddDelegations(delegations...)
+}
+
+func (c *Client) RemoveProof(id cid.Cid) error {
+	return c.store.RemoveDelegation(id)
 }
 
 // Reset clears all delegations from the store while preserving the principal.

@@ -25,6 +25,7 @@ type Store interface {
 	SetPrincipal(principal principal.Signer) error
 	Delegations() ([]delegation.Delegation, error)
 	AddDelegations(delegations ...delegation.Delegation) error
+	RemoveDelegation(id cid.Cid) error
 	Reset() error
 	Query(queries ...CapabilityQuery) ([]delegation.Delegation, error)
 }
