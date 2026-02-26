@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-
-	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client"
@@ -15,35 +13,32 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// space to list uploads from
-	space, _ := did.Parse("did:key:z6MkwDuRThQcyWjqNsK54yKAmzfsiH6BTkASyiucThMtHt1y")
-
 	// the account to log in as, which has access to the space
-	account, _ := did.Parse("mailto:example.com:ucansam")
+	account, err := did.Parse("did:mailto:gmail.com:sambhavjain170944")
+	if err != nil {
+		panic(err) // handle error properly
+	}
 
-	// Without `client.WithConnection`, uses default connection to the Storacha network
-	// Without `client.WithPrincipal`, the client will generate a new signer.
-	c, _ := client.NewClient()
+	c, err := client.NewClient()
+	if err != nil {
+		panic(err) // handle error properly
+	}
 
 	// Kick off the login flow
-	authOk, _ := c.RequestAccess(ctx, account.String())
+	authOk, err := c.RequestAccess(ctx, account.String())
+	if err != nil {
+		panic(err) // handle error properly
+	}
 
-	// Start polling to see if the user has authenticated yet
+	// Start polling to see if the user as authenticated yet
 	resultChan := c.PollClaim(ctx, authOk)
 	fmt.Println("Please click the link in your email to authenticate...")
 	// Wait for the user to authenticate
-	proofs, _ := result.Unwrap(<-resultChan)
+	proofs, err := result.Unwrap(<-resultChan)
+	if err != nil {
+		panic(err) // handle error properly
+	}
 
 	// Add the proofs to the client
 	c.AddProofs(proofs...)
-
-	listOk, _ := c.UploadList(
-		context.Background(),
-		space,
-		uploadcap.ListCaveats{},
-	)
-
-	for _, r := range listOk.Results {
-		fmt.Printf("%s\n", r.Root)
-	}
 }
