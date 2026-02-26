@@ -326,23 +326,25 @@ func (c *Client) SpaceBlobAdd(ctx context.Context, content io.Reader, space did.
 		return AddedBlob{}, fmt.Errorf("mandatory receipts not received in space/blob/add receipt")
 	}
 
-	if url != nil && headers != nil {
+	putSuccess := false
+	if putRcpt != nil {
+		putOk, _ := result.Unwrap(putRcpt.Out())
+		putSuccess = putOk != nil
+	}
+
+	// only perform HTTP PUT if we have an address AND we haven't received a
+	// success receipt for the `http/put` task (which means the upload has already
+	// been completed by a previous invocation attempt)
+	if url != nil && headers != nil && !putSuccess {
 		if err := putBlob(ctx, putClient, url, headers, contentReader); err != nil {
 			return AddedBlob{}, fmt.Errorf("putting blob: %w", err)
 		}
 	}
 
 	// invoke `ucan/conclude` with `http/put` receipt
-	if putRcpt == nil {
+	if !putSuccess {
 		if err := c.sendPutReceipt(ctx, putTask); err != nil {
 			return AddedBlob{}, fmt.Errorf("sending put receipt: %w", err)
-		}
-	} else {
-		putOk, _ := result.Unwrap(putRcpt.Out())
-		if putOk == nil {
-			if err := c.sendPutReceipt(ctx, putTask); err != nil {
-				return AddedBlob{}, fmt.Errorf("sending put receipt: %w", err)
-			}
 		}
 	}
 
