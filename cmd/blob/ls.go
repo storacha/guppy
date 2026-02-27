@@ -52,7 +52,7 @@ var lsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir, client.WithAdditionalProofs(proofs...))
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network, client.WithAdditionalProofs(proofs...))
 
 		spaceDID, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {

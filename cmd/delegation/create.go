@@ -51,7 +51,7 @@ var createCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		space, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {

@@ -31,10 +31,7 @@ var (
 	configFilePath = path.Join("guppy", "config.toml")
 )
 
-var (
-	cfgFile      string
-	guppyDirPath string
-)
+var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "guppy",
@@ -61,14 +58,6 @@ func init() {
 	}
 
 	rootCmd.AddCommand(unixfs.Cmd)
-	rootCmd.PersistentFlags().StringVar(
-		&guppyDirPath,
-		"guppy-dir",
-		"",
-		"Guppy Directory",
-	)
-
-	unixfs.StorePathP = &guppyDirPath
 
 	rootCmd.PersistentFlags().String(
 		"data-dir",
@@ -87,6 +76,25 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path. Attempts to load from user config directory if not set e.g. ~/.config/"+configFilePath)
 
 	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
+
+	// Network configuration flags
+	rootCmd.PersistentFlags().StringP("network", "n", "", "Network preset name (forge, hot, warm-staging)")
+	cobra.CheckErr(viper.BindPFlag("network.name", rootCmd.PersistentFlags().Lookup("network")))
+
+	rootCmd.PersistentFlags().String("upload-service-did", "", "Upload service DID (overrides network preset)")
+	cobra.CheckErr(viper.BindPFlag("network.upload_id", rootCmd.PersistentFlags().Lookup("upload-service-did")))
+
+	rootCmd.PersistentFlags().String("upload-service-url", "", "Upload service URL (overrides network preset)")
+	cobra.CheckErr(viper.BindPFlag("network.upload_url", rootCmd.PersistentFlags().Lookup("upload-service-url")))
+
+	rootCmd.PersistentFlags().String("receipts-url", "", "Receipts service URL (overrides network preset)")
+	cobra.CheckErr(viper.BindPFlag("network.receipts_url", rootCmd.PersistentFlags().Lookup("receipts-url")))
+
+	rootCmd.PersistentFlags().String("indexer-did", "", "Indexing service DID (overrides network preset)")
+	cobra.CheckErr(viper.BindPFlag("network.indexer_id", rootCmd.PersistentFlags().Lookup("indexer-did")))
+
+	rootCmd.PersistentFlags().String("indexer-url", "", "Indexing service URL (overrides network preset)")
+	cobra.CheckErr(viper.BindPFlag("network.indexer_url", rootCmd.PersistentFlags().Lookup("indexer-url")))
 
 	// Add Commands
 	rootCmd.AddCommand(
