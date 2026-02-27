@@ -108,7 +108,7 @@ var serveCmd = &cobra.Command{
 
 		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		pub, err := crypto.UnmarshalEd25519PublicKey(c.Issuer().Verifier().Raw())
 		cobra.CheckErr(err)
@@ -146,7 +146,7 @@ var serveCmd = &cobra.Command{
 			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {

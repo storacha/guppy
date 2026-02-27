@@ -44,10 +44,9 @@ var verifyCmd = &cobra.Command{
 			return fmt.Errorf("parsing root CID: %w", err)
 		}
 
-		networkName, _ := cmd.Flags().GetString("network")
-		network := cmdutil.MustGetNetworkConfig(networkName)
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
 
-		guppy := cmdutil.MustGetClientForNetwork(cfg.Repo.Dir, networkName)
+		guppy := cmdutil.MustGetClientForNetwork(cfg.Repo.Dir, cfg.Network, "")
 		allProofs, err := guppy.Proofs(agentstore.CapabilityQuery{Can: contentcap.RetrieveAbility})
 		if err != nil {
 			return err
@@ -147,8 +146,6 @@ var verifyCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(verifyCmd)
-	verifyCmd.Flags().StringP("network", "n", "", "Network to verify content retrieval from.")
-	verifyCmd.Flags().MarkHidden("network")
 }
 
 type verifyModel struct {

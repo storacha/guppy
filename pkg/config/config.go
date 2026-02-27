@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Repo    RepoConfig    `mapstructure:"repo" toml:"repo"`
 	Gateway GatewayConfig `mapstructure:"gateway" toml:"gateway"`
+	Network NetworkConfig `mapstructure:"network" toml:"network"`
 }
 
 func (c Config) Validate() error {
@@ -16,7 +17,10 @@ func (c Config) Validate() error {
 	if err != nil {
 		return err
 	}
-	return c.Gateway.Validate()
+	if err := c.Gateway.Validate(); err != nil {
+		return err
+	}
+	return c.Network.Validate()
 }
 
 func Load[T Validatable]() (T, error) {

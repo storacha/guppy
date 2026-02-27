@@ -4,8 +4,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var StorePathP *string
-
 var Cmd = &cobra.Command{
 	Use:   "unixfs",
 	Short: "Interact with UnixFS data",
