@@ -46,7 +46,7 @@ var retrieveCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		space, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {
 			return err
@@ -63,7 +63,7 @@ var retrieveCmd = &cobra.Command{
 
 		outputPath := args[2]
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
 		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
 			attribute.String("retrieval.space", space.DID().String()),

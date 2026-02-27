@@ -67,7 +67,7 @@ var AddCmd = &cobra.Command{
 			return fmt.Errorf("resolving absolute path: %w", err)
 		}
 
-		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
 			return err
