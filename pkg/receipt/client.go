@@ -21,6 +21,7 @@ import (
 	ucanhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
+	"github.com/storacha/guppy/internal/ctxutil"
 )
 
 var ErrNotFound = errors.New("receipt not found")
@@ -70,12 +71,12 @@ func (c *Client) Fetch(ctx context.Context, task ucan.Link) (receipt.AnyReceipt,
 	receiptURL := c.endpoint.JoinPath(task.String())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, receiptURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating get request: %w", err)
+		return nil, fmt.Errorf("creating get request: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("doing receipts request: %w", err)
+		return nil, fmt.Errorf("doing receipts request: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 	defer resp.Body.Close()
 
@@ -214,7 +215,7 @@ func (c *Client) Poll(ctx context.Context, task ucan.Link, options ...PollOption
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return nil, err
+			return nil, ctxutil.EnrichWithCause(err, ctx)
 		}
 		return nil, fmt.Errorf("receipt for %s was not found after %d attempts", task, *conf.retries+1)
 	}

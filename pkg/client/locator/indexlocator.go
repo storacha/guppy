@@ -18,6 +18,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/guppy/internal/ctxutil"
 	indexclient "github.com/storacha/indexing-service/pkg/client"
 	"github.com/storacha/indexing-service/pkg/types"
 )
@@ -189,7 +190,7 @@ func (s *indexLocator) query(ctx context.Context, spaces []did.DID, digests []mh
 		for i, h := range digests {
 			hashStrings[i] = digestutil.Format(h)
 		}
-		return fmt.Errorf("querying claims for [%s]: %w", strings.Join(hashStrings, ", "), err)
+		return fmt.Errorf("querying claims for [%s]: %w", strings.Join(hashStrings, ", "), ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	bs, err := blockstore.NewBlockReader(blockstore.WithBlocksIterator(result.Blocks()))

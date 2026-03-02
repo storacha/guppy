@@ -16,6 +16,7 @@ import (
 	"github.com/storacha/go-ucanto/core/result"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/internal/ctxutil"
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client/locator"
 )
@@ -77,7 +78,7 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 
 	xres, hres, err := rclient.Execute(ctx, inv, conn)
 	if err != nil {
-		return nil, fmt.Errorf("executing `space/content/retrieve` invocation: %w", err)
+		return nil, fmt.Errorf("executing `space/content/retrieve` invocation: %w", ctxutil.EnrichWithCause(err, ctx))
 	}
 
 	rcptLink, ok := xres.Get(inv.Link())
