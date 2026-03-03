@@ -32,8 +32,6 @@ sandbox="doupload-dir"
 
 guppy=("go" "run" ".." "--data-dir" "./$sandbox/storacha")
 
-certFile="$sandbox/cert.pem"
-keyFile="$sandbox/key.pem"
 outDir="$sandbox/out-kubo"
 
 if ! [[ -f "$sandbox/test-params.json" ]]; then
@@ -55,11 +53,6 @@ gupwayTlsPort=3443
 scriptsDir="$(cd ../scripts && pwd)"
 
 rm -rf "$IPFS_PATH"
-
-openssl req -x509 -newkey rsa:2048 -keyout "$keyFile" -out "$certFile" \
-  -days 36500 -nodes -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-	-quiet
 
 echo "📥 Retrieving data through gateway and ipfs"
 
