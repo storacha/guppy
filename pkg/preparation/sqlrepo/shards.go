@@ -3,8 +3,8 @@ package sqlrepo
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
+	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
@@ -353,8 +353,9 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
-func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error) {
-	stmt, err := r.prepareStmt(ctx, `
+func (r *Repo) ForEachNodeInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[blobs.NodeInShard, error] {
+	return func(yield func(blobs.NodeInShard, error) bool) {
+		stmt, err := r.prepareStmt(ctx, `
 			SELECT
 				nodes.cid,
 				nodes.size,
@@ -362,79 +363,45 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 				nodes.ufsdata,
 				nodes.path,
 				nodes.source_id,
-				nodes."offset"
+				nodes."offset",
+				node_uploads.shard_offset
 			FROM node_uploads
 			JOIN nodes ON nodes.cid = node_uploads.node_cid
 			AND nodes.space_did = node_uploads.space_did
 			WHERE node_uploads.shard_id = ?
 			AND node_uploads.shard_offset >= ?
 			ORDER BY node_uploads.shard_offset ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	rows, err := stmt.QueryContext(ctx, shardID, startOffset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nodes in shard %s: %w", shardID, err)
-	}
-	defer rows.Close()
-
-	var nodes []dagsmodel.Node
-	for rows.Next() {
-		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset)
-		})
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)
+			yield(blobs.NodeInShard{}, fmt.Errorf("failed to prepare statement: %w", err))
+			return
 		}
-		nodes = append(nodes, node)
-	}
-	return nodes, nil
-}
-
-func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error {
-	stmt, err := r.prepareStmt(ctx, `
-		SELECT
-			nodes.cid,
-			nodes.size,
-			nodes.space_did,
-			nodes.ufsdata,
-			nodes.path,
-			nodes.source_id,
-			nodes."offset",
-			node_uploads.shard_offset
-		FROM node_uploads
-		JOIN nodes ON nodes.cid = node_uploads.node_cid
-		AND nodes.space_did = node_uploads.space_did
-		WHERE node_uploads.shard_id = ?`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	rows, err := stmt.QueryContext(ctx, shardID)
-	if err != nil {
-		return fmt.Errorf("failed to get sizes of blocks in shard %s: %w", shardID, err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var shardOffset uint64
-		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, sourceID, offset, &shardOffset)
-		})
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
+		rows, err := stmt.QueryContext(ctx, shardID, startOffset)
 		if err != nil {
-			return fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)
+			yield(blobs.NodeInShard{}, fmt.Errorf("failed to query nodes in shard %s: %w", shardID, err))
+			return
 		}
-		if err := yield(node, shardOffset); err != nil {
-			return fmt.Errorf("failed to yield node CID %s for shard %s: %w", node.CID(), shardID, err)
-		}
-	}
+		defer rows.Close()
 
-	return nil
+		for rows.Next() {
+			var shardOffset uint64
+			node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
+				return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, sourceID, offset, &shardOffset)
+			})
+			if err != nil {
+				yield(blobs.NodeInShard{}, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err))
+				return
+			}
+			if !yield(blobs.NodeInShard{Node: node, ShardOffset: shardOffset}, nil) {
+				return
+			}
+		}
+
+		err = rows.Err()
+		if err != nil {
+			yield(blobs.NodeInShard{}, fmt.Errorf("error iterating node rows in shard %s: %w", shardID, err))
+		}
+
+	}
 }
 
 // UpdateShard updates a DAG scan in the repository.

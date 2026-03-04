@@ -3,6 +3,7 @@ package blobs
 import (
 	"context"
 	"io"
+	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
@@ -29,10 +30,9 @@ type Repo interface {
 	// CreateNodeUpload creates a node_uploads record with shard_id = NULL.
 	CreateNodeUpload(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
-	ForEachNode(ctx context.Context, shardID id.ShardID, yield func(node dagsmodel.Node, shardOffset uint64) error) error
-	// NodesByShard fetches all the nodes for a given shard, returned in the order
-	// they should appear in the shard.
-	NodesByShard(ctx context.Context, shardID id.ShardID, startOffset uint64) ([]dagsmodel.Node, error)
+	// ForEachNodeInShard iterates over all the nodes for a given shard, in the
+	// order they should appear in the shard.
+	ForEachNodeInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[NodeInShard, error]
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 	DeleteShard(ctx context.Context, shardID id.ShardID) error
 
@@ -47,10 +47,22 @@ type Repo interface {
 	ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error)
 	// ForEachNodeInIndex iterates over all nodes across all shards in an index,
 	// ordered by shard. This is a batch query that avoids per-shard round trips.
-	ForEachNodeInIndex(ctx context.Context, indexID id.IndexID, yield func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error) error
+	ForEachNodeInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[NodeInIndex, error]
 
 	// Upload methods
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
+}
+
+type NodeInShard struct {
+	Node        dagsmodel.Node
+	ShardOffset uint64
+}
+
+type NodeInIndex struct {
+	NodeCID     cid.Cid
+	NodeSize    uint64
+	ShardDigest multihash.Multihash
+	ShardOffset uint64
 }
 
 // ShardEncoder is the interface for shard implementations.
