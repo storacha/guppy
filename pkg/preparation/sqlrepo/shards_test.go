@@ -63,14 +63,13 @@ func TestAddNodeToShard(t *testing.T) {
 	}
 
 	nodeInfos := make([]nodeInfo, 0, 3)
-	err = repo.ForEachNode(t.Context(), shard.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
+	for nis, err := range repo.ForEachNodeInShard(t.Context(), shard.ID(), 0) {
+		require.NoError(t, err)
 		nodeInfos = append(nodeInfos, nodeInfo{
-			cid:    node.CID(),
-			offset: shardOffset,
+			cid:    nis.Node.CID(),
+			offset: nis.ShardOffset,
 		})
-		return nil
-	})
-	require.NoError(t, err)
+	}
 
 	require.Equal(t, []nodeInfo{
 		{cid: node1.CID(), offset: 100 + 1},

@@ -9,6 +9,7 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -285,49 +286,35 @@ func TestForEachNodeInIndex(t *testing.T) {
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard2.ID())
 		require.NoError(t, err)
 
-		// Collect all yielded rows
-		type row struct {
-			shardDigest multihash.Multihash
-			nodeCID     cid.Cid
-			nodeSize    uint64
-			shardOffset uint64
+		byCID := map[string]blobs.NodeInIndex{}
+		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
+			require.NoError(t, err)
+			byCID[nii.NodeCID.String()] = nii
 		}
-		var rows []row
-		err = repo.ForEachNodeInIndex(t.Context(), index.ID(), func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
-			rows = append(rows, row{shardDigest: shardDigest, nodeCID: nodeCID, nodeSize: nodeSize, shardOffset: shardOffset})
-			return nil
-		})
-		require.NoError(t, err)
-		require.Len(t, rows, 4)
-
-		// Build a lookup by nodeCID for easier assertions
-		byCID := map[string]row{}
-		for _, r := range rows {
-			byCID[r.nodeCID.String()] = r
-		}
+		require.Len(t, byCID, 4)
 
 		// shard_offset = shard.size + offset at time of AddNodeToShard
 		// shard1: node1 offset=0+0=0, size becomes 100; node2 offset=100+0=100
 		// shard2: node3 offset=0+0=0, size becomes 300; node4 offset=300+0=300
 		r1 := byCID[nodeCID1.String()]
-		require.Equal(t, digest1, []byte(r1.shardDigest))
-		require.Equal(t, uint64(100), r1.nodeSize)
-		require.Equal(t, uint64(0), r1.shardOffset)
+		require.Equal(t, digest1, []byte(r1.ShardDigest))
+		require.Equal(t, uint64(100), r1.NodeSize)
+		require.Equal(t, uint64(0), r1.ShardOffset)
 
 		r2 := byCID[nodeCID2.String()]
-		require.Equal(t, digest1, []byte(r2.shardDigest))
-		require.Equal(t, uint64(200), r2.nodeSize)
-		require.Equal(t, uint64(100), r2.shardOffset)
+		require.Equal(t, digest1, []byte(r2.ShardDigest))
+		require.Equal(t, uint64(200), r2.NodeSize)
+		require.Equal(t, uint64(100), r2.ShardOffset)
 
 		r3 := byCID[nodeCID3.String()]
-		require.Equal(t, digest2, []byte(r3.shardDigest))
-		require.Equal(t, uint64(300), r3.nodeSize)
-		require.Equal(t, uint64(0), r3.shardOffset)
+		require.Equal(t, digest2, []byte(r3.ShardDigest))
+		require.Equal(t, uint64(300), r3.NodeSize)
+		require.Equal(t, uint64(0), r3.ShardOffset)
 
 		r4 := byCID[nodeCID4.String()]
-		require.Equal(t, digest2, []byte(r4.shardDigest))
-		require.Equal(t, uint64(400), r4.nodeSize)
-		require.Equal(t, uint64(300), r4.shardOffset)
+		require.Equal(t, digest2, []byte(r4.ShardDigest))
+		require.Equal(t, uint64(400), r4.NodeSize)
+		require.Equal(t, uint64(300), r4.ShardOffset)
 	})
 
 	t.Run("yields nothing for an empty index", func(t *testing.T) {
@@ -339,11 +326,9 @@ func TestForEachNodeInIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		called := false
-		err = repo.ForEachNodeInIndex(t.Context(), index.ID(), func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+		for range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
 			called = true
-			return nil
-		})
-		require.NoError(t, err)
+		}
 		require.False(t, called)
 	})
 
@@ -401,21 +386,19 @@ func TestForEachNodeInIndex(t *testing.T) {
 
 		// ForEachNodeInIndex for index1 should only yield node1
 		var nodeCIDs1 []cid.Cid
-		err = repo.ForEachNodeInIndex(t.Context(), index1.ID(), func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
-			nodeCIDs1 = append(nodeCIDs1, nodeCID)
-			return nil
-		})
-		require.NoError(t, err)
+		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index1.ID()) {
+			require.NoError(t, err)
+			nodeCIDs1 = append(nodeCIDs1, nii.NodeCID)
+		}
 		require.Len(t, nodeCIDs1, 1)
 		require.Equal(t, nodeCID1, nodeCIDs1[0])
 
 		// ForEachNodeInIndex for index2 should only yield node2
 		var nodeCIDs2 []cid.Cid
-		err = repo.ForEachNodeInIndex(t.Context(), index2.ID(), func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
-			nodeCIDs2 = append(nodeCIDs2, nodeCID)
-			return nil
-		})
-		require.NoError(t, err)
+		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index2.ID()) {
+			require.NoError(t, err)
+			nodeCIDs2 = append(nodeCIDs2, nii.NodeCID)
+		}
 		require.Len(t, nodeCIDs2, 1)
 		require.Equal(t, nodeCID2, nodeCIDs2[0])
 	})
@@ -465,9 +448,12 @@ func TestForEachNodeInIndex(t *testing.T) {
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard2.ID())
 		require.NoError(t, err)
 
-		err = repo.ForEachNodeInIndex(t.Context(), index.ID(), func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
-			return nil
-		})
+		for _, nodeErr := range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
+			if nodeErr != nil {
+				err = nodeErr
+				break
+			}
+		}
 		require.ErrorContains(t, err, fmt.Sprintf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", index.ID(), shard2.ID()))
 	})
 }
