@@ -307,10 +307,12 @@ func executePDPAccept(
 // [spaceblobcap.Add] invocations in a test. rcptIssued is called with each
 // receipt that is issued along the way. If includePDP is true, the accept
 // receipt will include a (random) PDP accept link; otherwise, the PDP accept
-// link will be nil.
+// link will be nil. If includePutReceipt is true, a successful http/put receipt
+// is embedded in the response (simulating a blob that was already uploaded).
 func SpaceBlobAddHandler(
 	rcptIssued func(rcpt receipt.AnyReceipt),
 	includePDP bool,
+	includePutReceipt bool,
 ) (server.HandlerFunc[spaceblobcap.AddCaveats, spaceblobcap.AddOk, failure.IPLDBuilderFailure], error) {
 	storageProvider, err := ed25519signer.Generate()
 	if err != nil {
@@ -438,6 +440,33 @@ func SpaceBlobAddHandler(
 			fx.FromInvocation(httpPutInv),
 			fx.FromInvocation(acceptInv),
 		}
+
+		if includePutReceipt {
+			putRcpt, err := receipt.Issue(blobProvider, result.Ok[httpcap.PutOk, ipld.Builder](httpcap.PutOk{}), ran.FromInvocation(httpPutInv))
+			if err != nil {
+				return nil, nil, fmt.Errorf("issuing put receipt: %w", err)
+			}
+
+			putConcludeInv, err := ucancap.Conclude.Invoke(
+				context.ID(),
+				storageProvider,
+				cap.With(),
+				ucancap.ConcludeCaveats{
+					Receipt: putRcpt.Root().Link(),
+				},
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invoking put conclude: %w", err)
+			}
+			for rcptBlock, err := range putRcpt.Blocks() {
+				if err != nil {
+					return nil, nil, fmt.Errorf("getting put receipt block: %w", err)
+				}
+				putConcludeInv.Attach(rcptBlock)
+			}
+
+			forks = append(forks, fx.FromInvocation(putConcludeInv))
+		}
 		fxs := fx.NewEffects(fx.WithFork(forks...))
 
 		ok := spaceblobcap.AddOk{
@@ -498,15 +527,22 @@ func (r *receiptsTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // different options can't cooperate to share a receipts client. That's
 // solvable, but hasn't been necessary yet.
 func WithSpaceBlobAdd() Option {
-	return withSpaceBlobAdd(false)
+	return withSpaceBlobAdd(false, false)
 }
 
 // WithSpaceBlobAddPDP is like WithSpaceBlobAdd but includes a PDP accept link in the accept receipt.
 func WithSpaceBlobAddPDP() Option {
-	return withSpaceBlobAdd(true)
+	return withSpaceBlobAdd(true, false)
 }
 
-func withSpaceBlobAdd(includePDP bool) Option {
+// WithSpaceBlobAddPutReceipt is like WithSpaceBlobAdd but includes a
+// successful http/put receipt in the space/blob/add response, simulating a
+// blob that was already uploaded by a previous attempt.
+func WithSpaceBlobAddPutReceipt() Option {
+	return withSpaceBlobAdd(false, true)
+}
+
+func withSpaceBlobAdd(includePDP bool, includePutReceipt bool) Option {
 	receiptsTrans := receiptsTransport{
 		receipts: make(map[string]receipt.AnyReceipt),
 	}
@@ -518,6 +554,7 @@ func withSpaceBlobAdd(includePDP bool) Option {
 			receiptsTrans.receipts[rcpt.Ran().Link().String()] = rcpt
 		},
 		includePDP,
+		includePutReceipt,
 	))
 
 	return ComposeOptions(
