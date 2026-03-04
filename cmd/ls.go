@@ -14,7 +14,7 @@ import (
 	"github.com/storacha/guppy/pkg/config"
 )
 
-var size uint64 = 1000
+var shardsPerPage uint64 = 1000
 
 var lsFlags struct {
 	proofsPath string
@@ -74,7 +74,7 @@ var lsCmd = &cobra.Command{
 						shardListOk, err := c.UploadShardList(
 							cmd.Context(),
 							spaceDID,
-							shardcap.ListCaveats{Root: r.Root, Cursor: cursor, Size: &size},
+							shardcap.ListCaveats{Root: r.Root, Cursor: cursor, Size: &shardsPerPage},
 						)
 						if err != nil {
 							return fmt.Errorf("listing shards: %w", err)
