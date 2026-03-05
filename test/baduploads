@@ -87,7 +87,7 @@ TEST_SPACE_DID_HEX="ed01f02e0c65e65ab2c2a8fa1ef136ae0b9018144e6dd36eceaaedc8ce66
 # Function to generate a UUID (16 bytes = 32 hex chars) from a string seed
 generate_id() {
 	# Take MD5 hash of the input (16 bytes) and use as UUID
-	echo -n "$1" | md5 | tr -d '\n'
+	echo -n "$1" | md5sum | tr -d '\n'
 }
 
 # Function to generate a valid test CID from a seed number
