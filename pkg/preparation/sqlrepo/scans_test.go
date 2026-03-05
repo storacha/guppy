@@ -97,7 +97,7 @@ func TestCreateDirectoryChildren(t *testing.T) {
 	err = repo.CreateDirectoryChildren(t.Context(), dir, []model.FSEntry{file, file2})
 	require.NoError(t, err)
 
-	children, err := repo.DirectoryChildren(t.Context(), dir)
+	children, err := repo.DirectoryChildren(t.Context(), dir.ID())
 	require.NoError(t, err)
 	require.ElementsMatch(t, []model.FSEntry{file, file2}, children)
 }

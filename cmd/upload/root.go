@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
+	"github.com/storacha/guppy/cmd/upload/check"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/bus"
@@ -38,6 +39,7 @@ func init() {
 	Cmd.Flags().BoolVar(&rootFlags.assumeUnchangedSources, "assume-unchanged-sources", false, "When resuming, skip filesystem rescan if a completed scan already exists")
 
 	Cmd.AddCommand(source.Cmd)
+	Cmd.AddCommand(check.Cmd)
 }
 
 var Cmd = &cobra.Command{

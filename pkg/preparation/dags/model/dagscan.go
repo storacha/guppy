@@ -37,6 +37,7 @@ type DAGScan interface {
 	HasCID() bool
 	CID() cid.Cid
 	Complete(cid cid.Cid) error
+	ClearCID() error
 	isDAGScan()
 }
 
@@ -94,6 +95,15 @@ func (d *dagScan) Complete(cid cid.Cid) error {
 	}
 	d.updatedAt = time.Now()
 	d.cid = cid
+	return nil
+}
+
+func (d *dagScan) ClearCID() error {
+	if !d.cid.Defined() {
+		return fmt.Errorf("cannot clear CID from incomplete dag scan %s", d.fsEntryID)
+	}
+	d.updatedAt = time.Now()
+	d.cid = cid.Undef
 	return nil
 }
 
