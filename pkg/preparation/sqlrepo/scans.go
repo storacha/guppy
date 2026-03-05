@@ -12,6 +12,7 @@ import (
 	"github.com/storacha/guppy/pkg/bus/events"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
+	"github.com/storacha/guppy/pkg/preparation/types"
 
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
@@ -160,7 +161,7 @@ func (r *Repo) GetFSEntryByID(ctx context.Context, fsEntryID id.FSEntryID) (scan
 		return row.Scan(util.DbID(id), path, util.TimestampScanner(lastModified), mode, size, util.DbBytes(checksum), util.DbID(sourceID), util.DbDID(spaceDID))
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, types.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

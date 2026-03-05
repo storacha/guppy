@@ -170,8 +170,11 @@ func (c *Checker) checkUploadScanned(ctx context.Context, uploadID id.UploadID, 
 		})
 	} else {
 		// Verify FSEntry exists (could be file or directory)
-		entry, err := c.Repo.GetFSEntryByID(ctx, upload.RootFSEntryID())
-		if entry == nil && err == nil {
+		_, err := c.Repo.GetFSEntryByID(ctx, upload.RootFSEntryID())
+		if err != nil && !errors.Is(err, types.ErrNotFound) {
+			return result, fmt.Errorf("getting FSEntry: %w", err)
+		}
+		if errors.Is(err, types.ErrNotFound) {
 			// Entry doesn't exist
 			result.Passed = false
 			result.Issues = append(result.Issues, Issue{
@@ -289,13 +292,13 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 	var checkFSEntry func(fsEntryID id.FSEntryID) (bool, error)
 	checkFSEntry = func(fsEntryID id.FSEntryID) (bool, error) {
 		entry, err := c.Repo.GetFSEntryByID(ctx, fsEntryID)
-		if err != nil {
+		if err != nil && !errors.Is(err, types.ErrNotFound) {
 			return false, fmt.Errorf("error checking FSEntry %s: %w", fsEntryID, err)
 		}
 
 		// Handle case where FSEntry doesn't exist (shouldn't happen with FK constraints,
 		// but could occur with disabled FK constraints in tests or database corruption)
-		if entry == nil {
+		if errors.Is(err, types.ErrNotFound) {
 			return true, nil // Entry doesn't exist - mark as having errors
 		}
 
@@ -326,7 +329,7 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			return false, fmt.Errorf("checking DAGScan for FSEntry %s: %w", entry.ID(), err)
 		}
 
-		if dagScan == nil {
+		if errors.Is(err, types.ErrNotFound) {
 			// No DAGScan exists
 			missingDAGScans = append(missingDAGScans, entry.ID())
 			hadErrors = true
