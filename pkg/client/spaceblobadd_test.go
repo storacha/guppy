@@ -43,6 +43,35 @@ func TestSpaceBlobAdd(t *testing.T) {
 		require.Equal(t, 1, testutil.ReceivedBlobs(putClient).Size())
 	})
 
+	t.Run("with a pre-existing http/put success receipt", func(t *testing.T) {
+		space, err := ed25519signer.Generate()
+		require.NoError(t, err)
+
+		putClient := testutil.NewPutClient()
+
+		c, err := testutil.Client(testutil.WithSpaceBlobAddPutReceipt())
+		require.NoError(t, err)
+
+		// Delegate * on the space to the client
+		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+		proof, err := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+		require.NoError(t, err)
+		err = c.AddProofs(proof)
+		require.NoError(t, err)
+
+		testBlob := bytes.NewReader([]byte("test"))
+
+		addedBlob, err := c.SpaceBlobAdd(testContext(t), testBlob, space.DID(), client.WithPutClient(putClient))
+		require.NoError(t, err)
+
+		digest, err := multihash.Sum([]byte("test"), multihash.SHA2_256, -1)
+		require.NoError(t, err)
+
+		require.Equal(t, digest, addedBlob.Digest)
+		// The blob must NOT have been PUT because a success receipt was already present
+		require.Equal(t, 0, testutil.ReceivedBlobs(putClient).Size())
+	})
+
 	t.Run("with a `pdp/accept`", func(t *testing.T) {
 		space, err := ed25519signer.Generate()
 		require.NoError(t, err)

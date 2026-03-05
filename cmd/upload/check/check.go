@@ -63,7 +63,7 @@ Specify both space and source to check a specific upload.`,
 		}
 		defer repo.Close()
 
-		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		// Determine which uploads to check
 		var uploadsToCheck []uploadInfo

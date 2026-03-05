@@ -21,7 +21,7 @@ var resetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		return c.Reset()
 	},
 }

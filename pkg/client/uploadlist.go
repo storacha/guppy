@@ -31,13 +31,13 @@ func (c *Client) UploadList(ctx context.Context, space did.DID, params uploadcap
 	)
 
 	if err != nil {
-		return uploadcap.ListOk{}, fmt.Errorf("invoking and executing `upload/add`: %w", err)
+		return uploadcap.ListOk{}, fmt.Errorf("invoking and executing %q: %w", uploadcap.ListAbility, err)
 	}
 
-	addOk, failErr := result.Unwrap(res)
+	listOk, failErr := result.Unwrap(res)
 	if failErr != nil {
-		return uploadcap.ListOk{}, fmt.Errorf("`upload/add` failed: %w", failErr)
+		return uploadcap.ListOk{}, fmt.Errorf("%q failed: %w", uploadcap.ListAbility, failErr)
 	}
 
-	return addOk, nil
+	return listOk, nil
 }

@@ -36,7 +36,7 @@ var addCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		if dlg.Audience().DID() != c.Issuer().DID() {
 			return fmt.Errorf("delegation audience %q does not match agent DID %q", dlg.Audience().DID(), c.Issuer().DID())
