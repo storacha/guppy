@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-unixfsnode"
@@ -557,7 +558,7 @@ func (c *Checker) validateDirectoryDAG(ctx context.Context, dirFsEntryID id.FSEn
 
 		// Only include children that have completed DAGScans
 		if dagScan != nil && dagScan.HasCID() {
-			fsChildMap[child.Path()] = struct {
+			fsChildMap[filepath.Base(child.Path())] = struct {
 				fsEntryID id.FSEntryID
 				dagCID    cid.Cid
 			}{
