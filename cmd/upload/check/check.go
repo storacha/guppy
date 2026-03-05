@@ -32,10 +32,8 @@ func init() {
 var Cmd = &cobra.Command{
 	Use:   "check [space] [source-path-or-name]",
 	Short: "Check upload integrity and completeness",
-	Long: wordwrap.WrapString(`
-Checks uploads for data inconsistencies and incompleteness that may have
-occurred due to interrupted uploads or shutdowns. Performs the following checks:
-
+	Long: wordwrap.WrapString(`Checks uploads for data inconsistencies and incompleteness that may have occurred due to interrupted uploads or shutdowns.
+Performs the following checks:
 	1. Upload Scanned Check - Verifies FS and DAG scans completed
 	2. File System Integrity Check - Validates FS structure and DAG integrity
 	3. Node Integrity Check - Ensures all nodes have upload records

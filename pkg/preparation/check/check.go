@@ -333,18 +333,11 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			// Attempt repair if enabled
 			if cfg.applyRepairs {
 				_, err := c.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, upload.SpaceDID())
-				if err != nil {
-					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", entry.ID()),
-						Applied:     false,
-						Error:       err,
-					})
-				} else {
-					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create DAGScan for FSEntry %s", entry.ID()),
-						Applied:     true,
-					})
-				}
+				result.Repairs = append(result.Repairs, Repair{
+					Description: fmt.Sprintf("Create DAGScan for FSEntry %s", entry.ID()),
+					Applied:     err == nil,
+					Error:       err,
+				})
 			}
 		} else if dagScan.HasCID() {
 			// DAGScan exists and is complete - validate the DAG
@@ -394,18 +387,12 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 						})
 					} else {
 						// Update the DAGScan in the database
-						if err := c.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-							result.Repairs = append(result.Repairs, Repair{
-								Description: fmt.Sprintf("Clear invalid CID from DAGScan for FSEntry %s", fsEntryID),
-								Applied:     false,
-								Error:       fmt.Errorf("failed to update DAGScan: %w", err),
-							})
-						} else {
-							result.Repairs = append(result.Repairs, Repair{
-								Description: fmt.Sprintf("Clear invalid CID from DAGScan for FSEntry %s", fsEntryID),
-								Applied:     true,
-							})
-						}
+						err := c.Repo.UpdateDAGScan(ctx, dagScan)
+						result.Repairs = append(result.Repairs, Repair{
+							Description: fmt.Sprintf("Clear invalid CID from DAGScan for FSEntry %s", fsEntryID),
+							Applied:     err == nil,
+							Error:       fmt.Errorf("failed to update DAGScan: %w", err),
+						})
 					}
 				}
 
@@ -436,18 +423,12 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 			})
 		} else {
 			// Update the upload in the database
-			if err := c.Repo.UpdateUpload(ctx, upload); err != nil {
-				result.Repairs = append(result.Repairs, Repair{
-					Description: "Clear root CID from upload due to invalid root FSEntry DAG",
-					Applied:     false,
-					Error:       fmt.Errorf("failed to update upload: %w", err),
-				})
-			} else {
-				result.Repairs = append(result.Repairs, Repair{
-					Description: "Clear root CID from upload due to invalid root FSEntry DAG",
-					Applied:     true,
-				})
-			}
+			err := c.Repo.UpdateUpload(ctx, upload)
+			result.Repairs = append(result.Repairs, Repair{
+				Description: "Clear root CID from upload due to invalid root FSEntry DAG",
+				Applied:     err == nil,
+				Error:       err,
+			})
 		}
 	}
 
@@ -716,18 +697,12 @@ func (c *Checker) checkNodeIntegrity(ctx context.Context, uploadID id.UploadID, 
 
 			// Attempt repair if enabled
 			if cfg.applyRepairs {
-				if err := c.Repo.CreateNodeUpload(ctx, nodeCID, upload.SpaceDID(), uploadID); err != nil {
-					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create node_uploads record for node %s", nodeCID),
-						Applied:     false,
-						Error:       err,
-					})
-				} else {
-					result.Repairs = append(result.Repairs, Repair{
-						Description: fmt.Sprintf("Create node_uploads record for node %s", nodeCID),
-						Applied:     true,
-					})
-				}
+				err := c.Repo.CreateNodeUpload(ctx, nodeCID, upload.SpaceDID(), uploadID)
+				result.Repairs = append(result.Repairs, Repair{
+					Description: fmt.Sprintf("Create node_uploads record for node %s", nodeCID),
+					Applied:     err == nil,
+					Error:       err,
+				})
 			}
 		}
 
