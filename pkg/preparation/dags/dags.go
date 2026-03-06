@@ -140,7 +140,7 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	reader := visitor.ReaderPositionFromReader(f)
 	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, dagScan.SpaceDID(), dagScan.UploadID(), sourceID, path, reader, nodeCB)
 	log.Debugf("Building UnixFS file with source ID %s and path %s", sourceID, path)
-	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("size-%d", BlockSize), visitor.LinkSystem())
+	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("aes-256-ctr-size-%d", BlockSize), visitor.LinkSystem())
 	if err != nil {
 		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
 	}
