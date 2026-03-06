@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"fmt"
 	"io"
 	"math/rand"
@@ -31,11 +33,12 @@ var log = logging.Logger("client/dagservice")
 const DefaultMaxGap = 64
 
 type storachaExchange struct {
-	locator   locator.Locator
-	retriever Retriever
-	spaces    []did.DID
-	shards    blobindex.MultihashMap[[]byte]
-	maxGap    uint64
+	locator      locator.Locator
+	retriever    Retriever
+	spaces       []did.DID
+	shards       blobindex.MultihashMap[[]byte]
+	maxGap       uint64
+	aes256CTRKey []byte
 }
 
 var _ exchange.Interface = (*storachaExchange)(nil)
@@ -49,6 +52,12 @@ type ExchangeOption func(*storachaExchange)
 func WithMaxGap(maxGap uint64) ExchangeOption {
 	return func(se *storachaExchange) {
 		se.maxGap = maxGap
+	}
+}
+
+func WithAES256CTRDecryptionKey(key []byte) ExchangeOption {
+	return func(se *storachaExchange) {
+		se.aes256CTRKey = key
 	}
 }
 
@@ -93,7 +102,52 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
 	}
 
+	if se.aes256CTRKey != nil && block.Cid().Prefix().Codec == cid.Raw {
+		block, err = decryptAES256CTRBlock(se.aes256CTRKey, block)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting block %s: %w", c.String(), err)
+		}
+	}
+
 	return block, nil
+}
+
+type decryptedBlock struct {
+	cid  cid.Cid
+	data []byte
+}
+
+func (d decryptedBlock) Cid() cid.Cid {
+	return d.cid
+}
+
+func (d decryptedBlock) Loggable() map[string]any {
+	return map[string]any{
+		"block": d.Cid().String(),
+	}
+}
+
+func (d decryptedBlock) RawData() []byte {
+	return d.data
+}
+
+func (d decryptedBlock) String() string {
+	return fmt.Sprintf("[DecryptedBlock %s]", d.Cid())
+}
+
+func decryptAES256CTRBlock(sk []byte, block blocks.Block) (blocks.Block, error) {
+	cipherblock, err := aes.NewCipher(sk)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext := block.RawData()
+	// The IV needs to be unique, but not secure. Therefore it's common to
+	// include it at the beginning of the ciphertext.
+	iv := ciphertext[:aes.BlockSize]
+	data := make([]byte, len(ciphertext[aes.BlockSize:]))
+	stream := cipher.NewCTR(cipherblock, iv)
+	stream.XORKeyStream(data, ciphertext[aes.BlockSize:])
+	return decryptedBlock{cid: block.Cid(), data: data}, nil
 }
 
 // makeBlock creates a block from the given data and CID, verifying that the
@@ -301,6 +355,14 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				if err != nil {
 					log.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
 					return
+				}
+
+				if se.aes256CTRKey != nil && blk.Cid().Prefix().Codec == cid.Raw {
+					blk, err = decryptAES256CTRBlock(se.aes256CTRKey, blk)
+					if err != nil {
+						log.Errorf("decrypting block %s: %v", blk.Cid().String(), err)
+						return
+					}
 				}
 
 				out <- blk
