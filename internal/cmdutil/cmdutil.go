@@ -20,6 +20,7 @@ import (
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/guppy/pkg/agentstore"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/config"
 	cdg "github.com/storacha/guppy/pkg/delegation"
 	"github.com/storacha/guppy/pkg/presets"
 	receiptclient "github.com/storacha/guppy/pkg/receipt"
@@ -44,13 +45,16 @@ var tracedHttpClient = &http.Client{
 
 // MustGetClient creates a new client suitable for the CLI, using stored data,
 // if any. The storePath should be a directory path where agent data will be stored.
-func MustGetClient(storePath string, options ...client.Option) *client.Client {
-	return MustGetClientForNetwork(storePath, "", options...)
+// The networkCfg contains network settings from the config file.
+func MustGetClient(storePath string, networkCfg config.NetworkConfig, options ...client.Option) *client.Client {
+	return MustGetClientForNetwork(storePath, networkCfg, "", options...)
 }
 
 // MustGetClientForNetwork is like MustGetClient but allows specifying a network
-// configuration by name (which may be empty).
-func MustGetClientForNetwork(storePath string, networkName string, options ...client.Option) *client.Client {
+// configuration by name (which may be empty). The networkCfg contains network
+// settings from the config file, and flagName is the network name from CLI flag
+// (takes precedence over config).
+func MustGetClientForNetwork(storePath string, networkCfg config.NetworkConfig, flagName string, options ...client.Option) *client.Client {
 	store, err := agentstore.NewFs(storePath)
 	if err != nil {
 		log.Fatalf("creating agent store: %s", err)
@@ -65,7 +69,7 @@ func MustGetClientForNetwork(storePath string, networkName string, options ...cl
 		}
 	}
 
-	network := MustGetNetworkConfig(networkName)
+	network := MustGetNetworkConfig(networkCfg, flagName)
 
 	conn, err := uclient.NewConnection(
 		network.UploadID,
@@ -93,20 +97,36 @@ func MustGetClientForNetwork(storePath string, networkName string, options ...cl
 	return c
 }
 
-func MustGetNetworkConfig(name string) presets.NetworkConfig {
-	network, err := presets.GetNetworkConfig(name)
+// MustGetNetworkConfig resolves network configuration from config file and/or
+// CLI flag. The flagName takes precedence over config values when set.
+// Falls back to STORACHA_* env vars if config is empty.
+func MustGetNetworkConfig(networkCfg config.NetworkConfig, flagName string) presets.NetworkConfig {
+	// If config has values, use them (with flag name taking precedence for preset selection)
+	if !networkCfg.IsEmpty() || flagName != "" {
+		network, err := networkCfg.ToPresetConfig(flagName)
+		if err != nil {
+			log.Fatal(fmt.Errorf("getting network configuration: %w", err))
+		}
+		return network
+	}
+
+	// Fall back to preset-only behavior (handles STORACHA_* env vars)
+	network, err := presets.GetNetworkConfig("")
 	if err != nil {
 		log.Fatal(fmt.Errorf("getting network configuration: %w", err))
 	}
 	return network
 }
 
-func MustGetIndexClient() (*indexclient.Client, ucan.Principal) {
-	return MustGetIndexClientForNetwork("")
+// MustGetIndexClient creates a new indexer client using the network configuration.
+func MustGetIndexClient(networkCfg config.NetworkConfig) (*indexclient.Client, ucan.Principal) {
+	return MustGetIndexClientForNetwork(networkCfg, "")
 }
 
-func MustGetIndexClientForNetwork(networkName string) (*indexclient.Client, ucan.Principal) {
-	network := MustGetNetworkConfig(networkName)
+// MustGetIndexClientForNetwork creates a new indexer client, allowing a CLI flag
+// to override the network preset name.
+func MustGetIndexClientForNetwork(networkCfg config.NetworkConfig, flagName string) (*indexclient.Client, ucan.Principal) {
+	network := MustGetNetworkConfig(networkCfg, flagName)
 
 	client, err := indexclient.New(network.IndexerID, network.IndexerURL, indexclient.WithHTTPClient(tracedHttpClient))
 	if err != nil {

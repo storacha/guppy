@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
+	"github.com/storacha/guppy/cmd/upload/check"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/bus"
@@ -25,17 +26,20 @@ import (
 var log = logging.Logger("cmd/upload")
 
 var rootFlags struct {
-	all         bool
-	retry       bool
-	parallelism uint64
+	all                    bool
+	retry                  bool
+	parallelism            uint64
+	assumeUnchangedSources bool
 }
 
 func init() {
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
+	Cmd.Flags().BoolVar(&rootFlags.assumeUnchangedSources, "assume-unchanged-sources", false, "When resuming, skip filesystem rescan if a completed scan already exists")
 
 	Cmd.AddCommand(source.Cmd)
+	Cmd.AddCommand(check.Cmd)
 }
 
 var Cmd = &cobra.Command{
@@ -84,7 +88,7 @@ var Cmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
 			return err
@@ -92,6 +96,7 @@ var Cmd = &cobra.Command{
 
 		api := preparation.NewAPI(repo, client,
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
+			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)

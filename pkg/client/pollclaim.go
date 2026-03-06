@@ -9,6 +9,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/ipld"
 	"github.com/storacha/go-ucanto/core/result"
+	"github.com/storacha/guppy/internal/ctxutil"
 )
 
 // PollClaim attempts to `access/claim` and retries until it finds delegations
@@ -38,7 +39,7 @@ func (c *Client) pollClaimWithTicker(ctx context.Context, authOk access.Authoriz
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("context canceled before delegations could be claimed: %w", ctx.Err())
+			return nil, fmt.Errorf("context canceled before delegations could be claimed: %w", ctxutil.Cause(ctx))
 		case <-tickChan:
 			dels, err := c.ClaimAccess(ctx)
 			if err != nil {

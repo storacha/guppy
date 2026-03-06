@@ -52,7 +52,7 @@ var retrieveCmd = &cobra.Command{
 			return err
 		}
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		space, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {
 			return err
@@ -69,7 +69,7 @@ var retrieveCmd = &cobra.Command{
 
 		outputPath := args[2]
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
 		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
 			attribute.String("retrieval.space", space.DID().String()),
@@ -86,7 +86,7 @@ var retrieveCmd = &cobra.Command{
 		}()
 
 		networkName, _ := cmd.Flags().GetString("network")
-		network := cmdutil.MustGetNetworkConfig(networkName)
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, networkName)
 		pruningCtx, err := cmdutil.BuildPruningContext(ctx, network.UploadID)
 		if err != nil {
 			return err
@@ -182,4 +182,3 @@ var retrieveCmd = &cobra.Command{
 		return nil
 	},
 }
-

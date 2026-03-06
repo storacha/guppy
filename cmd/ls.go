@@ -6,12 +6,15 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	uploadcap "github.com/storacha/go-libstoracha/capabilities/upload"
+	shardcap "github.com/storacha/go-libstoracha/capabilities/upload/shard"
 	"github.com/storacha/go-ucanto/core/delegation"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/config"
 )
+
+var shardsPerPage uint64 = 1000
 
 var lsFlags struct {
 	proofsPath string
@@ -46,7 +49,7 @@ var lsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir, client.WithAdditionalProofs(proofs...))
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network, client.WithAdditionalProofs(proofs...))
 
 		spaceDID, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {
@@ -66,8 +69,23 @@ var lsCmd = &cobra.Command{
 			for _, r := range listOk.Results {
 				fmt.Printf("%s\n", r.Root)
 				if lsFlags.showShards {
-					for _, s := range r.Shards {
-						fmt.Printf("\t%s\n", s)
+					var cursor *string
+					for {
+						shardListOk, err := c.UploadShardList(
+							cmd.Context(),
+							spaceDID,
+							shardcap.ListCaveats{Root: r.Root, Cursor: cursor, Size: &shardsPerPage},
+						)
+						if err != nil {
+							return fmt.Errorf("listing shards: %w", err)
+						}
+						for _, s := range shardListOk.Results {
+							fmt.Printf("\t%s\n", s)
+						}
+						cursor = shardListOk.Cursor
+						if cursor == nil {
+							break
+						}
 					}
 				}
 			}

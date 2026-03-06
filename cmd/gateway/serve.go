@@ -70,9 +70,12 @@ func init() {
 		"External HTTPS URL at which this gateway is reachable by peers (e.g. "+
 			"https://localhost:3443). Delegated routing responses served by the "+
 			"gateway will point to this URL as the location of blocks, which must be "+
-			"served over HTTPS.",
+			"served over HTTPS. This option is required to enable delegated routing "+
+			"responses, which are required for Kubo to retrieve content from the "+
+			"gateway. If not set, the gateway will still serve content over HTTP but "+
+			"will not include routing responses.",
 		80))
-	cobra.CheckErr(viper.BindPFlag("gateway.advertise-url", serveCmd.Flags().Lookup("advertise-url")))
+	cobra.CheckErr(viper.BindPFlag("gateway.advertise_url", serveCmd.Flags().Lookup("advertise-url")))
 
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
@@ -111,7 +114,7 @@ var serveCmd = &cobra.Command{
 
 		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		pub, err := crypto.UnmarshalEd25519PublicKey(c.Issuer().Verifier().Raw())
 		cobra.CheckErr(err)
@@ -149,9 +152,9 @@ var serveCmd = &cobra.Command{
 			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
-		network := cmdutil.MustGetNetworkConfig("")
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
 		pruningCtx, err := cmdutil.BuildPruningContext(ctx, network.UploadID)
 		if err != nil {
 			return fmt.Errorf("building pruning context: %w", err)

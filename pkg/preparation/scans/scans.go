@@ -3,6 +3,7 @@ package scans
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -100,10 +102,10 @@ func (a API) openFile(ctx context.Context, file *model.File) (fs.File, error) {
 // getFileByID retrieves a file by its ID from the repository, returning an error if not found.
 func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
 	file, err := a.Repo.GetFileByID(ctx, fileID)
-	if err != nil {
+	if err != nil && !errors.Is(err, types.ErrNotFound) {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
 	}
-	if file == nil {
+	if errors.Is(err, types.ErrNotFound) {
 		return nil, fmt.Errorf("file with ID %s not found", fileID)
 	}
 	return file, nil

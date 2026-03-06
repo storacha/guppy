@@ -544,3 +544,42 @@ func (r *Repo) NodesNotInShards(ctx context.Context, uploadID id.UploadID, space
 	}
 	return cids, rows.Err()
 }
+
+// NodeUploadExists checks if a node_uploads record exists for the given node, space, and upload.
+func (r *Repo) NodeUploadExists(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) (bool, error) {
+	stmt, err := r.prepareStmt(ctx, `
+		SELECT 1
+		FROM node_uploads
+		WHERE node_cid = ? AND space_did = ? AND upload_id = ?
+	`)
+	if err != nil {
+		return false, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	var exists int
+	err = stmt.QueryRowContext(ctx, util.DbCID(&nodeCID), util.DbDID(&spaceDID), uploadID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check node_uploads existence: %w", err)
+	}
+	return true, nil
+}
+
+// CreateNodeUpload creates a node_uploads record with shard_id = NULL.
+func (r *Repo) CreateNodeUpload(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) error {
+	stmt, err := r.prepareStmt(ctx, `
+		INSERT INTO node_uploads (node_cid, space_did, upload_id, shard_id, shard_offset)
+		VALUES (?, ?, ?, NULL, NULL)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+
+	_, err = stmt.ExecContext(ctx, util.DbCID(&nodeCID), util.DbDID(&spaceDID), uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to create node_upload: %w", err)
+	}
+	return nil
+}

@@ -17,7 +17,7 @@ var whoamiCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		cmd.Println(c.DID())
 		return nil
 	},
