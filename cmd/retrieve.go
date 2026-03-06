@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -11,12 +10,8 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
-	"github.com/storacha/go-libstoracha/principalresolver"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
-	edverifier "github.com/storacha/go-ucanto/principal/ed25519/verifier"
-	"github.com/storacha/go-ucanto/principal/verifier"
-	"github.com/storacha/go-ucanto/server"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/storacha/go-ucanto/validator"
 	"go.opentelemetry.io/otel/attribute"
@@ -92,7 +87,7 @@ var retrieveCmd = &cobra.Command{
 
 		networkName, _ := cmd.Flags().GetString("network")
 		network := cmdutil.MustGetNetworkConfig(networkName)
-		pruningCtx, err := buildPruningContext(ctx, network.UploadID)
+		pruningCtx, err := cmdutil.BuildPruningContext(ctx, network.UploadID)
 		if err != nil {
 			return err
 		}
@@ -129,9 +124,9 @@ var retrieveCmd = &cobra.Command{
 				return nil, fmt.Errorf("creating delegation to indexer: %w", err)
 			}
 
-			pfs, unauth := validator.PruneProofs(ctx, draftDlg, pruningCtx)
+			prunedPfs, unauth := validator.PruneProofs(ctx, draftDlg, pruningCtx)
 			if unauth != nil {
-				return nil, unauth
+				return nil, fmt.Errorf("pruning proofs: %w", unauth)
 			}
 
 			return delegation.Delegate(
@@ -140,7 +135,7 @@ var retrieveCmd = &cobra.Command{
 				[]ucan.Capability[ucan.NoCaveats]{
 					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
 				},
-				delegation.WithProof(pfs...),
+				delegation.WithProof(prunedPfs...),
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
@@ -188,39 +183,3 @@ var retrieveCmd = &cobra.Command{
 	},
 }
 
-func buildPruningContext(ctx context.Context, attestorDID did.DID) (validator.ValidationContext[contentcap.RetrieveCaveats], error) {
-	resolver, err := principalresolver.NewHTTPResolver([]did.DID{attestorDID})
-	if err != nil {
-		return nil, fmt.Errorf("creating principal resolver: %w", err)
-	}
-
-	resolvedKeyDID, unresolvedErr := resolver.ResolveDIDKey(ctx, attestorDID)
-	if unresolvedErr != nil {
-		return nil, fmt.Errorf("resolving attestor DID key: %w", unresolvedErr)
-	}
-
-	keyVerifier, err := edverifier.Parse(resolvedKeyDID.String())
-	if err != nil {
-		return nil, fmt.Errorf("parsing resolved key DID: %w", err)
-	}
-
-	attestor, err := verifier.Wrap(keyVerifier, attestorDID)
-	if err != nil {
-		return nil, fmt.Errorf("creating attestor verifier: %w", err)
-	}
-
-	return validator.NewValidationContext(
-		// For client evaluated chains, the authority must be the service that issued the ucan/attest
-		// delegations — e.g. the upload-service.
-		attestor,
-		contentcap.Retrieve,
-		validator.IsSelfIssued,
-		func(context.Context, validator.Authorization[any]) validator.Revoked {
-			return nil
-		},
-		validator.ProofUnavailable,
-		server.ParsePrincipal,
-		validator.FailDIDKeyResolution,
-		validator.NotExpiredNotTooEarly,
-	), nil
-}

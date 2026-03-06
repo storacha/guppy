@@ -28,6 +28,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/cmd/gateway/banner"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
@@ -97,6 +98,8 @@ var serveCmd = &cobra.Command{
 			"Spaces can be specified by DID or by name.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
@@ -147,6 +150,13 @@ var serveCmd = &cobra.Command{
 		}
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+
+		network := cmdutil.MustGetNetworkConfig("")
+		pruningCtx, err := cmdutil.BuildPruningContext(ctx, network.UploadID)
+		if err != nil {
+			return fmt.Errorf("building pruning context: %w", err)
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -170,12 +180,27 @@ var serveCmd = &cobra.Command{
 				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), ucan.NoCaveats{}))
 			}
 
-			opts := []delegation.Option{
+			// Build a draft delegation covering all caps to determine the minimum
+			// needed proofs, then prune before sending to avoid large HTTP headers.
+			draftDlg, err := delegation.Delegate(
+				c.Issuer(), indexerPrincipal, caps,
 				delegation.WithProof(pfs...),
-				delegation.WithExpiration(int(time.Now().Add(30 * time.Second).Unix())),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("creating draft delegation: %w", err)
 			}
 
-			return delegation.Delegate(c.Issuer(), indexerPrincipal, caps, opts...)
+			prunedPfs, unauth := validator.PruneProofs(ctx, draftDlg, pruningCtx)
+			if unauth != nil {
+				return nil, fmt.Errorf("pruning proofs: %w", unauth)
+			}
+
+			return delegation.Delegate(
+				c.Issuer(), indexerPrincipal, caps,
+				delegation.WithProof(prunedPfs...),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
 		})
 		exchange := dagservice.NewExchange(locator, c, spaces)
 
