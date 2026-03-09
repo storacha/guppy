@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -24,6 +25,11 @@ import (
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
 )
+
+func init() {
+	retrieveCmd.Flags().StringP("network", "n", "", "Network to retrieve content from.")
+	retrieveCmd.Flags().MarkHidden("network")
+}
 
 var retrieveCmd = &cobra.Command{
 	Use:     "retrieve <space> <content-path> <output-path>",
@@ -79,6 +85,13 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
+		networkName, _ := cmd.Flags().GetString("network")
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, networkName)
+		pruningCtx, err := cmdutil.BuildPruningContext(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -98,13 +111,31 @@ var retrieveCmd = &cobra.Command{
 			}
 
 			// Allow the indexing service to retrieve indexes
+			// Prune proofs from the delegation to avoid sending large delegations to the indexer
+			draftDlg, err := contentcap.Retrieve.Delegate(
+				c.Issuer(),
+				indexerPrincipal,
+				space.DID().String(),
+				contentcap.RetrieveCaveats{},
+				delegation.WithProof(pfs...),
+				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("creating delegation to indexer: %w", err)
+			}
+
+			prunedPfs, unauth := validator.PruneProofs(ctx, draftDlg, pruningCtx)
+			if unauth != nil {
+				return nil, fmt.Errorf("pruning proofs: %w", unauth)
+			}
+
 			return delegation.Delegate(
 				c.Issuer(),
 				indexerPrincipal,
 				[]ucan.Capability[ucan.NoCaveats]{
 					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
 				},
-				delegation.WithProof(pfs...),
+				delegation.WithProof(prunedPfs...),
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
