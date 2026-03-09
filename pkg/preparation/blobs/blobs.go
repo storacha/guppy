@@ -209,20 +209,16 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	}, nil
 }
 
-func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (hRet *shardHashState, errRet error) {
+func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*shardHashState, error) {
 	h, err := fromShard(shard)
 	if err != nil {
 		return nil, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
 	}
-	defer func() {
-		if errRet != nil {
-			h.reset()
-		}
-	}()
 
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
 		if err != nil {
+			h.reset()
 			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
 		}
 	}
