@@ -182,7 +182,6 @@ type digestStateUpdate struct {
 }
 
 func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node dagsmodel.Node, data []byte) (digestStateUpdate, error) {
-
 	if uint64(len(data)) != node.Size() {
 		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
 	}
@@ -191,6 +190,7 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	if err != nil {
 		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer hasher.reset()
 
 	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
 	if err != nil {
@@ -218,6 +218,7 @@ func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*sh
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
 		if err != nil {
+			h.reset()
 			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
 		}
 	}
@@ -230,6 +231,7 @@ func (a API) closeShard(ctx context.Context, shard *model.Shard) error {
 	if err != nil {
 		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer h.reset()
 	shardDigest, pieceCID, err := h.finalize(shard.Size())
 	if err != nil {
 		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)

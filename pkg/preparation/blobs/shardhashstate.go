@@ -76,6 +76,11 @@ func (s *shardHashState) marshal() ([]byte, []byte, error) {
 	return digestState, pieceCIDState, nil
 }
 
+func (s *shardHashState) reset() {
+	s.digestHash.Reset()
+	s.commpCalc.Reset()
+}
+
 func (s *shardHashState) finalize(shardSize uint64) (multihash.Multihash, cid.Cid, error) {
 	shardDigest, err := multihash.Encode(s.digestHash.Sum(nil), multihash.SHA2_256)
 	if err != nil {
