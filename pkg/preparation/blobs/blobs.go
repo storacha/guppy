@@ -182,7 +182,6 @@ type digestStateUpdate struct {
 }
 
 func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node dagsmodel.Node, data []byte) (digestStateUpdate, error) {
-
 	if uint64(len(data)) != node.Size() {
 		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
 	}
@@ -210,11 +209,16 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	}, nil
 }
 
-func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*shardHashState, error) {
+func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (hRet *shardHashState, errRet error) {
 	h, err := fromShard(shard)
 	if err != nil {
 		return nil, fmt.Errorf("getting shard %s hasher: %w", shard.ID(), err)
 	}
+	defer func() {
+		if errRet != nil {
+			h.reset()
+		}
+	}()
 
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
