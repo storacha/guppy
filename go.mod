@@ -2,8 +2,6 @@ module github.com/storacha/guppy
 
 go 1.25.3
 
-replace github.com/ipfs/boxo => github.com/alanshaw/boxo v0.0.0-20260306125143-eaa10128e98f
-
 require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
 	github.com/briandowns/spinner v1.23.2
@@ -21,7 +19,7 @@ require (
 	github.com/grafana/otel-profiling-go v0.5.1
 	github.com/grafana/pyroscope-go v1.2.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/ipfs/boxo v0.36.0
+	github.com/ipfs/boxo v0.37.1-0.20260310144018-e8ef4a2593a0
 	github.com/ipfs/go-block-format v0.2.3
 	github.com/ipfs/go-cid v0.6.0
 	github.com/ipfs/go-datastore v0.9.1
