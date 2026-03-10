@@ -102,10 +102,11 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	}
 
 	if se.aes256CTRKey != nil && block.Cid().Prefix().Codec == cid.Raw {
-		block, err = decryptAES256CTRBlock(se.aes256CTRKey, block)
+		data, err := encryption.DecryptAES256CTR(se.aes256CTRKey, block.RawData())
 		if err != nil {
-			return nil, fmt.Errorf("decrypting block %s: %w", c.String(), err)
+			return nil, fmt.Errorf("decrypting block: %w", err)
 		}
+		block = decryptedBlock{cid: block.Cid(), data: data}
 	}
 
 	return block, nil
@@ -132,14 +133,6 @@ func (d decryptedBlock) RawData() []byte {
 
 func (d decryptedBlock) String() string {
 	return fmt.Sprintf("[DecryptedBlock %s]", d.Cid())
-}
-
-func decryptAES256CTRBlock(sk []byte, block blocks.Block) (blocks.Block, error) {
-	data, err := encryption.DecryptAES256CTR(sk, block.RawData())
-	if err != nil {
-		return nil, fmt.Errorf("decrypting block: %w", err)
-	}
-	return decryptedBlock{cid: block.Cid(), data: data}, nil
 }
 
 // makeBlock creates a block from the given data and CID, verifying that the
