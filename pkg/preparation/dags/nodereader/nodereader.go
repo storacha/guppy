@@ -19,6 +19,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/encryption"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodemeta"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -188,22 +189,30 @@ func (nr *nodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) (
 	if _, err := seeker.Seek(int64(node.Offset()), io.SeekStart); err != nil {
 		return nil, err
 	}
-	size := node.Size()
-	// if the chunker is aes-256-ctr, we need to account for the 16 byte IV prefix
-	// on each chunk
+
+	var data []byte
 	if nr.aes256CTRKey != nil {
-		size -= 16
-	}
-	data := make([]byte, size)
-	if _, err := io.ReadFull(seeker, data); err != nil {
-		return nil, err
-	}
-	if nr.aes256CTRKey != nil {
-		data, _, err = encryption.EncryptAES256CTR(nr.aes256CTRKey, data, encryption.WithIV(node.Meta()))
+		meta, err := nodemeta.Decode[*nodemeta.AES256CTRMeta](node.Meta())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode AES-256-CTR metadata for node %s: %w", node.CID(), err)
+		}
+		// if node is encrypted with aes-256-ctr, we need to account for the 16 byte
+		// IV prefix on each chunk
+		data = make([]byte, int(node.Size())-len(meta.Value.IV))
+		if _, err := io.ReadFull(seeker, data); err != nil {
+			return nil, err
+		}
+		data, _, err = encryption.EncryptAES256CTR(nr.aes256CTRKey, data, encryption.WithIV(meta.Value.IV))
 		if err != nil {
 			return nil, fmt.Errorf("failed to encrypt data for node %s: %w", node.CID(), err)
 		}
+	} else {
+		data = make([]byte, node.Size())
+		if _, err := io.ReadFull(seeker, data); err != nil {
+			return nil, err
+		}
 	}
+
 	return data, nil
 }
 

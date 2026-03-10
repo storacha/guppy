@@ -13,10 +13,10 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode/data/builder"
 	dagpb "github.com/ipld/go-codec-dagpb"
-	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodemeta"
 	"github.com/storacha/guppy/pkg/preparation/dags/visitor"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -80,16 +80,7 @@ func New(repo Repo, fileAccessor FileAccessorFunc, options ...Option) (API, erro
 		chunk.Register(chunker, func(r io.Reader, _ string) (chunk.Splitter, error) {
 			return NewAES256CTRSplitter(cfg.aes256CTRKey, r, BlockSize), nil
 		})
-		extractMetadata = func(node datamodel.Node, cid cid.Cid, data []byte) ([]byte, error) {
-			// For AES-256-CTR encrypted nodes, we want to store the IV as metadata so
-			// that we can decrypt the node later. The IV is the first 16 bytes of the
-			// encrypted data.
-			if len(data) < 16 {
-				return nil, fmt.Errorf("invalid encrypted data: too short to contain IV")
-			}
-			iv := data[:16]
-			return iv, nil
-		}
+		extractMetadata = nodemeta.ExtractAES256CTRMetadata
 	}
 
 	return API{
@@ -199,7 +190,6 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 
 	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, dagScan.SpaceDID(), dagScan.UploadID(), sourceID, path, reader, nodeCB, a.extractMetadata)
 	log.Debugf("Building UnixFS file with source ID %s and path %s", sourceID, path)
-	fmt.Printf("Building UnixFS file with source ID %s and path %s\n", sourceID, path)
 	l, _, err := builder.BuildUnixFSFile(reader, a.chunker, visitor.LinkSystem())
 	if err != nil {
 		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
