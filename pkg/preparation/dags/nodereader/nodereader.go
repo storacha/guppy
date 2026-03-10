@@ -154,7 +154,6 @@ func (nr *nodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("CHECKING NODE", node.CID(), "FOUND CID", foundCID)
 		if !foundCID.Equals(node.CID()) {
 			return nil, fmt.Errorf("node integrity check failure: %w", fs.ErrInvalid)
 		}

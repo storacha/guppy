@@ -80,6 +80,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
 			nil,
+			nil,
 		)
 
 		pbnode := pbNode(t)
@@ -100,6 +101,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 			id.New(),
 			"some/path",
 			visitor.ReaderPositionFromReader(bytes.NewReader([]byte("some data"))),
+			nil,
 			nil,
 		)
 
@@ -127,6 +129,7 @@ func TestUnixFSFileNodeVisitorLinkSystem(t *testing.T) {
 				callbackCIDs = append(callbackCIDs, node.CID())
 				return nil
 			},
+			nil,
 		)
 
 		l, _, err := builder.BuildUnixFSFile(reader, "size-4", v.LinkSystem())
