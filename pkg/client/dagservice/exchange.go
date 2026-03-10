@@ -343,11 +343,12 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				}
 
 				if se.aes256CTRKey != nil && blk.Cid().Prefix().Codec == cid.Raw {
-					blk, err = decryptAES256CTRBlock(se.aes256CTRKey, blk)
+					data, err := encryption.DecryptAES256CTR(se.aes256CTRKey, blk.RawData())
 					if err != nil {
 						log.Errorf("decrypting block %s: %v", blk.Cid().String(), err)
 						return
 					}
+					blk = decryptedBlock{cid: blk.Cid(), data: data}
 				}
 
 				out <- blk
