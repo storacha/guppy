@@ -35,6 +35,9 @@ theme:
         icon: material/brightness-7
         name: Switch to dark mode
 
+extra_css:
+  - styles/branding.css
+
 nav:
   - Getting Started: index.md
   - CLI Reference:
