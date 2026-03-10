@@ -70,8 +70,9 @@ func Decode[T encoding.BinaryUnmarshaler](data []byte) (NodeMetadata[T], error) 
 		return NodeMetadata[T]{}, fmt.Errorf("decoding metadata value: %w", err)
 	}
 	var value T
-	if reflect.TypeFor[T]().Kind() == reflect.Ptr {
-		value = reflect.New(reflect.TypeFor[T]().Elem()).Interface().(T)
+	typ := reflect.TypeFor[T]()
+	if typ.Kind() == reflect.Ptr {
+		value = reflect.New(typ.Elem()).Interface().(T)
 	}
 	err = value.UnmarshalBinary(valueBytes)
 	if err != nil {
