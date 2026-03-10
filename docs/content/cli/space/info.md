@@ -2,6 +2,8 @@
 
 Get information about a space, including its associated providers and provisioning status.
 
+This is a network operation. Your agent must be authorized to `space/info` before running this command. This typically delegated to any account granted access to a space.
+
 ## Usage
 
 ```
@@ -23,5 +25,5 @@ guppy space info <space> [flags]
 ## Example
 
 ```bash
-guppy space info "my data"
+guppy space info my-data
 ```

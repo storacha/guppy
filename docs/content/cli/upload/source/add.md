@@ -29,13 +29,13 @@ guppy upload source add <space> <path> [flags]
 Add a directory as a source:
 
 ```bash
-guppy upload source add "my data" /path/to/dataset
+guppy upload source add my-data /path/to/dataset
 ```
 
 Add with a custom name and shard size:
 
 ```bash
-guppy upload source add "my data" /path/to/dataset --name "photos" --shard-size 50M
+guppy upload source add my-data /path/to/dataset --name "photos" --shard-size 50M
 ```
 
 ## What's Next
@@ -43,7 +43,7 @@ guppy upload source add "my data" /path/to/dataset --name "photos" --shard-size 
 Start the upload:
 
 ```bash
-guppy upload "my data"
+guppy upload my-data
 ```
 
 See [`guppy upload`](../index.md) for details.

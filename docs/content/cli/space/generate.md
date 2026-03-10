@@ -2,9 +2,9 @@
 
 Generate a new Storacha space.
 
-Creates a new space, provisions it to your logged-in account (for billing), and grants your account access to the space. The space is stored locally.
+Creates a new space, provisions it to your logged-in account (for billing), and grants your account access to the space. The delegations are stored in the network and in your local store.
 
-If you are logged into multiple accounts, use `--grant-to` and `--provision-to` to specify which account to use.
+If you are logged into multiple accounts, use `--grant-to` and `--provision-to` to specify which account to use for each.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ guppy space generate [flags]
 ## Example
 
 ```bash
-guppy space generate --name "my data"
+guppy space generate --name my-data
 ```
 
 ## What's Next

@@ -2,7 +2,7 @@
 
 Create and manage Storacha spaces.
 
-A space is a namespace for your uploads on the Storacha network, identified by a `did:key:` DID. Spaces can also have human-readable names for convenience.
+A space is a container for your uploads on the Storacha network, identified by a `did:key:` DID. Spaces can also have human-readable names for convenience.
 
 ## Usage
 

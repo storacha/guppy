@@ -2,8 +2,6 @@
 
 List blobs stored in a space.
 
-Displays all blobs as multibase base58btc encoded strings.
-
 **Aliases:** `list`, `ls`
 
 ## Usage
@@ -32,17 +30,17 @@ guppy blob list <space> [flags]
 List blobs:
 
 ```bash
-guppy blob list "my data"
+guppy blob list my-data
 ```
 
 List with sizes in human-readable format:
 
 ```bash
-guppy blob list "my data" --long --human
+guppy blob list my-data --long --human
 ```
 
 Output as JSON:
 
 ```bash
-guppy blob list "my data" --json
+guppy blob list my-data --json
 ```

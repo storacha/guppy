@@ -30,7 +30,7 @@ guppy delegation create <space> <audience-did> [flags]
 Delegate upload capability to another agent:
 
 ```bash
-guppy delegation create "my data" did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK \
+guppy delegation create my-data did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK \
   --can space/blob/add \
   --can space/index/add \
   --can filecoin/offer \

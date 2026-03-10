@@ -29,7 +29,7 @@ guppy login racha@storacha.network
 After logging in, create a space to store your data:
 
 ```bash
-guppy space generate --name "my data"
+guppy space generate --name my-data
 ```
 
 See [`guppy space generate`](space/generate.md) for details.

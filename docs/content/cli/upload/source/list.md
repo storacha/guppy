@@ -19,5 +19,5 @@ guppy upload source list <space>
 ## Example
 
 ```bash
-guppy upload source list "my data"
+guppy upload source list my-data
 ```

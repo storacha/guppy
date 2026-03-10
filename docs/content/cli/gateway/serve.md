@@ -41,7 +41,7 @@ guppy gateway serve --port 8080
 Serve a specific space:
 
 ```bash
-guppy gateway serve "my data" --port 3000
+guppy gateway serve my-data --port 3000
 ```
 
 Start with subdomain mode:

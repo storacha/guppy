@@ -20,5 +20,5 @@ guppy space provision <space> <email-address>
 ## Example
 
 ```bash
-guppy space provision "my data" billing@example.com
+guppy space provision my-data billing@example.com
 ```

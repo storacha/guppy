@@ -2,7 +2,7 @@
 
 Check upload integrity and completeness.
 
-Runs a comprehensive validation of your uploads with six check types:
+Runs a comprehensive validation of the local upload state with six check types:
 
 1. **Upload Scanned** - Verifies filesystem and DAG scans completed
 2. **File System Integrity** - Validates filesystem structure and DAG integrity
@@ -11,7 +11,9 @@ Runs a comprehensive validation of your uploads with six check types:
 5. **Shard Completeness** - Verifies all shards are uploaded and indexed
 6. **Index Completeness** - Verifies all indexes are uploaded
 
-By default, runs in dry-run mode and only reports issues. Use `--repair` to automatically fix problems.
+By default, runs in dry-run mode and only reports issues. Use `--repair` to automatically fix problems when possible.
+
+This is not a network operation. This check operation only looks at your local upload database to check and repair an upload which is not progressing properly.
 
 ## Usage
 
@@ -45,11 +47,11 @@ guppy upload check
 Check a specific space:
 
 ```bash
-guppy upload check "my data"
+guppy upload check my-data
 ```
 
 Check and repair:
 
 ```bash
-guppy upload check "my data" --repair
+guppy upload check my-data --repair
 ```
