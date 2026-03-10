@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"fmt"
 	"io"
 	"math/rand"
@@ -21,6 +19,7 @@ import (
 	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/encryption"
 )
 
 var log = logging.Logger("client/dagservice")
@@ -136,17 +135,10 @@ func (d decryptedBlock) String() string {
 }
 
 func decryptAES256CTRBlock(sk []byte, block blocks.Block) (blocks.Block, error) {
-	cipherblock, err := aes.NewCipher(sk)
+	data, err := encryption.DecryptAES256CTR(sk, block.RawData())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decrypting block: %w", err)
 	}
-	ciphertext := block.RawData()
-	// The IV needs to be unique, but not secure. Therefore it's common to
-	// include it at the beginning of the ciphertext.
-	iv := ciphertext[:aes.BlockSize]
-	data := make([]byte, len(ciphertext[aes.BlockSize:]))
-	stream := cipher.NewCTR(cipherblock, iv)
-	stream.XORKeyStream(data, ciphertext[aes.BlockSize:])
 	return decryptedBlock{cid: block.Cid(), data: data}, nil
 }
 

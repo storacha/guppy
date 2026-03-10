@@ -245,7 +245,7 @@ func TestExecuteUpload(t *testing.T) {
 		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
 		uploadSourcePath := t.TempDir()
-		api := preparation.NewAPI(
+		api, err := preparation.NewAPI(
 			repo,
 			c,
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
@@ -254,6 +254,7 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 			preparation.WithBlobUploadParallelism(1),
 		)
+		require.NoError(t, err)
 
 		upload := createUpload(t, t.Context(), uploadSourcePath, repo, space.DID(), api, 1<<16)
 
@@ -379,7 +380,7 @@ func TestExecuteUpload(t *testing.T) {
 		c := prepareTestClient(t, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
 		uploadSourcePath := t.TempDir()
-		api := preparation.NewAPI(
+		api, err := preparation.NewAPI(
 			repo,
 			c,
 			preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
@@ -388,6 +389,7 @@ func TestExecuteUpload(t *testing.T) {
 			}),
 			preparation.WithBlobUploadParallelism(1),
 		)
+		require.NoError(t, err)
 
 		upload := createUpload(t, t.Context(), uploadSourcePath, repo, space.DID(), api, 1<<16)
 
@@ -740,11 +742,12 @@ func BenchmarkExecuteUpload2GB(b *testing.B) {
 		var uploadAddCaps []ucan.Capability[uploadcap.AddCaveats]
 		c := prepareTestClient(b, space, putClient, &indexCaps, &replicateCaps, &offerCaps, &uploadAddCaps)
 
-		api := preparation.NewAPI(
+		api, err := preparation.NewAPI(
 			repo,
 			c,
 			preparation.WithBlobUploadParallelism(4),
 		)
+		require.NoError(b, err)
 
 		upload := createUpload(b, b.Context(), uploadSourcePath, repo, space.DID(), api, spacesmodel.DefaultShardSize)
 

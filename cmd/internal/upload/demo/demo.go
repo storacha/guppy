@@ -322,9 +322,12 @@ func Demo(ctx context.Context, repo *sqlrepo.Repo, spaceName string, alterMetada
 	if err != nil {
 		return fmt.Errorf("creating changing FS: %w", err)
 	}
-	api := preparation.NewAPI(repo, customPutClient, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
+	api, err := preparation.NewAPI(repo, customPutClient, preparation.WithGetLocalFSForPathFn(func(path string) (fs.FS, error) {
 		return fsys, nil
 	}))
+	if err != nil {
+		return fmt.Errorf("failed to create API: %w", err)
+	}
 
 	uploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 	if err != nil {

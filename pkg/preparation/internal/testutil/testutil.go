@@ -47,7 +47,7 @@ func AddNodeToUploadShardsWithData(t *testing.T, repo *sqlrepo.Repo, blobsApi bl
 
 	nodeCID := stestutil.RandomCID(t).(cidlink.Link).Cid
 	path := fmt.Sprintf("some/path/%s", nodeCID.String())
-	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, uploadID, path, sourceID, 0)
+	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, uploadID, path, sourceID, 0, nil)
 	require.NoError(t, err)
 	err = blobsApi.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, shardCB)
 	require.NoError(t, err)

@@ -230,7 +230,8 @@ func (r *Repo) nodeFinder(ctx context.Context) (nodeFinder, error) {
 			ufsdata,
 			path,
 			source_id,
-			"offset"
+			"offset",
+			meta
 		FROM nodes
 		WHERE cid = ?
 		AND space_did = ?
@@ -248,8 +249,8 @@ type RowScanner interface {
 }
 
 func (r *Repo) getNodeFromRow(scanner RowScanner) (model.Node, error) {
-	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-		return scanner.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset)
+	node, err := model.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64, meta *[]byte) error {
+		return scanner.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset, util.DbBytes(meta))
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -267,8 +268,8 @@ type nodeCreator struct {
 
 func (r *Repo) nodeCreator(ctx context.Context) (nodeCreator, error) {
 	stmt, err := r.prepareStmt(ctx, `
-			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, "offset")
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO nodes (cid, size, space_did, ufsdata, path, source_id, "offset", meta)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`)
 
 	if err != nil {
@@ -300,12 +301,12 @@ func (r *Repo) nodeCreator(ctx context.Context) (nodeCreator, error) {
 }
 
 func (n nodeCreator) Create(node model.Node, uploadID id.UploadID, tx *sql.Tx) error {
-	err := model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error {
+	err := model.WriteNodeToDatabase(func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64, meta []byte) error {
 		stmt := n.stmt
 		if tx != nil {
 			stmt = tx.StmtContext(n.ctx, stmt)
 		}
-		_, err := stmt.ExecContext(n.ctx, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset)
+		_, err := stmt.ExecContext(n.ctx, util.DbCID(&cid), size, util.DbDID(&spaceDID), util.DbBytes(&ufsdata), path, util.DbID(&sourceID), offset, util.DbBytes(&meta))
 		return err
 	}, node)
 	if err != nil {
@@ -344,7 +345,7 @@ func (n nodeCreator) Create(node model.Node, uploadID id.UploadID, tx *sql.Tx) e
 // FindOrCreateRawNode finds or creates a raw node in the repository.
 // If a node with the same CID, size, path, source ID, and offset already exists, it returns that node.
 // If not, it creates a new raw node with the provided parameters.
-func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error) {
+func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64, meta []byte) (*model.RawNode, bool, error) {
 	nf, err := r.nodeFinder(ctx)
 	if err != nil {
 		return nil, false, err
@@ -371,7 +372,7 @@ func (r *Repo) FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64
 		return nil, false, errors.New("found entry is not a raw node")
 	}
 
-	newNode, err := model.NewRawNode(cid, size, spaceDID, path, sourceID, offset)
+	newNode, err := model.NewRawNode(cid, size, spaceDID, path, sourceID, offset, meta)
 	if err != nil {
 		return nil, false, err
 	}

@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 
+	"github.com/google/uuid"
+	chunk "github.com/ipfs/boxo/chunker"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode/data/builder"
 	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -36,10 +40,64 @@ func init() {
 	builder.DefaultLinksPerBlock = DefaultLinksPerBlock
 }
 
+type config struct {
+	aes256CTRKey []byte
+}
+
+type Option func(cfg *config) error
+
+func WithAES256CTREncryptionKey(sk []byte) Option {
+	return func(cfg *config) error {
+		if len(sk) != 32 {
+			return fmt.Errorf("invalid key length: expected 32 bytes for AES-256, got %d", len(sk))
+		}
+		cfg.aes256CTRKey = sk
+		return nil
+	}
+}
+
 // API provides methods to interact with the DAG scans in the repository.
 type API struct {
-	Repo         Repo
-	FileAccessor FileAccessorFunc
+	Repo            Repo
+	FileAccessor    FileAccessorFunc
+	chunker         string
+	extractMetadata visitor.ExtractMetadataFunc
+}
+
+func New(repo Repo, fileAccessor FileAccessorFunc, options ...Option) (API, error) {
+	cfg := config{}
+	for _, opt := range options {
+		if err := opt(&cfg); err != nil {
+			return API{}, fmt.Errorf("applying option: %w", err)
+		}
+	}
+
+	chunker := fmt.Sprintf("size-%d", BlockSize)
+	var extractMetadata visitor.ExtractMetadataFunc
+
+	if cfg.aes256CTRKey != nil {
+		chunker = fmt.Sprintf("%x", uuid.New())
+		chunk.Register(chunker, func(r io.Reader, _ string) (chunk.Splitter, error) {
+			return NewAES256CTRSplitter(cfg.aes256CTRKey, r, BlockSize), nil
+		})
+		extractMetadata = func(node datamodel.Node, cid cid.Cid, data []byte) ([]byte, error) {
+			// For AES-256-CTR encrypted nodes, we want to store the IV as metadata so
+			// that we can decrypt the node later. The IV is the first 16 bytes of the
+			// encrypted data.
+			if len(data) < 16 {
+				return nil, fmt.Errorf("invalid encrypted data: too short to contain IV")
+			}
+			iv := data[:16]
+			return iv, nil
+		}
+	}
+
+	return API{
+		Repo:            repo,
+		FileAccessor:    fileAccessor,
+		chunker:         chunker,
+		extractMetadata: extractMetadata,
+	}, nil
 }
 
 // FileAccessorFunc is a function type that retrieves a file for a given fsEntryID.
@@ -138,9 +196,11 @@ func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan,
 	}
 	defer f.Close()
 	reader := visitor.ReaderPositionFromReader(f)
-	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, dagScan.SpaceDID(), dagScan.UploadID(), sourceID, path, reader, nodeCB)
+
+	visitor := visitor.NewUnixFSFileNodeVisitor(ctx, a.Repo, dagScan.SpaceDID(), dagScan.UploadID(), sourceID, path, reader, nodeCB, a.extractMetadata)
 	log.Debugf("Building UnixFS file with source ID %s and path %s", sourceID, path)
-	l, _, err := builder.BuildUnixFSFile(reader, fmt.Sprintf("aes-256-ctr-size-%d", BlockSize), visitor.LinkSystem())
+	fmt.Printf("Building UnixFS file with source ID %s and path %s\n", sourceID, path)
+	l, _, err := builder.BuildUnixFSFile(reader, a.chunker, visitor.LinkSystem())
 	if err != nil {
 		return cid.Undef, fmt.Errorf("building UnixFS file: %w", err)
 	}
