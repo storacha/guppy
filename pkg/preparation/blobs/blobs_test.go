@@ -433,7 +433,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 		// Create three closed shards
 		shard1, err := repo.CreateShard(t.Context(), upload.ID(), 0, nil, nil)
 		require.NoError(t, err)
-		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, upload.ID(), 0, nil)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, upload.ID(), 0)
 		require.NoError(t, err)
 		digest1, err := multihash.Encode([]byte("shard1"), multihash.IDENTITY)
 		require.NoError(t, err)
@@ -444,7 +444,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 
 		shard2, err := repo.CreateShard(t.Context(), upload.ID(), 0, nil, nil)
 		require.NoError(t, err)
-		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, upload.ID(), 0, nil)
+		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, upload.ID(), 0)
 		require.NoError(t, err)
 		digest2, err := multihash.Encode([]byte("shard2"), multihash.IDENTITY)
 		require.NoError(t, err)
@@ -455,7 +455,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 
 		shard3, err := repo.CreateShard(t.Context(), upload.ID(), 0, nil, nil)
 		require.NoError(t, err)
-		err = repo.AddNodeToShard(t.Context(), shard3.ID(), nodeCID3, spaceDID, upload.ID(), 0, nil)
+		err = repo.AddNodeToShard(t.Context(), shard3.ID(), nodeCID3, spaceDID, upload.ID(), 0)
 		require.NoError(t, err)
 		digest3, err := multihash.Encode([]byte("shard3"), multihash.IDENTITY)
 		require.NoError(t, err)
@@ -532,7 +532,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 
 			shard, err := repo.CreateShard(t.Context(), upload.ID(), 0, nil, nil)
 			require.NoError(t, err)
-			err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID, spaceDID, upload.ID(), 0, nil)
+			err = repo.AddNodeToShard(t.Context(), shard.ID(), nodeCID, spaceDID, upload.ID(), 0)
 			require.NoError(t, err)
 			// Re-fetch shard to get updated slice_count after AddNodeToShard
 			shard, err = repo.GetShardByID(t.Context(), shard.ID())
@@ -587,7 +587,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 
 		shard1, err := repo.CreateShard(t.Context(), upload1.ID(), 0, nil, nil)
 		require.NoError(t, err)
-		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, upload1.ID(), 0, nil)
+		err = repo.AddNodeToShard(t.Context(), shard1.ID(), nodeCID1, spaceDID, upload1.ID(), 0)
 		require.NoError(t, err)
 		digest1, err := multihash.Encode([]byte("shard1"), multihash.IDENTITY)
 		require.NoError(t, err)
@@ -600,7 +600,7 @@ func TestAddShardsToUploadIndexes(t *testing.T) {
 		require.NoError(t, err)
 		shard2, err := repo.CreateShard(t.Context(), upload2.ID(), 0, nil, nil)
 		require.NoError(t, err)
-		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, upload2.ID(), 0, nil)
+		err = repo.AddNodeToShard(t.Context(), shard2.ID(), nodeCID2, spaceDID, upload2.ID(), 0)
 		require.NoError(t, err)
 		digest2, err := multihash.Encode([]byte("shard2"), multihash.IDENTITY)
 		require.NoError(t, err)
