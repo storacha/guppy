@@ -54,17 +54,17 @@ func TestFindOrCreateRawNode(t *testing.T) {
 		cid1 := testutil.RandomCID(t)
 		cid2 := testutil.RandomCID(t)
 
-		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0)
+		rawNode, created, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0, nil)
 		require.NoError(t, err)
 		require.True(t, created)
 		require.NotNil(t, rawNode)
 
-		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0)
+		rawNode2, created2, err := repo.FindOrCreateRawNode(t.Context(), cid1.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path1", sourceId, 0, nil)
 		require.NoError(t, err)
 		require.False(t, created2)
 		require.Equal(t, rawNode, rawNode2)
 
-		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path2", sourceId, 0)
+		rawNode3, created3, err := repo.FindOrCreateRawNode(t.Context(), cid2.(cidlink.Link).Cid, 16, spaceDID, uploadID, "some/path2", sourceId, 0, nil)
 		require.NoError(t, err)
 		require.True(t, created3)
 		require.NotEqual(t, rawNode.CID(), rawNode3.CID())

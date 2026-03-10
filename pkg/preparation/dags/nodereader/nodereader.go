@@ -17,7 +17,9 @@ import (
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/encryption"
 	"github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/dags/nodemeta"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -35,10 +37,11 @@ const (
 type LinksForCIDFunc func(ctx context.Context, cid cid.Cid, spaceDID did.DID) ([]*model.Link, error)
 
 type NodeReaderOpener struct {
-	linksForCID LinksForCIDFunc
-	checkReads  bool
-	dataCache   *lru.Cache[cid.Cid, []byte]
-	fileOpener  FileOpenerFn
+	linksForCID  LinksForCIDFunc
+	checkReads   bool
+	dataCache    *lru.Cache[cid.Cid, []byte]
+	fileOpener   FileOpenerFn
+	aes256CTRKey []byte
 }
 
 type NodeReader interface {
@@ -58,16 +61,40 @@ type cachedFile struct {
 	file fs.File
 }
 
-func NewNodeReaderOpener(linksForCid LinksForCIDFunc, fileOpener FileOpenerFn, checkReads bool) (*NodeReaderOpener, error) {
+type config struct {
+	aes256CTRKey []byte
+}
+
+type Option func(cfg *config) error
+
+func WithAES256CTREncryptionKey(sk []byte) Option {
+	return func(cfg *config) error {
+		if len(sk) != 32 {
+			return fmt.Errorf("invalid key length: expected 32 bytes for AES-256, got %d", len(sk))
+		}
+		cfg.aes256CTRKey = sk
+		return nil
+	}
+}
+
+func NewNodeReaderOpener(linksForCid LinksForCIDFunc, fileOpener FileOpenerFn, checkReads bool, options ...Option) (*NodeReaderOpener, error) {
+	cfg := config{}
+	for _, opt := range options {
+		if err := opt(&cfg); err != nil {
+			return nil, err
+		}
+	}
+
 	dataCache, err := lru.New[cid.Cid, []byte](DataCacheSize)
 	if err != nil {
 		return nil, err
 	}
 	return &NodeReaderOpener{
-		linksForCID: linksForCid,
-		checkReads:  checkReads,
-		dataCache:   dataCache,
-		fileOpener:  fileOpener,
+		linksForCID:  linksForCid,
+		checkReads:   checkReads,
+		dataCache:    dataCache,
+		fileOpener:   fileOpener,
+		aes256CTRKey: cfg.aes256CTRKey,
 	}, nil
 }
 
@@ -122,14 +149,14 @@ func (nr *nodeReader) GetData(ctx context.Context, node model.Node) ([]byte, err
 	}
 	if nr.checkReads {
 		if len(data) != int(node.Size()) {
-			return nil, fs.ErrInvalid
+			return nil, fmt.Errorf("invalid node data size: %w", fs.ErrInvalid)
 		}
 		foundCID, err := node.CID().Prefix().Sum(data)
 		if err != nil {
 			return nil, err
 		}
 		if !foundCID.Equals(node.CID()) {
-			return nil, fs.ErrInvalid
+			return nil, fmt.Errorf("node integrity check failure: %w", fs.ErrInvalid)
 		}
 	}
 	nr.dataCache.Add(node.CID(), data)
@@ -162,10 +189,30 @@ func (nr *nodeReader) getRawNodeData(ctx context.Context, node *model.RawNode) (
 	if _, err := seeker.Seek(int64(node.Offset()), io.SeekStart); err != nil {
 		return nil, err
 	}
-	data := make([]byte, node.Size())
-	if _, err := io.ReadFull(seeker, data); err != nil {
-		return nil, err
+
+	var data []byte
+	if nr.aes256CTRKey != nil {
+		meta, err := nodemeta.Decode[*nodemeta.AES256CTRMeta](node.Meta())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode AES-256-CTR metadata for node %s: %w", node.CID(), err)
+		}
+		// if node is encrypted with aes-256-ctr, we need to account for the 16 byte
+		// IV prefix on each chunk
+		data = make([]byte, int(node.Size())-len(meta.Value.IV))
+		if _, err := io.ReadFull(seeker, data); err != nil {
+			return nil, err
+		}
+		data, _, err = encryption.EncryptAES256CTR(nr.aes256CTRKey, data, encryption.WithIV(meta.Value.IV))
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt data for node %s: %w", node.CID(), err)
+		}
+	} else {
+		data = make([]byte, node.Size())
+		if _, err := io.ReadFull(seeker, data); err != nil {
+			return nil, err
+		}
 	}
+
 	return data, nil
 }
 

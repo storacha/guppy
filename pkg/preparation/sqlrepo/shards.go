@@ -341,7 +341,7 @@ func (r *Repo) AddNodeToShard(ctx context.Context, shardID id.ShardID, nodeCID c
 
 func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error) {
 	stmt, err := r.prepareStmt(ctx, `
-		SELECT cid, size, space_did, ufsdata, path, source_id, "offset"
+		SELECT cid, size, space_did, ufsdata, path, source_id, "offset", meta
 		FROM nodes
 		WHERE cid = ?
 		  AND space_did = ?
@@ -362,7 +362,8 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 				nodes.ufsdata,
 				nodes.path,
 				nodes.source_id,
-				nodes."offset"
+				nodes."offset",
+				nodes.meta
 			FROM node_uploads
 			JOIN nodes ON nodes.cid = node_uploads.node_cid
 			AND nodes.space_did = node_uploads.space_did
@@ -380,8 +381,8 @@ func (r *Repo) NodesByShard(ctx context.Context, shardID id.ShardID, startOffset
 
 	var nodes []dagsmodel.Node
 	for rows.Next() {
-		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset)
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64, meta *[]byte) error {
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset, util.DbBytes(meta))
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -404,6 +405,7 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 			nodes.path,
 			nodes.source_id,
 			nodes."offset",
+			nodes.meta,
 			node_uploads.shard_offset
 		FROM node_uploads
 		JOIN nodes ON nodes.cid = node_uploads.node_cid
@@ -420,8 +422,8 @@ func (r *Repo) ForEachNode(ctx context.Context, shardID id.ShardID, yield func(n
 
 	for rows.Next() {
 		var shardOffset uint64
-		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error {
-			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, sourceID, offset, &shardOffset)
+		node, err := dagsmodel.ReadNodeFromDatabase(func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64, meta *[]byte) error {
+			return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, util.DbID(sourceID), offset, util.DbBytes(meta), &shardOffset)
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil

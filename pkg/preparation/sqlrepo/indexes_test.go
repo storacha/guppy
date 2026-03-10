@@ -29,11 +29,11 @@ func TestShardsNotInIndexes(t *testing.T) {
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 100, spaceDID, uploadID, "dir/file3", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 100, spaceDID, uploadID, "dir/file3", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create three shards
@@ -105,9 +105,9 @@ func TestShardsNotInIndexes(t *testing.T) {
 		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create one closed shard
@@ -144,7 +144,7 @@ func TestShardsNotInIndexes(t *testing.T) {
 
 		// Create a node
 		nodeCID := testutil.RandomCID(t).(cidlink.Link).Cid
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID, 100, spaceDID, uploadID, "dir/file", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID, 100, spaceDID, uploadID, "dir/file", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create and close a shard
@@ -185,9 +185,9 @@ func TestShardsNotInIndexes(t *testing.T) {
 		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID1, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID1, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID2, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID2, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create and close shards for different uploads
@@ -240,13 +240,13 @@ func TestForEachNodeInIndex(t *testing.T) {
 		nodeCID3 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID4 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 300, spaceDID, uploadID, "dir/file3", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 300, spaceDID, uploadID, "dir/file3", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID4, 400, spaceDID, uploadID, "dir/file4", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID4, 400, spaceDID, uploadID, "dir/file4", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create shard1 with nodes 1 and 2 (offset=0 for simplicity)
@@ -359,9 +359,9 @@ func TestForEachNodeInIndex(t *testing.T) {
 		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create shard1 with node1
@@ -432,9 +432,9 @@ func TestForEachNodeInIndex(t *testing.T) {
 		nodeCID1 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 200, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// Create shard1 with node1

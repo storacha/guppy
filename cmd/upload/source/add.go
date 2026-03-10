@@ -73,7 +73,10 @@ var AddCmd = &cobra.Command{
 			return err
 		}
 
-		api := preparation.NewAPI(repo, client)
+		api, err := preparation.NewAPI(repo, client)
+		if err != nil {
+			return fmt.Errorf("failed to create API: %w", err)
+		}
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption

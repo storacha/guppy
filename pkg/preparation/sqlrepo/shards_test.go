@@ -24,7 +24,7 @@ func TestAddNodeToShard(t *testing.T) {
 	uploadID := id.New()
 
 	makeRawNodeWithSize := func(size uint64) dagsmodel.Node {
-		node, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, size, spaceDID, uploadID, "dir/file", id.New(), 0)
+		node, _, err := repo.FindOrCreateRawNode(t.Context(), testutil.RandomCID(t).(cidlink.Link).Cid, size, spaceDID, uploadID, "dir/file", id.New(), 0, nil)
 		require.NoError(t, err)
 		return node
 	}
@@ -93,11 +93,11 @@ func TestNodesNotInShards(t *testing.T) {
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 		nodeCID3 := testutil.RandomCID(t).(cidlink.Link).Cid
 
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 100, spaceDID, uploadID, "dir/file3", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID3, 100, spaceDID, uploadID, "dir/file3", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// All three should be returned as not in shards
@@ -129,7 +129,7 @@ func TestNodesNotInShards(t *testing.T) {
 		nodeCID := testutil.RandomCID(t).(cidlink.Link).Cid
 
 		// Create node and node_upload
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID, 100, spaceDID, uploadID, "dir/file", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID, 100, spaceDID, uploadID, "dir/file", id.New(), 0, nil)
 		require.NoError(t, err)
 		// Assign to shard
 		shard, err := repo.CreateShard(t.Context(), uploadID, 0, nil, nil)
@@ -156,9 +156,9 @@ func TestNodesNotInShards(t *testing.T) {
 		nodeCID2 := testutil.RandomCID(t).(cidlink.Link).Cid
 
 		// Create nodes
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID1, "dir/file1", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID1, 100, spaceDID, uploadID1, "dir/file1", id.New(), 0, nil)
 		require.NoError(t, err)
-		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID2, "dir/file2", id.New(), 0)
+		_, _, err = repo.FindOrCreateRawNode(t.Context(), nodeCID2, 100, spaceDID, uploadID2, "dir/file2", id.New(), 0, nil)
 		require.NoError(t, err)
 
 		// NodesNotInShards for upload1 should only return nodeCID1
