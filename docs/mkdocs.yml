@@ -40,6 +40,7 @@ extra_css:
 
 nav:
   - Getting Started: index.md
+  - Configuration: configuration.md
   - CLI Reference:
       - cli/index.md
       - login: cli/login.md

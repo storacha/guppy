@@ -141,20 +141,9 @@ This starts an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/) tha
 
 ## Configuration
 
-Guppy can be configured through three layers (in order of precedence):
-
-1. CLI flags
-2. Environment variables (e.g., `GUPPY_GATEWAY_PORT=8080`)
-3. TOML Config file
-
-Config files are loaded from these locations (in order of precedence):
-
-1. Path specified with `--config`
-2. `~/.config/guppy/config.toml`
-3. `./config.toml` (current directory)
-
-Available networks: `forge`, `hot`, `warm-staging`.
+Guppy can be configured through CLI flags, environment variables (prefixed with `GUPPY_`), and a TOML config file. See [Configuration](configuration.md) for the full reference, including all available config keys, network presets, and the complete config file syntax.
 
 ## What's Next
 
+- [Configuration](configuration.md) — Config file reference, environment variables, and network presets
 - [CLI Reference](cli/index.md) — Complete documentation for all commands and flags
