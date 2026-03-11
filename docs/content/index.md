@@ -79,43 +79,19 @@ These stages form a pipeline, so as soon as a file is discovered, it will be bro
 
 All progress is tracked in a local SQLite database. If the process is interrupted at any stage, just run the `upload` command on the space again to resume.
 
-### Catching changed sources
+### Resuming uploads
 
-By default, when resuming, `upload` will scan the entire source again, in case any files have changed. The result will be a complete, consistent snapshot of the source. Any work that was in progress in later stages will continue, but the upload will not complete until the re-scan has confirmed that nothing has changed.
+Running `upload` on a space with a source which has been partially uploaded resumes the upload process from where it left off.
 
-If you know the source data hasn't changed, you can use `--assume-unchanged-sources`. This will skip scanning files and directories which have been scanned before, so interrupted filesystem scans will resume rather than restart, and completed filesystem scans will not be repeated.
+By default, when resuming, `upload` will scan the entire source again, in case any files have changed between runs. This happens in parallel with resuming any other in-progress work, so other work does not have to wait for the scan to complete before it can begin, but the entire upload process can't complete until the scan has completed and `guppy` is satisfied that the current state of the source is what it has uploaded to the network.
+
+If you know the source data hasn't changed, you can use `--assume-unchanged-sources`. This will skip scanning files and directories which have been scanned before, so interrupted filesystem scans will resume rather than restart, and completed filesystem scans will not be repeated. For large sources, especially with many individual files, this is much faster than a full rescan.
 
 ```bash
 guppy upload my-data --assume-unchanged-sources
 ```
 
-Guppy will also verify during upload that the data it's sending is what was scanned and hashed originally. If something's become inconsistent, those files will be marked as un-scanned, and resuming the upload will perform a new scan on them. You can also use `--retry` to automatically retry the upload after hitting such an issue.
-
-### Repairing bad states
-
-If the database does get into an incorrect state for some reason, or if you're ever concerned it has, you can check the local upload records to make sure they're consistent:
-
-```bash
-guppy upload check
-```
-
-## Step 5: Verify
-
-After uploading, you can verify your data is complete and correctly stored:
-
-```bash
-guppy verify <root-cid>
-```
-
-Note that this requires reading the data from your space, which will incur egress charges. `<root-cid>` is the CID of the root of the DAG to verify, which can be the root of the entire upload or of some file or directory within the upload, which will verify from there down.
-
-You can list your uploads to see their root CIDs:
-
-```bash
-guppy ls my-data
-```
-
-## Step 6: Retrieve
+## Step 5: Retrieve
 
 Retrieve content from the network:
 

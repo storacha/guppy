@@ -81,3 +81,4 @@ nav:
       - unixfs:
           - cli/unixfs/index.md
           - ls: cli/unixfs/ls.md
+  - Troubleshooting: troubleshooting.md
