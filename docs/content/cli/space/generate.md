@@ -6,6 +6,8 @@ Creates a new space, provisions it to your logged-in account (for billing), and 
 
 If you are logged into multiple accounts, use `--grant-to` and `--provision-to` to specify which account to use for each.
 
+Spaces can always be referred to in other commands by their full DID. They can also be referred to by their name, if set with `--name`.
+
 ## Prerequisites
 
 You must be logged in with [`guppy login`](../login.md) before generating a space.
@@ -36,8 +38,8 @@ guppy space generate --name my-data
 Add a source and start uploading:
 
 ```bash
-guppy upload source add <space> /path/to/data
-guppy upload <space>
+guppy upload source add my-data /path/to/data
+guppy upload my-data
 ```
 
 See [`guppy upload`](../upload/index.md) for details.
