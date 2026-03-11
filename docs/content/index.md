@@ -113,7 +113,7 @@ To provide HTTP access, you can run a local IPFS Gateway:
 guppy gateway serve --port 3000
 ```
 
-This starts an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/) that serves content from your spaces. Access it at `http://localhost:3000/ipfs/<cid>`. Provide a space name or DID to limit the gateway to that space.
+This starts an [IPFS Gateway](https://docs.ipfs.tech/concepts/ipfs-gateway/) that serves content from your spaces. Access it at `http://localhost:3000/ipfs/<cid>`. Provide a space name or DID to limit the gateway to that space. The gateway is suitable for using locally or exposing to the public internet. When making it publicly available, we recommend placing it behind a TLS endpoint and serving HTTPS.
 
 ## Configuration
 
