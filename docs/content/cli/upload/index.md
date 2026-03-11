@@ -78,17 +78,3 @@ Manage upload sources (local paths associated with a space).
 ### [check](check.md)
 
 Check upload integrity and completeness.
-
-## What's Next
-
-After uploading, verify your data:
-
-```bash
-guppy verify <root-cid>
-```
-
-Or list your uploads:
-
-```bash
-guppy ls <space>
-```

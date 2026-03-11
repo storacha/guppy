@@ -32,14 +32,3 @@ guppy space generate [flags]
 ```bash
 guppy space generate --name my-data
 ```
-
-## What's Next
-
-Add a source and start uploading:
-
-```bash
-guppy upload source add my-data /path/to/data
-guppy upload my-data
-```
-
-See [`guppy upload`](../upload/index.md) for details.

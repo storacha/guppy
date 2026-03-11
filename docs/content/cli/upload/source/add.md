@@ -37,13 +37,3 @@ Add with a custom name and shard size:
 ```bash
 guppy upload source add my-data /path/to/dataset --name "photos" --shard-size 50M
 ```
-
-## What's Next
-
-Start the upload:
-
-```bash
-guppy upload my-data
-```
-
-See [`guppy upload`](../index.md) for details.

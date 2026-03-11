@@ -23,13 +23,3 @@ guppy login <email-address>
 ```bash
 guppy login racha@storacha.network
 ```
-
-## What's Next
-
-After logging in, create a space to store your data:
-
-```bash
-guppy space generate --name my-data
-```
-
-See [`guppy space generate`](space/generate.md) for details.

@@ -23,11 +23,3 @@ Add a delegation from a file:
 ```bash
 guppy proof add delegation.car
 ```
-
-## What's Next
-
-Once you have a proof for a space, you can upload to it:
-
-```bash
-guppy upload <space>
-```
