@@ -1,6 +1,6 @@
 # Getting Started with Guppy
 
-Guppy is a Go client and CLI for the [Storacha network](https://storacha.network), built for enterprise-scale, resumable uploads with parallel processing.
+Guppy is a Go client and CLI for the [Storacha](https://storacha.network)'s Forge network, built for enterprise-scale, resumable uploads with parallel processing.
 
 Unlike simple upload tools, Guppy is designed for large datasets that may take hours or days to upload. It tracks progress locally, so interrupted uploads resume exactly where they left off. Data is prepared and uploaded in parallel, which maximizes throughput and allows the data to start uploading early, before the full scan is complete.
 
