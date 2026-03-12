@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -291,6 +292,17 @@ var serveCmd = &cobra.Command{
 			e.GET("/routing/v1/providers/*", routingHandler)
 			e.GET("/routing/v1/peers/*", routingHandler)
 		}
+
+		// shut down the server gracefully on context cancellation
+		go func() {
+			<-cmd.Context().Done()
+			cmd.Println("\nShutting down server...")
+			ctx, cancel := context.WithTimeout(cmd.Context(), time.Second*5)
+			defer cancel()
+			if err := e.Shutdown(ctx); err != nil {
+				cmd.PrintErrf("shutting down server: %s", err.Error())
+			}
+		}()
 
 		// print banner after short delay to ensure it only appears if no errors
 		// occurred during startup
