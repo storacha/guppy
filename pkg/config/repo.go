@@ -7,8 +7,9 @@ import (
 )
 
 type RepoConfig struct {
-	Dir         string `mapstructure:"data_dir"`
-	DatabaseURL string `mapstructure:"database_url"`
+	Dir            string `mapstructure:"data_dir"`
+	DatabaseURL    string `mapstructure:"database_url"`
+	DatabaseSchema string `mapstructure:"database_schema"`
 }
 
 func (r RepoConfig) Validate() error {

@@ -41,6 +41,13 @@ func init() {
 	)
 	cobra.CheckErr(viper.BindPFlag("repo.database_url", Cmd.PersistentFlags().Lookup("database-url")))
 
+	Cmd.PersistentFlags().String(
+		"pg-schema-name",
+		"",
+		"PostgreSQL schema name to use (e.g., guppy). If set, tables are created in this schema instead of the default. The schema is created if it does not exist.",
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.database_schema", Cmd.PersistentFlags().Lookup("pg-schema-name")))
+
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
