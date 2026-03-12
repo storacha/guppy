@@ -10,6 +10,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/cmd/upload/check"
@@ -33,6 +34,20 @@ var rootFlags struct {
 }
 
 func init() {
+	Cmd.PersistentFlags().String(
+		"database-url",
+		"",
+		"PostgreSQL connection URL (e.g., postgres://user:pass@host:5432/dbname). If set, uses PostgreSQL instead of SQLite.",
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.database_url", Cmd.PersistentFlags().Lookup("database-url")))
+
+	Cmd.PersistentFlags().String(
+		"pg-schema-name",
+		"",
+		"PostgreSQL schema name to use (e.g., guppy). If set, tables are created in this schema instead of the default. The schema is created if it does not exist.",
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.database_schema", Cmd.PersistentFlags().Lookup("pg-schema-name")))
+
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")

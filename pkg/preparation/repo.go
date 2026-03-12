@@ -28,7 +28,10 @@ const (
 // If cfg.IsPostgres(), it connects to PostgreSQL; otherwise it uses SQLite.
 func OpenRepo(ctx context.Context, cfg appconfig.RepoConfig, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
 	if cfg.IsPostgres() {
-		return openPostgresRepo(ctx, cfg.DatabaseURL, opts...)
+		return openPostgresRepo(ctx, cfg.DatabaseURL, cfg.DatabaseSchema, opts...)
+	}
+	if cfg.DatabaseSchema != "" {
+		return nil, fmt.Errorf("--pg-schema-name requires a PostgreSQL database (--database-url)")
 	}
 	return openSQLiteRepo(ctx, cfg.DatabasePath(), opts...)
 }
@@ -63,7 +66,14 @@ func openSQLiteRepo(ctx context.Context, dbPath string, opts ...sqlrepo.Option) 
 	return repo, nil
 }
 
-func openPostgresRepo(ctx context.Context, connURL string, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
+func openPostgresRepo(ctx context.Context, connURL string, schema string, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
+	if schema != "" {
+		if err := ensurePostgresSchema(ctx, connURL, schema); err != nil {
+			return nil, err
+		}
+		connURL = setConnSearchPath(connURL, schema)
+	}
+
 	db, err := sql.Open("postgres", connURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
@@ -91,6 +101,31 @@ func openPostgresRepo(ctx context.Context, connURL string, opts ...sqlrepo.Optio
 	}
 
 	return repo, nil
+}
+
+// ensurePostgresSchema creates the given schema if it does not exist, using a
+// temporary connection that is closed immediately afterward.
+func ensurePostgresSchema(ctx context.Context, connURL string, schema string) error {
+	db, err := sql.Open("postgres", connURL)
+	if err != nil {
+		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
+	}
+	defer db.Close()
+
+	quoted := pq.QuoteIdentifier(schema)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted)); err != nil {
+		return fmt.Errorf("failed to create PostgreSQL schema %q: %w", schema, err)
+	}
+	return nil
+}
+
+// setConnSearchPath appends a search_path parameter to a PostgreSQL connection
+// URL so that every connection in the pool uses the given schema.
+func setConnSearchPath(connURL string, schema string) string {
+	if strings.Contains(connURL, "?") {
+		return connURL + "&search_path=" + schema
+	}
+	return connURL + "?search_path=" + schema
 }
 
 func migrate(ctx context.Context, db *sql.DB, dialect sqlrepo.Dialect) error {
