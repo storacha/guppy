@@ -17,6 +17,11 @@ var (
 	forgeReceiptsURL, _       = url.Parse("https://up.forge.storacha.network/receipt/")
 	forgeUploadID, _          = did.Parse("did:web:up.forge.storacha.network")
 	forgeUploadURL, _         = url.Parse("https://up.forge.storacha.network")
+	forgeTestIndexerID, _     = did.Parse("did:web:indexer.test.storacha.network")
+	forgeTestIndexerURL, _    = url.Parse("https://indexer.test.storacha.network")
+	forgeTestReceiptsURL, _   = url.Parse("https://up.test.storacha.network/receipt/")
+	forgeTestUploadID, _      = did.Parse("did:web:up.test.storacha.network")
+	forgeTestUploadURL, _     = url.Parse("https://up.test.storacha.network")
 	hotIndexerID, _           = did.Parse("did:web:indexer.storacha.network")
 	hotIndexerURL, _          = url.Parse("https://indexer.storacha.network")
 	hotReceiptsURL, _         = url.Parse("https://up.storacha.network/receipt/")
@@ -48,6 +53,15 @@ var Networks = []NetworkConfig{
 		ReceiptsURL:          *forgeReceiptsURL,
 		IndexerID:            forgeIndexerID,
 		IndexerURL:           *forgeIndexerURL,
+		AuthorizedRetrievals: true,
+	},
+	{
+		Name:                 "forge-test",
+		UploadID:             forgeTestUploadID,
+		UploadURL:            *forgeTestUploadURL,
+		ReceiptsURL:          *forgeTestReceiptsURL,
+		IndexerID:            forgeTestIndexerID,
+		IndexerURL:           *forgeTestIndexerURL,
 		AuthorizedRetrievals: true,
 	},
 	{

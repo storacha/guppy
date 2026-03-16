@@ -78,7 +78,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("ui", false, "Use the guppy UI")
 
 	// Network configuration flags
-	rootCmd.PersistentFlags().StringP("network", "n", "", "Network preset name (forge, hot, warm-staging)")
+	rootCmd.PersistentFlags().StringP("network", "n", "", "Network preset name (forge, forge-test, hot, warm-staging)")
 	cobra.CheckErr(viper.BindPFlag("network.name", rootCmd.PersistentFlags().Lookup("network")))
 
 	rootCmd.PersistentFlags().String("upload-service-did", "", "Upload service DID (overrides network preset)")
