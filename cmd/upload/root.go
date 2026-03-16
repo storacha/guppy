@@ -37,16 +37,9 @@ func init() {
 	Cmd.PersistentFlags().String(
 		"database-url",
 		"",
-		"PostgreSQL connection URL (e.g., postgres://user:pass@host:5432/dbname). If set, uses PostgreSQL instead of SQLite.",
+		wordwrap.WrapString("PostgreSQL connection URL (e.g., postgres://user:pass@host:5432/dbname). If set, uses PostgreSQL instead of SQLite. If search_path is set to a schema name (e.g., postgres://user:pass@host:5432/dbname?search_path=guppy), the specified schema will be used, and will be created if it does not exist.", 60),
 	)
 	cobra.CheckErr(viper.BindPFlag("repo.database_url", Cmd.PersistentFlags().Lookup("database-url")))
-
-	Cmd.PersistentFlags().String(
-		"pg-schema-name",
-		"",
-		"PostgreSQL schema name to use (e.g., guppy). If set, tables are created in this schema instead of the default. The schema is created if it does not exist.",
-	)
-	cobra.CheckErr(viper.BindPFlag("repo.database_schema", Cmd.PersistentFlags().Lookup("pg-schema-name")))
 
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
