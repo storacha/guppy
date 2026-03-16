@@ -9,6 +9,7 @@
 #                         include a database name (e.g., postgres://localhost/mydb)
 #                         or omit it (e.g., postgres://localhost), in which case a
 #                         temporary database is created and dropped on exit.
+#                         To use a specific schema, add ?search_path=<name> to the URL.
 #
 # The test will:
 # 1. Create a temporary email inbox using maildrop.cc
@@ -70,18 +71,19 @@ if [[ -n "$database_url" ]]; then
 		created_db_name="guppy_test_$(head -c 8 < /dev/urandom | xxd -p)"
 		# Strip trailing slash from base
 		url_base="${url_base%/}"
-		# Connect to the default 'postgres' database to create ours
-		psql "${url_base}/postgres${url_query}" -c "CREATE DATABASE ${created_db_name};" >/dev/null
+
+		# We need to connect to the "postgres" database to create a new database. We
+		# also need to strip out parameters that Go's adapter understands but psql
+		# doesn't, namely `search_path`. Conveniently, we also don't need to set a
+		# search_path for this operation.
+		psql_query=$(echo "$url_query" | sed 's/[?&]search_path=[^&]*//' | sed 's/^&/?/')
+		postgres_db_url="${url_base}/postgres${psql_query}"
+
+		psql "$postgres_db_url" -c "CREATE DATABASE ${created_db_name};" >/dev/null
 		database_url="${url_base}/${created_db_name}${url_query}"
 		echo "Created temporary database: ${created_db_name}"
 	fi
 fi
-
-export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
-export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
-export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
-export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
-export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
 
 # Check for dependencies
 if ! command -v jq &> /dev/null; then
@@ -102,13 +104,21 @@ exec 3>&1
 
 sandbox="doupload-dir"
 
-# Function wrapper to properly invoke guppy with word splitting
+export GUPPY_REPO_DATA_DIR=./$sandbox/storacha 
+
+# Configure guppy
+if [[ -n "$database_url" ]]; then
+	export GUPPY_REPO_DATABASE_URL="$database_url"
+fi
+
+export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
+export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
+export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
+
 guppy() {
-	local db_args=()
-	if [[ -n "$database_url" ]]; then
-		db_args+=(--database-url "$database_url")
-	fi
-	go run .. --data-dir ./$sandbox/storacha "${db_args[@]}" "$@"
+	go run .. "$@"
 }
 
 dataDir="$sandbox/data"
@@ -141,14 +151,7 @@ cleanup() {
 	# Drop temporary database if we created one
 	if [[ -n "$created_db_name" ]]; then
 		echo "Dropping temporary database: ${created_db_name}"
-		local drop_url_base="${database_url%%\?*}"
-		drop_url_base="${drop_url_base%/${created_db_name}}"
-		local drop_url_query=""
-		if [[ "$database_url" == *"?"* ]]; then
-			drop_url_query="?${database_url#*\?}"
-		fi
-		psql "${drop_url_base}/postgres${drop_url_query}" -c "DROP DATABASE IF EXISTS ${created_db_name};" >/dev/null 2>&1 || true
-		
+		psql "$postgres_db_url" -c "DROP DATABASE IF EXISTS ${created_db_name};" >/dev/null 2>&1 || true
 	fi
 }
 
