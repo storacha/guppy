@@ -202,6 +202,16 @@ main () {
 	rootCID=$(guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
 
 	echo
+	echo "🧐 Checking local upload state"
+	guppy upload check "$space"
+	echo "✅ Upload state passed checks!"
+
+	echo
+	echo "🕵 Verifying uploaded data is accessible and consistent"
+	guppy verify "$rootCID"
+	echo "✅ Uploaded data verified!"
+
+	echo
 	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
 	guppy retrieve "$space" "$rootCID" "$outDir1"
 
@@ -229,7 +239,7 @@ main () {
 	diff -r "$dataDir" "$outDir1"
 	diff -r "$dataDir/small-files" "$outDir2"
 	diff -r "$dataDir" "$outDir3"
-	echo "✅ Data verified!"
+	echo "✅ Retrieval verified!"
 
 	jq -n \
 		--arg account "$account" \
