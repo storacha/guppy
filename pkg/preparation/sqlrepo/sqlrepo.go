@@ -3,6 +3,7 @@ package sqlrepo
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -76,6 +77,7 @@ type Repo struct {
 	dialect        Dialect
 	bus            bus.Publisher
 	preparedStmts  *lru.Cache[string, *sql.Stmt]
+	prepareMu      sync.Mutex // protects prepareStmt check-and-prepare
 	checkpointStop chan struct{}
 }
 
@@ -126,6 +128,9 @@ func (r *Repo) StartPeriodicCheckpoint(ctx context.Context, interval time.Durati
 }
 
 func (r *Repo) prepareStmt(ctx context.Context, query string) (*sql.Stmt, error) {
+	r.prepareMu.Lock()
+	defer r.prepareMu.Unlock()
+
 	if stmt, ok := r.preparedStmts.Get(query); ok {
 		return stmt, nil
 	}
