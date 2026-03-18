@@ -26,11 +26,6 @@ import (
 	"github.com/storacha/guppy/pkg/dagfs"
 )
 
-func init() {
-	retrieveCmd.Flags().StringP("network", "n", "", "Network to retrieve content from.")
-	retrieveCmd.Flags().MarkHidden("network")
-}
-
 var retrieveCmd = &cobra.Command{
 	Use:     "retrieve <space> <content-path> <output-path>",
 	Aliases: []string{"get"},
@@ -85,8 +80,7 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
-		networkName, _ := cmd.Flags().GetString("network")
-		network := cmdutil.MustGetNetworkConfig(cfg.Network, networkName)
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
 		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
 		if err != nil {
 			return err
