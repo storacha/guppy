@@ -2,9 +2,6 @@ module github.com/storacha/guppy
 
 go 1.25.3
 
-replace github.com/storacha/go-ucanto => ../go-ucanto
-
-
 require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
 	github.com/briandowns/spinner v1.23.2
@@ -49,7 +46,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/storacha/go-ds-arc v0.0.1
 	github.com/storacha/go-libstoracha v0.7.5
-	github.com/storacha/go-ucanto v0.8.0
+	github.com/storacha/go-ucanto v0.8.1
 	github.com/storacha/indexing-service v1.12.2
 	github.com/stretchr/testify v1.11.1
 	github.com/wordgen/wordlists/eff v0.3.0
