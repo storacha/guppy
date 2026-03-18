@@ -427,6 +427,14 @@ func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadI
 	}
 	span.AddEvent("found uploaded indexes", trace.WithAttributes(attribute.Int("indexes", len(uploadedIndexes))))
 
+	// If there are no uploaded indexes, nothing to do, and we might not even have
+	// a root CID yet. No need to fail in a moment when if there's no root CID,
+	// because we don't actually need one if there are no indexes to post-process.
+	// Just return early now.
+	if len(uploadedIndexes) == 0 {
+		return nil
+	}
+
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)

@@ -220,6 +220,8 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	signal(dagScansAvailable)
 	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
+	signal(uploadedShardsAvailable)
+	signal(uploadedIndexesAvailable)
 	close(scansAvailable)
 
 	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
