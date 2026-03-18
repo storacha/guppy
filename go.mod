@@ -46,7 +46,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/storacha/go-ds-arc v0.0.1
 	github.com/storacha/go-libstoracha v0.7.5
-	github.com/storacha/go-ucanto v0.8.1
+	github.com/storacha/go-ucanto v0.8.2
 	github.com/storacha/indexing-service v1.12.2
 	github.com/stretchr/testify v1.11.1
 	github.com/wordgen/wordlists/eff v0.3.0

@@ -110,8 +110,8 @@ var retrieveCmd = &cobra.Command{
 			return delegation.Delegate(
 				c.Issuer(),
 				indexerPrincipal,
-				[]ucan.Capability[contentcap.RetrieveCaveats]{
-					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), contentcap.RetrieveCaveats{}),
+				[]ucan.Capability[ucan.NoCaveats]{
+					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
 				},
 				delegation.WithProof(pfs...),
 				delegation.WithProofPruning(pruner),

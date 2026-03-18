@@ -181,9 +181,9 @@ var serveCmd = &cobra.Command{
 			// Allow the indexing service to retrieve indexes. Enable proof pruning to avoid
 			// exceeding the max header size in authorized retrievals.
 			pruner := validator.NewProofPruner(uploadServiceVerifier, contentcap.Retrieve)
-			caps := make([]ucan.Capability[contentcap.RetrieveCaveats], 0, len(spaces))
+			caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaces))
 			for _, space := range spaces {
-				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), contentcap.RetrieveCaveats{}))
+				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), ucan.NoCaveats{}))
 			}
 
 			opts := []delegation.Option{
