@@ -28,6 +28,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/cmd/gateway/banner"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
@@ -100,6 +101,8 @@ var serveCmd = &cobra.Command{
 			"Spaces can be specified by DID or by name.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
@@ -150,6 +153,13 @@ var serveCmd = &cobra.Command{
 		}
 
 		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
+
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
+		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -168,13 +178,17 @@ var serveCmd = &cobra.Command{
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
-			caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaces))
+			// Allow the indexing service to retrieve indexes. Enable proof pruning to avoid
+			// exceeding the max header size in authorized retrievals.
+			pruner := validator.NewProofPruner(uploadServiceVerifier, contentcap.Retrieve)
+			caps := make([]ucan.Capability[contentcap.RetrieveCaveats], 0, len(spaces))
 			for _, space := range spaces {
-				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), ucan.NoCaveats{}))
+				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), contentcap.RetrieveCaveats{}))
 			}
 
 			opts := []delegation.Option{
 				delegation.WithProof(pfs...),
+				delegation.WithProofPruning(pruner),
 				delegation.WithExpiration(int(time.Now().Add(30 * time.Second).Unix())),
 			}
 
