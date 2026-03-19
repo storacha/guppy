@@ -300,13 +300,23 @@ func (r *Repo) DeleteFSEntriesByPaths(ctx context.Context, paths []string, sourc
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt = tx.StmtContext(ctx, stmt)
+
 	for _, path := range paths {
 		_, err := stmt.ExecContext(ctx, path, util.DbID(&sourceID), util.DbDID(&spaceDID))
 		if err != nil {
 			return fmt.Errorf("failed to delete FS entries for path %s: %w", path, err)
 		}
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 func (r *Repo) DeleteFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
