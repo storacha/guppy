@@ -415,12 +415,15 @@ func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[b
 		JOIN nodes ON nodes.cid = nu.node_cid AND nodes.space_did = nu.space_did
 		WHERE si.index_id = ?`)
 		if err != nil {
-			yield(blobs.NodeInIndex{}, fmt.Errorf("failed to prepare statement: %w", err))
-			return
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to prepare statement: %w", err)) {
+				return
+			}
 		}
 		rows, err := stmt.QueryContext(ctx, indexID)
 		if err != nil {
-			yield(blobs.NodeInIndex{}, fmt.Errorf("failed to query nodes in index %s: %w", indexID, err))
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to query nodes in index %s: %w", indexID, err)) {
+				return
+			}
 			return
 		}
 		defer rows.Close()
@@ -432,12 +435,14 @@ func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[b
 			var nodeSize uint64
 			var shardOffset uint64
 			if err := rows.Scan(&shardID, util.DbBytes(&shardDigest), util.DbCID(&nodeCID), &nodeSize, &shardOffset); err != nil {
-				yield(blobs.NodeInIndex{}, fmt.Errorf("failed to scan node row in index %s: %w", indexID, err))
-				return
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to scan node row in index %s: %w", indexID, err)) {
+					return
+				}
 			}
 			if len(shardDigest) == 0 {
-				yield(blobs.NodeInIndex{}, fmt.Errorf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", indexID, shardID))
-				return
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", indexID, shardID)) {
+					return
+				}
 			}
 			if !yield(blobs.NodeInIndex{
 				NodeCID:     nodeCID,
@@ -451,7 +456,9 @@ func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[b
 
 		err = rows.Err()
 		if err != nil {
-			yield(blobs.NodeInIndex{}, fmt.Errorf("error iterating node rows in index %s: %w", indexID, err))
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("error iterating node rows in index %s: %w", indexID, err)) {
+				return
+			}
 		}
 	}
 }

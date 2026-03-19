@@ -372,12 +372,15 @@ func (r *Repo) NodesInShard(ctx context.Context, shardID id.ShardID, startOffset
 			AND node_uploads.shard_offset >= ?
 			ORDER BY node_uploads.shard_offset ASC`)
 		if err != nil {
-			yield(blobs.NodeInShard{}, fmt.Errorf("failed to prepare statement: %w", err))
-			return
+			if !yield(blobs.NodeInShard{}, fmt.Errorf("failed to prepare statement: %w", err)) {
+				return
+			}
 		}
 		rows, err := stmt.QueryContext(ctx, shardID, startOffset)
 		if err != nil {
-			yield(blobs.NodeInShard{}, fmt.Errorf("failed to query nodes in shard %s: %w", shardID, err))
+			if !yield(blobs.NodeInShard{}, fmt.Errorf("failed to query nodes in shard %s: %w", shardID, err)) {
+				return
+			}
 			return
 		}
 		defer rows.Close()
@@ -388,8 +391,9 @@ func (r *Repo) NodesInShard(ctx context.Context, shardID id.ShardID, startOffset
 				return rows.Scan(util.DbCID(cid), size, util.DbDID(spaceDID), util.DbBytes(ufsdata), path, sourceID, offset, &shardOffset)
 			})
 			if err != nil {
-				yield(blobs.NodeInShard{}, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err))
-				return
+				if !yield(blobs.NodeInShard{}, fmt.Errorf("failed to get node from row for shard %s: %w", shardID, err)) {
+					return
+				}
 			}
 			if !yield(blobs.NodeInShard{Node: node, ShardOffset: shardOffset}, nil) {
 				return
@@ -398,7 +402,9 @@ func (r *Repo) NodesInShard(ctx context.Context, shardID id.ShardID, startOffset
 
 		err = rows.Err()
 		if err != nil {
-			yield(blobs.NodeInShard{}, fmt.Errorf("error iterating node rows in shard %s: %w", shardID, err))
+			if !yield(blobs.NodeInShard{}, fmt.Errorf("error iterating node rows in shard %s: %w", shardID, err)) {
+				return
+			}
 		}
 
 	}
