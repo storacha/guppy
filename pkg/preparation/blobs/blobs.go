@@ -378,7 +378,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		defer close(jobs)
 
 		idx := 0
-		for nis, err := range a.Repo.ForEachNodeInShard(ctx, shardID, offset) {
+		for nis, err := range a.Repo.NodesInShard(ctx, shardID, offset) {
 			if err != nil {
 				// If we fail to iterate nodes, send the error and stop producing jobs.
 				select {
@@ -463,11 +463,11 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 // node.
 func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader nodereader.NodeReader) error {
 	// Collect the nodes first, because we can't read data for each node while
-	// holding the lock on the database that ForEachNodeInShard has. This means
-	// holding a bunch of nodes in memory, but it's limited to the size of a
+	// holding the lock on the database that the NodesInShard iterator has. This
+	// means holding a bunch of nodes in memory, but it's limited to the size of a
 	// shard.
 	var nodes []dagsmodel.Node
-	for nis, err := range a.Repo.ForEachNodeInShard(ctx, shardID, 0) {
+	for nis, err := range a.Repo.NodesInShard(ctx, shardID, 0) {
 		if err != nil {
 			return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
 		}
@@ -505,7 +505,7 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	// Query all nodes across all shards in this index in a single batch query
 	nodeCount := 0
 	log.Infow("building index", "index", indexID)
-	for nii, err := range a.Repo.ForEachNodeInIndex(ctx, indexID) {
+	for nii, err := range a.Repo.NodesInIndex(ctx, indexID) {
 		if err != nil {
 			return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 		}

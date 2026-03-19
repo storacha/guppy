@@ -226,7 +226,7 @@ func TestShardsNotInIndexes(t *testing.T) {
 	})
 }
 
-func TestForEachNodeInIndex(t *testing.T) {
+func TestNodesInIndex(t *testing.T) {
 	t.Run("yields all nodes across shards in an index", func(t *testing.T) {
 		repo := testutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
 
@@ -287,7 +287,7 @@ func TestForEachNodeInIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		byCID := map[string]blobs.NodeInIndex{}
-		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
+		for nii, err := range repo.NodesInIndex(t.Context(), index.ID()) {
 			require.NoError(t, err)
 			byCID[nii.NodeCID.String()] = nii
 		}
@@ -326,7 +326,7 @@ func TestForEachNodeInIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		called := false
-		for range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
+		for range repo.NodesInIndex(t.Context(), index.ID()) {
 			called = true
 		}
 		require.False(t, called)
@@ -384,18 +384,18 @@ func TestForEachNodeInIndex(t *testing.T) {
 		err = repo.AddShardToIndex(t.Context(), index2.ID(), shard2.ID())
 		require.NoError(t, err)
 
-		// ForEachNodeInIndex for index1 should only yield node1
+		// NodesInIndex for index1 should only yield node1
 		var nodeCIDs1 []cid.Cid
-		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index1.ID()) {
+		for nii, err := range repo.NodesInIndex(t.Context(), index1.ID()) {
 			require.NoError(t, err)
 			nodeCIDs1 = append(nodeCIDs1, nii.NodeCID)
 		}
 		require.Len(t, nodeCIDs1, 1)
 		require.Equal(t, nodeCID1, nodeCIDs1[0])
 
-		// ForEachNodeInIndex for index2 should only yield node2
+		// NodesInIndex for index2 should only yield node2
 		var nodeCIDs2 []cid.Cid
-		for nii, err := range repo.ForEachNodeInIndex(t.Context(), index2.ID()) {
+		for nii, err := range repo.NodesInIndex(t.Context(), index2.ID()) {
 			require.NoError(t, err)
 			nodeCIDs2 = append(nodeCIDs2, nii.NodeCID)
 		}
@@ -448,7 +448,7 @@ func TestForEachNodeInIndex(t *testing.T) {
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard2.ID())
 		require.NoError(t, err)
 
-		for _, nodeErr := range repo.ForEachNodeInIndex(t.Context(), index.ID()) {
+		for _, nodeErr := range repo.NodesInIndex(t.Context(), index.ID()) {
 			if nodeErr != nil {
 				err = nodeErr
 				break

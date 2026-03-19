@@ -405,7 +405,7 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model
 	return shards, nil
 }
 
-func (r *Repo) ForEachNodeInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[blobs.NodeInIndex, error] {
+func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[blobs.NodeInIndex, error] {
 	return func(yield func(blobs.NodeInIndex, error) bool) {
 		stmt, err := r.prepareStmt(ctx, `
 		SELECT s.id, s.digest, nodes.cid, nodes.size, nu.shard_offset

@@ -63,7 +63,7 @@ func TestAddNodeToShard(t *testing.T) {
 	}
 
 	nodeInfos := make([]nodeInfo, 0, 3)
-	for nis, err := range repo.ForEachNodeInShard(t.Context(), shard.ID(), 0) {
+	for nis, err := range repo.NodesInShard(t.Context(), shard.ID(), 0) {
 		require.NoError(t, err)
 		nodeInfos = append(nodeInfos, nodeInfo{
 			cid:    nis.Node.CID(),

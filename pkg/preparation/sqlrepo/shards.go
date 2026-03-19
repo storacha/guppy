@@ -353,7 +353,7 @@ func (r *Repo) FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID
 	return r.getNodeFromRow(row)
 }
 
-func (r *Repo) ForEachNodeInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[blobs.NodeInShard, error] {
+func (r *Repo) NodesInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[blobs.NodeInShard, error] {
 	return func(yield func(blobs.NodeInShard, error) bool) {
 		stmt, err := r.prepareStmt(ctx, `
 			SELECT

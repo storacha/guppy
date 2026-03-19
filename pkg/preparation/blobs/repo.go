@@ -30,9 +30,9 @@ type Repo interface {
 	// CreateNodeUpload creates a node_uploads record with shard_id = NULL.
 	CreateNodeUpload(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
-	// ForEachNodeInShard iterates over all the nodes for a given shard, in the
+	// NodesInShard iterates over all the nodes for a given shard, in the
 	// order they should appear in the shard.
-	ForEachNodeInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[NodeInShard, error]
+	NodesInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[NodeInShard, error]
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 	DeleteShard(ctx context.Context, shardID id.ShardID) error
 
@@ -45,9 +45,9 @@ type Repo interface {
 	AddShardToIndex(ctx context.Context, indexID id.IndexID, shardID id.ShardID) error
 	ShardsNotInIndexes(ctx context.Context, uploadID id.UploadID) ([]id.ShardID, error)
 	ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model.Shard, error)
-	// ForEachNodeInIndex iterates over all nodes across all shards in an index,
+	// NodesInIndex iterates over all nodes across all shards in an index,
 	// ordered by shard. This is a batch query that avoids per-shard round trips.
-	ForEachNodeInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[NodeInIndex, error]
+	NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[NodeInIndex, error]
 
 	// Upload methods
 	GetUploadByID(ctx context.Context, uploadID id.UploadID) (*uploadsmodel.Upload, error)
