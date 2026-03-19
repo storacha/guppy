@@ -46,7 +46,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/storacha/go-ds-arc v0.0.1
 	github.com/storacha/go-libstoracha v0.7.5
-	github.com/storacha/go-ucanto v0.7.3-0.20260217160605-b36b2fa2b6fc
+	github.com/storacha/go-ucanto v0.8.2
 	github.com/storacha/indexing-service v1.12.2
 	github.com/stretchr/testify v1.11.1
 	github.com/wordgen/wordlists/eff v0.3.0
@@ -115,6 +115,7 @@ require (
 	github.com/multiformats/go-multiaddr-dns v0.4.1 // indirect
 	github.com/multiformats/go-multistream v0.6.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect

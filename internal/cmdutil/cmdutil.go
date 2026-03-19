@@ -2,6 +2,7 @@
 package cmdutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -10,11 +11,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/storacha/go-libstoracha/principalresolver"
 	uclient "github.com/storacha/go-ucanto/client"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/principal"
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
+	edverifier "github.com/storacha/go-ucanto/principal/ed25519/verifier"
+	"github.com/storacha/go-ucanto/principal/verifier"
 	"github.com/storacha/go-ucanto/transport/car"
 	uhttp "github.com/storacha/go-ucanto/transport/http"
 	"github.com/storacha/go-ucanto/ucan"
@@ -236,4 +240,23 @@ func ResolveSpace(c *client.Client, identifier string) (did.DID, error) {
 	}
 
 	return space.DID(), nil
+}
+
+func ResolveDIDWebAndWrap(ctx context.Context, didWeb did.DID) (principal.Verifier, error) {
+	resolver, err := principalresolver.NewHTTPResolver([]did.DID{didWeb})
+	if err != nil {
+		return nil, fmt.Errorf("creating principal resolver: %w", err)
+	}
+
+	resolvedKeyDID, unresolvedErr := resolver.ResolveDIDKey(ctx, didWeb)
+	if unresolvedErr != nil {
+		return nil, fmt.Errorf("resolving DID key: %w", unresolvedErr)
+	}
+
+	keyVerifier, err := edverifier.Parse(resolvedKeyDID.String())
+	if err != nil {
+		return nil, fmt.Errorf("parsing resolved key DID: %w", err)
+	}
+
+	return verifier.Wrap(keyVerifier, didWeb)
 }
