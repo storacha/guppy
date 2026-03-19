@@ -14,6 +14,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
 	"github.com/stretchr/testify/assert"
@@ -83,7 +84,7 @@ func TestRemoveBadFSEntry(t *testing.T) {
 		// The bad file and all ancestors should be deleted
 		for _, p := range []string{"dir1/dir2/file.txt", "dir1/dir2", "dir1", "."} {
 			entry, err := repo.GetFSEntryByPath(t.Context(), p, sourceID, spaceDID)
-			require.NoError(t, err)
+			require.ErrorIs(t, err, types.ErrNotFound)
 			require.Nil(t, entry, "expected %s to be deleted", p)
 		}
 
@@ -121,7 +122,7 @@ func TestRemoveBadFSEntry(t *testing.T) {
 
 		for _, p := range []string{"top.txt", "."} {
 			entry, err := repo.GetFSEntryByPath(t.Context(), p, sourceID, spaceDID)
-			require.NoError(t, err)
+			require.ErrorIs(t, err, types.ErrNotFound)
 			require.Nil(t, entry, "expected %s to be deleted", p)
 		}
 	})

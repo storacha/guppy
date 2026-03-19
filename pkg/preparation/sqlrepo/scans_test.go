@@ -9,6 +9,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/internal/testdb"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
 )
@@ -173,9 +174,9 @@ func TestGetFSEntryByID(t *testing.T) {
 		require.Equal(t, dir.Path(), entry.Path())
 	})
 
-	t.Run("returns nil for nonexistent ID", func(t *testing.T) {
+	t.Run("returns ErrNotFound for nonexistent ID", func(t *testing.T) {
 		entry, err := repo.GetFSEntryByID(t.Context(), id.New())
-		require.NoError(t, err)
+		require.ErrorIs(t, err, types.ErrNotFound)
 		require.Nil(t, entry)
 	})
 }
@@ -196,9 +197,9 @@ func TestGetFSEntryByPath(t *testing.T) {
 		require.Equal(t, file.ID(), entry.ID())
 	})
 
-	t.Run("returns nil for nonexistent path", func(t *testing.T) {
+	t.Run("returns ErrNotFound for nonexistent path", func(t *testing.T) {
 		entry, err := repo.GetFSEntryByPath(t.Context(), "nonexistent/path.txt", sourceId, spaceDID)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, types.ErrNotFound)
 		require.Nil(t, entry)
 	})
 
@@ -208,7 +209,7 @@ func TestGetFSEntryByPath(t *testing.T) {
 		require.NoError(t, err)
 
 		entry, err := repo.GetFSEntryByPath(t.Context(), "scoped/file.txt", otherSourceId, spaceDID)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, types.ErrNotFound)
 		require.Nil(t, entry)
 	})
 
@@ -248,7 +249,7 @@ func TestDeleteFSEntriesByPaths(t *testing.T) {
 
 		for _, p := range []string{"a/b/c.txt", "a/b", "a"} {
 			entry, err := repo.GetFSEntryByPath(t.Context(), p, sourceId, spaceDID)
-			require.NoError(t, err)
+			require.ErrorIs(t, err, types.ErrNotFound)
 			require.Nil(t, entry, "expected %s to be deleted", p)
 		}
 
@@ -272,7 +273,7 @@ func TestDeleteFSEntriesByPaths(t *testing.T) {
 		require.NoError(t, err)
 
 		entry, err := repo.GetFSEntryByPath(t.Context(), "dup/dir", sourceId, spaceDID)
-		require.NoError(t, err)
+		require.ErrorIs(t, err, types.ErrNotFound)
 		require.Nil(t, entry)
 	})
 
