@@ -16,6 +16,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/internal/ctxutil"
+	"github.com/storacha/guppy/pkg/internal/util"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
@@ -486,27 +487,17 @@ func lengthVarint(size uint64) []byte {
 }
 
 func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadCloser, error) {
-	index, err := a.Repo.GetIndexByID(ctx, indexID)
-	if err != nil {
-		return nil, fmt.Errorf("getting index %s: %w", indexID, err)
-	}
-
-	// Get the upload to retrieve the root CID
-	upload, err := a.Repo.GetUploadByID(ctx, index.UploadID())
-	if err != nil {
-		return nil, fmt.Errorf("getting upload for index %s: %w", indexID, err)
-	}
-	if upload.RootCID() == cid.Undef {
-		return nil, fmt.Errorf("no root CID set yet for upload %s (index %s)", upload.ID(), indexID)
-	}
-
 	// Build the index by reading shards from the database
-	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
+
+	// Use a placeholder for the root because it doesn't matter what it is, and we
+	// don't want to wait for it to be known. It shouldn't really be something the
+	// index knows at all.
+	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: util.PlaceholderCID}, -1)
 
 	// Query all nodes across all shards in this index in a single batch query
 	nodeCount := 0
 	log.Infow("building index", "index", indexID)
-	err = a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+	err := a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
 		nodeCount++
 		if nodeCount%10000 == 0 {
 			log.Infow("building index", "index", indexID, "nodes", nodeCount)
