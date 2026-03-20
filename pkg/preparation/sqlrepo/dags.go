@@ -172,8 +172,8 @@ func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGSc
 			child_root_nodes.size + COALESCE(SUM(child_root_links.t_size), 0),
 			child_root_nodes.cid
 		FROM directory_children
-		JOIN fs_entries child_fs_entries ON directory_children.child_id = child_fs_entries.id
-		JOIN dag_scans child_dag_scans ON directory_children.child_id = child_dag_scans.fs_entry_id
+		JOIN fs_entries AS child_fs_entries ON directory_children.child_id = child_fs_entries.id
+		JOIN dag_scans AS child_dag_scans ON directory_children.child_id = child_dag_scans.fs_entry_id
 		JOIN nodes child_root_nodes ON child_dag_scans.cid = child_root_nodes.cid
 			AND child_root_nodes.space_did = child_fs_entries.space_did
 		LEFT JOIN links child_root_links ON child_root_links.parent_id = child_root_nodes.cid
