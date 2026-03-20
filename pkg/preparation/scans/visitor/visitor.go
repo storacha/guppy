@@ -2,6 +2,7 @@ package visitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
 
@@ -70,10 +72,9 @@ func (v *ScanVisitor) SkipEntry(path string, dirEntry fs.DirEntry) (model.FSEntr
 	}
 	entry, err := v.repo.GetFSEntryByPath(v.ctx, path, v.sourceID, v.spaceDID)
 	if err != nil {
-		log.Warnw("error looking up existing fs entry, will re-scan", "path", path, "err", err)
-		return nil, false
-	}
-	if entry == nil {
+		if !errors.Is(err, types.ErrNotFound) {
+			log.Warnw("error looking up existing fs entry, will re-scan", "path", path, "err", err)
+		}
 		return nil, false
 	}
 	// Don't trust directory entries that have no children: they may be leftovers
