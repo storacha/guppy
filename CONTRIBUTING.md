@@ -74,3 +74,7 @@ This section provides detailed instructions for setting up the Guppy client loca
 The preparation database uses [Goose](https://pressly.github.io/goose/) migrations. The base schema is in [`pkg/preparation/sqlrepo/schema.sql`](pkg/preparation/sqlrepo/schema.sql), and migrations are in [`pkg/preparation/sqlrepo/migrations/`](pkg/preparation/sqlrepo/migrations/). Migrations are automatically applied when the DB is used.
 
 To create a new migration, use `make migration NAME=<new-migration-name>`. To manually migrate up or down, reset, or check the status, use `migrate-up`, `migrate-down`, `migrate-reset`, or `migrate-status`, respectively. These are simply shortcuts for using `go tool goose` with the correct migrations directory and DB connection.
+
+## Releases (maintainers only)
+
+To release a new version of Guppy, run `make release`. This will switch to `origin/main` and ask `gorelease` to suggest the next version number. Then it will create a release branch, increment the `version.json`, and commit that change. Push that branch to create a release PR, and merge it to publish the release.

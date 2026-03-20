@@ -1,4 +1,4 @@
-.PHONY: build test clean migration migrate-up migrate-down migrate-status migrate-reset
+.PHONY: build test clean migration migrate-up migrate-down migrate-status migrate-reset release
 
 BINARY ?= guppy
 MIGRATIONS_DIR ?= pkg/preparation/sqlrepo/migrations
@@ -30,3 +30,6 @@ migrate-status:
 
 migrate-reset:
 	$(GOOSE) -dir $(MIGRATIONS_DIR) sqlite3 $(DB_PATH) reset
+
+release:
+	./scripts/release.sh
