@@ -77,22 +77,26 @@ func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node
 	return nil
 }
 
+type ExtractMetadataFunc func(node datamodel.Node, cid cid.Cid, data []byte) ([]byte, error)
+
 // A UnixFSFileNodeVisitor provides a link system for
 // [builder.BuildUnixFSFile] which visits produced nodes with [cb] as
 // they're encoded.
 type UnixFSFileNodeVisitor struct {
 	UnixFSDirectoryNodeVisitor
-	sourceID       id.SourceID
-	path           string // path is the root path of the scan
-	readerPosition ReaderPosition
+	sourceID        id.SourceID
+	path            string // path is the root path of the scan
+	readerPosition  ReaderPosition
+	extractMetadata ExtractMetadataFunc
 }
 
-func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, uploadID id.UploadID, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback) UnixFSFileNodeVisitor {
+func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, uploadID id.UploadID, sourceID id.SourceID, path string, readerPosition ReaderPosition, cb NodeCallback, extractMeta ExtractMetadataFunc) UnixFSFileNodeVisitor {
 	return UnixFSFileNodeVisitor{
 		UnixFSDirectoryNodeVisitor: NewUnixFSDirectoryNodeVisitor(ctx, repo, spaceDID, uploadID, cb),
 		sourceID:                   sourceID,
 		path:                       path,
 		readerPosition:             readerPosition,
+		extractMetadata:            extractMeta,
 	}
 }
 
@@ -100,10 +104,18 @@ func NewUnixFSFileNodeVisitor(ctx context.Context, repo Repo, spaceDID did.DID, 
 func (v UnixFSFileNodeVisitor) visitRawNode(datamodelNode datamodel.Node, cid cid.Cid, data []byte) error {
 	log.Debugf("Visiting raw node with CID: %s", cid)
 	size := uint64(len(data))
+	offset := v.readerPosition.Stamp()
 
-	// this raw block has already been read, so we subtract its size to get the beginning offset
-	offset := v.readerPosition.Offset() - size
-	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.spaceDID, v.uploadID, v.path, v.sourceID, offset)
+	var meta []byte
+	if v.extractMetadata != nil {
+		m, err := v.extractMetadata(datamodelNode, cid, data)
+		if err != nil {
+			return fmt.Errorf("extracting metadata: %w", err)
+		}
+		meta = m
+	}
+
+	node, created, err := v.repo.FindOrCreateRawNode(v.ctx, cid, size, v.spaceDID, v.uploadID, v.path, v.sourceID, offset, meta)
 	if err != nil {
 		return fmt.Errorf("creating raw node: %w", err)
 	}

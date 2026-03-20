@@ -47,7 +47,7 @@ func AddNodeToUploadShardsWithData(t *testing.T, repo *sqlrepo.Repo, blobsApi bl
 
 	nodeCID := stestutil.RandomCID(t).(cidlink.Link).Cid
 	path := fmt.Sprintf("some/path/%s", nodeCID.String())
-	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, uploadID, path, sourceID, 0)
+	_, _, err := repo.FindOrCreateRawNode(t.Context(), nodeCID, uint64(len(data)), spaceDID, uploadID, path, sourceID, 0, nil)
 	require.NoError(t, err)
 	err = blobsApi.AddNodeToUploadShards(t.Context(), uploadID, spaceDID, nodeCID, data, shardCB)
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func (b *UploadBuilder) WithRootFSEntry() *UploadBuilder {
 func (b *UploadBuilder) WithRootCID() *UploadBuilder {
 	b.t.Helper()
 	nodeCID := stestutil.RandomCID(b.t).(cidlink.Link).Cid
-	_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), "test.txt", b.source.ID(), 0)
+	_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), "test.txt", b.source.ID(), 0, nil)
 	require.NoError(b.t, err)
 	err = b.upload.SetRootCID(nodeCID)
 	require.NoError(b.t, err)
@@ -138,7 +138,7 @@ func (b *UploadBuilder) WithFileAndDAGScan(path string, complete bool) *UploadBu
 
 	if complete {
 		nodeCID := stestutil.RandomCID(b.t).(cidlink.Link).Cid
-		_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), path, b.source.ID(), 0)
+		_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), path, b.source.ID(), 0, nil)
 		require.NoError(b.t, err)
 		err = dagScan.Complete(nodeCID)
 		require.NoError(b.t, err)
@@ -160,7 +160,7 @@ func (b *UploadBuilder) WithUnshardedNodes(count int) *UploadBuilder {
 	for i := range count {
 		nodeCID := stestutil.RandomCID(b.t).(cidlink.Link).Cid
 		path := fmt.Sprintf("unsharded/file%d.txt", i)
-		_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), path, b.source.ID(), 0)
+		_, _, err := b.repo.FindOrCreateRawNode(b.t.Context(), nodeCID, 100, b.spaceDID, b.upload.ID(), path, b.source.ID(), 0, nil)
 		require.NoError(b.t, err)
 		// Note: FindOrCreateRawNode creates node_uploads record, but we could delete it
 		// For simplicity, we'll rely on the test to manually query NodesNotInShards

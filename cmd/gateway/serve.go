@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -90,6 +91,8 @@ func init() {
 	serveCmd.Flags().String("log-level", "", "Logging level for the gateway server (debug, info, warn, error)")
 	cobra.CheckErr(viper.BindPFlag("gateway.log_level", serveCmd.Flags().Lookup("log-level")))
 
+	serveCmd.Flags().String("decryption-key", "", "Path to AES-256-CTR decryption key for encrypted blocks")
+	cobra.CheckErr(viper.BindPFlag("gateway.decryption_key", serveCmd.Flags().Lookup("decryption-key")))
 }
 
 var serveCmd = &cobra.Command{
@@ -195,7 +198,18 @@ var serveCmd = &cobra.Command{
 
 			return delegation.Delegate(c.Issuer(), indexerPrincipal, caps, opts...)
 		})
-		exchange := dagservice.NewExchange(locator, c, spaces)
+
+		exchOpts := []dagservice.ExchangeOption{}
+		decryptionKeyPath, _ := cmd.Flags().GetString("decryption-key")
+		if decryptionKeyPath != "" {
+			decryptionKey, err := os.ReadFile(decryptionKeyPath)
+			if err != nil {
+				return fmt.Errorf("reading decryption key: %w", err)
+			}
+			exchOpts = append(exchOpts, dagservice.WithAES256CTRDecryptionKey(decryptionKey))
+		}
+
+		exchange := dagservice.NewExchange(locator, c, spaces, exchOpts...)
 
 		pubGws := map[string]*gateway.PublicGateway{}
 		if cfg.Gateway.Subdomain.Enabled {

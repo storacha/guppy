@@ -13,7 +13,7 @@ import (
 type Repo interface {
 	GetDAGScanByFSEntryID(ctx context.Context, fsEntryID id.FSEntryID) (model.DAGScan, error)
 	UpdateDAGScan(ctx context.Context, dagScan model.DAGScan) error
-	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64) (*model.RawNode, bool, error)
+	FindOrCreateRawNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, path string, sourceID id.SourceID, offset uint64, meta []byte) (*model.RawNode, bool, error)
 	FindOrCreateUnixFSNode(ctx context.Context, cid cid.Cid, size uint64, spaceDID did.DID, uploadID id.UploadID, ufsdata []byte, links []model.LinkParams) (*model.UnixFSNode, bool, error)
 	LinksForCID(ctx context.Context, cid cid.Cid, spaceDID did.DID) ([]*model.Link, error)
 	HasIncompleteChildren(ctx context.Context, directoryScans *model.DirectoryDAGScan) (bool, error)

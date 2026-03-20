@@ -19,6 +19,7 @@ import (
 	"github.com/storacha/go-libstoracha/digestutil"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/encryption"
 )
 
 var log = logging.Logger("client/dagservice")
@@ -31,11 +32,12 @@ var log = logging.Logger("client/dagservice")
 const DefaultMaxGap = 64
 
 type storachaExchange struct {
-	locator   locator.Locator
-	retriever Retriever
-	spaces    []did.DID
-	shards    blobindex.MultihashMap[[]byte]
-	maxGap    uint64
+	locator      locator.Locator
+	retriever    Retriever
+	spaces       []did.DID
+	shards       blobindex.MultihashMap[[]byte]
+	maxGap       uint64
+	aes256CTRKey []byte
 }
 
 var _ exchange.Interface = (*storachaExchange)(nil)
@@ -49,6 +51,12 @@ type ExchangeOption func(*storachaExchange)
 func WithMaxGap(maxGap uint64) ExchangeOption {
 	return func(se *storachaExchange) {
 		se.maxGap = maxGap
+	}
+}
+
+func WithAES256CTRDecryptionKey(key []byte) ExchangeOption {
+	return func(se *storachaExchange) {
+		se.aes256CTRKey = key
 	}
 }
 
@@ -93,7 +101,38 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
 	}
 
+	if se.aes256CTRKey != nil && block.Cid().Prefix().Codec == cid.Raw {
+		data, err := encryption.DecryptAES256CTR(se.aes256CTRKey, block.RawData())
+		if err != nil {
+			return nil, fmt.Errorf("decrypting block: %w", err)
+		}
+		block = decryptedBlock{cid: block.Cid(), data: data}
+	}
+
 	return block, nil
+}
+
+type decryptedBlock struct {
+	cid  cid.Cid
+	data []byte
+}
+
+func (d decryptedBlock) Cid() cid.Cid {
+	return d.cid
+}
+
+func (d decryptedBlock) Loggable() map[string]any {
+	return map[string]any{
+		"block": d.Cid().String(),
+	}
+}
+
+func (d decryptedBlock) RawData() []byte {
+	return d.data
+}
+
+func (d decryptedBlock) String() string {
+	return fmt.Sprintf("[DecryptedBlock %s]", d.Cid())
 }
 
 // makeBlock creates a block from the given data and CID, verifying that the
@@ -301,6 +340,15 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 				if err != nil {
 					log.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
 					return
+				}
+
+				if se.aes256CTRKey != nil && blk.Cid().Prefix().Codec == cid.Raw {
+					data, err := encryption.DecryptAES256CTR(se.aes256CTRKey, blk.RawData())
+					if err != nil {
+						log.Errorf("decrypting block %s: %v", blk.Cid().String(), err)
+						return
+					}
+					blk = decryptedBlock{cid: blk.Cid(), data: data}
 				}
 
 				out <- blk

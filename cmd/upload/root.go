@@ -3,6 +3,7 @@ package upload
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -45,6 +46,7 @@ func init() {
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
 	Cmd.Flags().BoolVar(&rootFlags.assumeUnchangedSources, "assume-unchanged-sources", false, "When resuming, skip filesystem rescan if a completed scan already exists")
+	Cmd.Flags().String("encryption-key", "", "Path to AES-256-CTR encryption key for encrypted blocks")
 
 	Cmd.AddCommand(source.Cmd)
 	Cmd.AddCommand(check.Cmd)
@@ -102,11 +104,28 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		api := preparation.NewAPI(repo, client,
+		var encryptionKey []byte
+		encryptionKeyPath, _ := cmd.Flags().GetString("encryption-key")
+		if encryptionKeyPath != "" {
+			encryptionKey, err = os.ReadFile(encryptionKeyPath)
+			if err != nil {
+				return fmt.Errorf("reading encryption key: %w", err)
+			}
+		}
+
+		prepAPIOpts := []preparation.Option{
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
 			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
-		)
+		}
+		if encryptionKey != nil {
+			prepAPIOpts = append(prepAPIOpts, preparation.WithAES256CTREncryptionKey(encryptionKey))
+		}
+
+		api, err := preparation.NewAPI(repo, client, prepAPIOpts...)
+		if err != nil {
+			return fmt.Errorf("failed to create API: %w", err)
+		}
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
 			return fmt.Errorf("command failed to create uploads: %w", err)

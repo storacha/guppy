@@ -194,11 +194,18 @@ type RawNode struct {
 	path     string
 	sourceID id.SourceID
 	offset   uint64
+	meta     []byte
 }
 
 // Path returns the path of the raw node in the source
 func (n *RawNode) Path() string {
 	return n.path
+}
+
+// Meta returns the optional metadata for the raw node. For AES 256 CTR encrypted
+// nodes it contains the initialization vector (IV) used for encryption.
+func (n *RawNode) Meta() []byte {
+	return n.meta
 }
 
 // SourceID returns the source ID for the raw node
@@ -226,7 +233,7 @@ func validateRawNode(node *RawNode) error {
 }
 
 // NewRawNode creates a new RawNode instance with the provided CID, Size, spaceDID, path, source ID, and offset.
-func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64) (*RawNode, error) {
+func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceID id.SourceID, offset uint64, meta []byte) (*RawNode, error) {
 	node := &RawNode{
 		node: node{
 			cid:      cid,
@@ -236,6 +243,7 @@ func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceI
 		path:     path,
 		sourceID: sourceID,
 		offset:   offset,
+		meta:     meta,
 	}
 	if err := validateRawNode(node); err != nil {
 		return nil, err
@@ -244,22 +252,22 @@ func NewRawNode(cid cid.Cid, size uint64, spaceDID did.DID, path string, sourceI
 }
 
 // NodeWriter is a function type for writing a Node to the database.
-type NodeWriter func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64) error
+type NodeWriter func(cid cid.Cid, size uint64, spaceDID did.DID, ufsdata []byte, path *string, sourceID id.SourceID, offset *uint64, meta []byte) error
 
 // WriteNodeToDatabase writes a Node to the database using the provided writer function.
 func WriteNodeToDatabase(writer NodeWriter, node Node) error {
 	switch n := node.(type) {
 	case *UnixFSNode:
-		return writer(n.cid, n.size, n.spaceDID, n.ufsdata, nil, id.Nil, nil)
+		return writer(n.cid, n.size, n.spaceDID, n.ufsdata, nil, id.Nil, nil, nil)
 	case *RawNode:
-		return writer(n.cid, n.size, n.spaceDID, nil, &n.path, n.sourceID, &n.offset)
+		return writer(n.cid, n.size, n.spaceDID, nil, &n.path, n.sourceID, &n.offset, n.meta)
 	default:
 		return fmt.Errorf("unsupported node type: %T", node)
 	}
 }
 
 // NodeScanner is a function type for scanning a Node from the database.
-type NodeScanner func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64) error
+type NodeScanner func(cid *cid.Cid, size *uint64, spaceDID *did.DID, ufsdata *[]byte, path **string, sourceID *id.SourceID, offset **uint64, meta *[]byte) error
 
 // ReadNodeFromDatabase reads a Node from the database using the provided scanner function.
 func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
@@ -268,7 +276,8 @@ func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 	var path *string
 	var sourceID id.SourceID
 	var offset *uint64
-	if err := scanner(&node.cid, &node.size, &node.spaceDID, &ufsdata, &path, &sourceID, &offset); err != nil {
+	var meta []byte
+	if err := scanner(&node.cid, &node.size, &node.spaceDID, &ufsdata, &path, &sourceID, &offset, &meta); err != nil {
 		return nil, err
 	}
 	switch node.cid.Type() {
@@ -287,6 +296,7 @@ func ReadNodeFromDatabase(scanner NodeScanner) (Node, error) {
 			path:     *path,
 			sourceID: sourceID,
 			offset:   *offset,
+			meta:     meta,
 		}
 		if err := validateRawNode(rawNode); err != nil {
 			return nil, err

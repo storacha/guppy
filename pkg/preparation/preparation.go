@@ -59,11 +59,12 @@ type config struct {
 	blobUploadParallelism  int
 	assumeUnchangedSources bool
 	bus                    bus.Bus
+	aes256CTRKey           []byte
 }
 
 const defaultBlobUploadParallelism = 6
 
-func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
+func NewAPI(repo Repo, client StorachaClient, options ...Option) (API, error) {
 	cfg := &config{
 		blobUploadParallelism: defaultBlobUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
@@ -93,7 +94,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
-			panic(fmt.Sprintf("failed to apply option: %v", err))
+			return API{}, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
 
@@ -116,9 +117,19 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		WalkerFn:       walker.WalkDir,
 	}
 
-	dagsAPI := dags.API{
-		Repo:         repo,
-		FileAccessor: scansAPI.OpenFileByID,
+	dagsAPIOpts := []dags.Option{}
+	if cfg.aes256CTRKey != nil {
+		dagsAPIOpts = append(dagsAPIOpts, dags.WithAES256CTREncryptionKey(cfg.aes256CTRKey))
+	}
+
+	dagsAPI, err := dags.New(repo, scansAPI.OpenFileByID, dagsAPIOpts...)
+	if err != nil {
+		return API{}, fmt.Errorf("failed to create DAGs API: %w", err)
+	}
+
+	nodeReaderOpts := []nodereader.Option{}
+	if cfg.aes256CTRKey != nil {
+		nodeReaderOpts = append(nodeReaderOpts, nodereader.WithAES256CTREncryptionKey(cfg.aes256CTRKey))
 	}
 
 	nr, err := nodereader.NewNodeReaderOpener(repo.LinksForCID, func(ctx context.Context, sourceID id.SourceID, path string) (fs.File, error) {
@@ -137,9 +148,9 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 			return nil, fmt.Errorf("failed to open file %s in source %s: %w", path, sourceID, err)
 		}
 		return f, nil
-	}, true)
+	}, true, nodeReaderOpts...)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create node reader: %v", err))
+		return API{}, fmt.Errorf("failed to create node reader: %w", err)
 	}
 
 	blobsAPI := &blobs.API{
@@ -186,7 +197,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		DAGs:    dagsAPI,
 		Scans:   scansAPI,
 		Bus:     cfg.bus,
-	}
+	}, nil
 }
 
 func WithEventBus(bus bus.Bus) Option {
@@ -223,6 +234,16 @@ func WithBlobUploadParallelism(blobUploadParallelism int) Option {
 			return fmt.Errorf("parallelism must be greater than 0")
 		}
 		cfg.blobUploadParallelism = blobUploadParallelism
+		return nil
+	}
+}
+
+func WithAES256CTREncryptionKey(sk []byte) Option {
+	return func(cfg *config) error {
+		if len(sk) != 32 {
+			return fmt.Errorf("invalid key length: expected 32 bytes for AES-256, got %d", len(sk))
+		}
+		cfg.aes256CTRKey = sk
 		return nil
 	}
 }
