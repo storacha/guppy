@@ -29,7 +29,7 @@ Guppy looks for a TOML config file in these locations, reading only the first fi
 # Network configuration — which Storacha network to use.
 [network]
   # Preset network name. Sets all the service URLs and DIDs below.
-  # Available presets: forge, hot, warm-staging
+  # Available presets: forge, forge-test, hot, warm-staging
   name = "forge"
 
   # Override individual network endpoints (optional).
@@ -108,3 +108,18 @@ The data directory (`~/.storacha/guppy/` by default) contains:
 - **Agent store** — Your agent identity and UCAN delegations/proofs
 
 Override with `--data-dir` or `GUPPY_REPO_DATA_DIR`.
+
+## Test Network
+
+To use Guppy with the **Forge Test network**, use the CLI flag `--network=forge-test`, or configure the network in your `config.toml` like so:
+
+```toml
+[network]
+  name = "forge-test"
+```
+
+The test network is intended to be used while integrating Guppy with your application. Data stored on the test network is not permanent.
+
+!!! warning
+
+    The test network is reset every month. This includes all data, indexes and accounts. All delegations issued by the service expire at the end of the month.
