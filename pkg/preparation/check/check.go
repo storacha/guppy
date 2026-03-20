@@ -464,6 +464,7 @@ func (c *Checker) checkFileSystemIntegrity(ctx context.Context, uploadID id.Uplo
 				details += " Root FSEntry DAG is invalid - use --repair to also clear upload.root_cid."
 			}
 		}
+
 		result.Issues = append(result.Issues, Issue{
 			Type:        IssueTypeError,
 			Description: fmt.Sprintf("Found %d FSEntry(s) with invalid DAGs", len(invalidDAGs)),
@@ -525,14 +526,22 @@ func (c *Checker) validateDAG(ctx context.Context, rootCID cid.Cid, spaceDID did
 				}
 			}
 
-			return actualSize != expectedSize, nil
+			// Cumulative TSize = this node's block size + sum of child TSizes
+			if expectedSize > 0 {
+				return (node.Size() + actualSize) != expectedSize, nil
+			}
+			return false, nil
 		} else {
-			// Raw node
-			return node.Size() != expectedSize, nil
+			// Raw node — compare block size against parent link's TSize
+			if expectedSize > 0 {
+				return node.Size() != expectedSize, nil
+			}
+			return false, nil
 		}
 	}
 
-	return checkNode(rootNode.CID(), rootNode.Size())
+	// Root has no parent link, so no TSize to validate against
+	return checkNode(rootNode.CID(), 0)
 }
 
 // validateDirectoryDAG validates that a directory's UnixFS DAG entries match filesystem children.

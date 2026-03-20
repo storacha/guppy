@@ -213,6 +213,9 @@ Specify both space and source to check a specific upload.`,
 			}
 		}
 
+		if !allPassed {
+			return cmdutil.NewHandledCliError(fmt.Errorf("upload check failed"))
+		}
 		return nil
 	},
 }

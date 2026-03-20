@@ -49,19 +49,15 @@ func (v UnixFSDirectoryNodeVisitor) visitUnixFSNode(datamodelNode datamodel.Node
 		return fmt.Errorf("failed to cast node to PBNode")
 	}
 	ufsData := pbNode.FieldData().Must().Bytes()
-	pbLinks := make([]dagpb.PBLink, 0, pbNode.FieldLinks().Length())
 	iter := pbNode.FieldLinks().Iterator()
+	links := make([]model.LinkParams, 0, pbNode.FieldLinks().Length())
 	for !iter.Done() {
 		_, pbLink := iter.Next()
-		pbLinks = append(pbLinks, pbLink)
-	}
-	links := make([]model.LinkParams, len(pbLinks))
-	for i, link := range pbLinks {
-		links[i] = model.LinkParams{
-			Hash:  link.FieldHash().Link().(cidlink.Link).Cid,
-			Name:  link.FieldName().Must().String(),
-			TSize: uint64(link.FieldTsize().Must().Int()),
-		}
+		links = append(links, model.LinkParams{
+			Hash:  pbLink.FieldHash().Link().(cidlink.Link).Cid,
+			Name:  pbLink.FieldName().Must().String(),
+			TSize: uint64(pbLink.FieldTsize().Must().Int()),
+		})
 	}
 	node, created, err := v.repo.FindOrCreateUnixFSNode(v.ctx, cid, size, v.spaceDID, v.uploadID, ufsData, links)
 	if err != nil {

@@ -168,14 +168,18 @@ func (r *Repo) CompleteDAGScansForUpload(ctx context.Context, uploadID id.Upload
 func (r *Repo) DirectoryLinks(ctx context.Context, dirScan *model.DirectoryDAGScan) ([]model.LinkParams, error) {
 	stmt, err := r.prepareStmt(ctx, `
 		SELECT
-			fs_entries.path,
-			nodes.size,
-			nodes.cid
+			child_fs_entries.path,
+			child_root_nodes.size + COALESCE(SUM(child_root_links.t_size), 0),
+			child_root_nodes.cid
 		FROM directory_children
-		JOIN fs_entries ON directory_children.child_id = fs_entries.id
-		JOIN dag_scans ON directory_children.child_id = dag_scans.fs_entry_id
-		JOIN nodes ON dag_scans.cid = nodes.cid AND nodes.space_did = fs_entries.space_did
+		JOIN fs_entries AS child_fs_entries ON directory_children.child_id = child_fs_entries.id
+		JOIN dag_scans AS child_dag_scans ON directory_children.child_id = child_dag_scans.fs_entry_id
+		JOIN nodes child_root_nodes ON child_dag_scans.cid = child_root_nodes.cid
+			AND child_root_nodes.space_did = child_fs_entries.space_did
+		LEFT JOIN links child_root_links ON child_root_links.parent_id = child_root_nodes.cid
+			AND child_root_links.space_did = child_root_nodes.space_did
 		WHERE directory_children.directory_id = ?
+		GROUP BY child_fs_entries.path, child_root_nodes.size, child_root_nodes.cid
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
