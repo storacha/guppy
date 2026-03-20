@@ -11,7 +11,6 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
-	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
@@ -345,13 +344,6 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		return nil
 	}
 
-	nodes, err := a.Repo.NodesByShard(ctx, shardID, offset)
-	if err != nil {
-		log.Debug("Error getting nodes for shard:", err)
-
-		return err
-	}
-
 	nodeReader, err := a.OpenNodeReader()
 	if err != nil {
 		return fmt.Errorf("failed to open node reader for shard %s: %w", shardID, err)
@@ -384,12 +376,24 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 
 	go func() {
 		defer close(jobs)
-		for idx, node := range nodes {
+
+		idx := 0
+		for nis, err := range a.Repo.NodesInShard(ctx, shardID, offset) {
+			if err != nil {
+				// If we fail to iterate nodes, send the error and stop producing jobs.
+				select {
+				case <-ctx.Done():
+					return
+				case results <- result{err: fmt.Errorf("failed to iterate nodes in shard %s: %w", shardID, err)}:
+				}
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case jobs <- job{idx: idx, node: node}:
+			case jobs <- job{idx: idx, node: nis.Node}:
 			}
+			idx++
 		}
 	}()
 
@@ -459,11 +463,15 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 // node.
 func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader nodereader.NodeReader) error {
 	// Collect the nodes first, because we can't read data for each node while
-	// holding the lock on the database that ForEachNode has. This means holding a
-	// bunch of nodes in memory, but it's limited to the size of a shard.
-	nodes, err := a.Repo.NodesByShard(ctx, shardID, 0)
-	if err != nil {
-		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+	// holding the lock on the database that the NodesInShard iterator has. This
+	// means holding a bunch of nodes in memory, but it's limited to the size of a
+	// shard.
+	var nodes []dagsmodel.Node
+	for nis, err := range a.Repo.NodesInShard(ctx, shardID, 0) {
+		if err != nil {
+			return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+		}
+		nodes = append(nodes, nis.Node)
 	}
 
 	var errs []types.BadNodeError
@@ -497,16 +505,15 @@ func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadClo
 	// Query all nodes across all shards in this index in a single batch query
 	nodeCount := 0
 	log.Infow("building index", "index", indexID)
-	err := a.Repo.ForEachNodeInIndex(ctx, indexID, func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error {
+	for nii, err := range a.Repo.NodesInIndex(ctx, indexID) {
+		if err != nil {
+			return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
+		}
 		nodeCount++
 		if nodeCount%10000 == 0 {
 			log.Infow("building index", "index", indexID, "nodes", nodeCount)
 		}
-		indexView.SetSlice(shardDigest, nodeCID.Hash(), blobindex.Position{Offset: shardOffset, Length: nodeSize})
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
+		indexView.SetSlice(nii.ShardDigest, nii.NodeCID.Hash(), blobindex.Position{Offset: nii.ShardOffset, Length: nii.NodeSize})
 	}
 	log.Infow("built index", "index", indexID, "nodes", nodeCount)
 

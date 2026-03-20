@@ -3,10 +3,12 @@ package sqlrepo
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -403,39 +405,60 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model
 	return shards, nil
 }
 
-func (r *Repo) ForEachNodeInIndex(ctx context.Context, indexID id.IndexID, yield func(shardDigest multihash.Multihash, nodeCID cid.Cid, nodeSize uint64, shardOffset uint64) error) error {
-	stmt, err := r.prepareStmt(ctx, `
+func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[blobs.NodeInIndex, error] {
+	return func(yield func(blobs.NodeInIndex, error) bool) {
+		stmt, err := r.prepareStmt(ctx, `
 		SELECT s.id, s.digest, nodes.cid, nodes.size, nu.shard_offset
 		FROM shards_in_indexes si
 		JOIN shards s ON s.id = si.shard_id
 		JOIN node_uploads nu ON nu.shard_id = si.shard_id
 		JOIN nodes ON nodes.cid = nu.node_cid AND nodes.space_did = nu.space_did
 		WHERE si.index_id = ?`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	rows, err := stmt.QueryContext(ctx, indexID)
-	if err != nil {
-		return fmt.Errorf("failed to query nodes in index %s: %w", indexID, err)
-	}
-	defer rows.Close()
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to prepare statement: %w", err)) {
+				return
+			}
+		}
+		rows, err := stmt.QueryContext(ctx, indexID)
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to query nodes in index %s: %w", indexID, err)) {
+				return
+			}
+			return
+		}
+		defer rows.Close()
 
-	for rows.Next() {
-		var shardID id.ShardID
-		var shardDigest multihash.Multihash
-		var nodeCID cid.Cid
-		var nodeSize uint64
-		var shardOffset uint64
-		if err := rows.Scan(&shardID, util.DbBytes(&shardDigest), util.DbCID(&nodeCID), &nodeSize, &shardOffset); err != nil {
-			return fmt.Errorf("failed to scan node row in index %s: %w", indexID, err)
+		for rows.Next() {
+			var shardID id.ShardID
+			var shardDigest multihash.Multihash
+			var nodeCID cid.Cid
+			var nodeSize uint64
+			var shardOffset uint64
+			if err := rows.Scan(&shardID, util.DbBytes(&shardDigest), util.DbCID(&nodeCID), &nodeSize, &shardOffset); err != nil {
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to scan node row in index %s: %w", indexID, err)) {
+					return
+				}
+			}
+			if len(shardDigest) == 0 {
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", indexID, shardID)) {
+					return
+				}
+			}
+			if !yield(blobs.NodeInIndex{
+				NodeCID:     nodeCID,
+				NodeSize:    nodeSize,
+				ShardDigest: shardDigest,
+				ShardOffset: shardOffset,
+			}, nil) {
+				return
+			}
 		}
-		if len(shardDigest) == 0 {
-			return fmt.Errorf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", indexID, shardID)
-		}
-		if err := yield(shardDigest, nodeCID, nodeSize, shardOffset); err != nil {
-			return fmt.Errorf("failed to yield node %s in index %s: %w", nodeCID, indexID, err)
+
+		err = rows.Err()
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("error iterating node rows in index %s: %w", indexID, err)) {
+				return
+			}
 		}
 	}
-
-	return rows.Err()
 }
