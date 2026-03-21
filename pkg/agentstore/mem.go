@@ -6,6 +6,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/principal"
 	ed25519 "github.com/storacha/go-ucanto/principal/ed25519/signer"
+	"github.com/ipfs/go-cid"
 )
 
 var _ Store = (*MemStore)(nil)
@@ -81,6 +82,20 @@ func (s *MemStore) principal() (principal.Signer, error) {
 
 func (s *MemStore) delegations() ([]delegation.Delegation, error) {
 	return s.data.Delegations, nil
+}
+
+func (s *MemStore) RemoveDelegation(id cid.Cid) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var updated []delegation.Delegation
+	for _, d := range s.data.Delegations {
+		if d.Link().String() != id.String() {
+			updated = append(updated, d)
+		}
+	}
+	s.data.Delegations = updated
+	return nil
 }
 
 // Query returns delegations that match the given capability queries.
