@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"slices"
 	"sync"
 
@@ -74,26 +73,30 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
 
-	// Randomly pick one of the available locations
-	location := locations[rand.Intn(len(locations))]
+	var reqErr error
+	for _, location := range locations {
+		blockReader, err := se.retriever.Retrieve(ctx, location)
+		if err != nil {
+			reqErr = fmt.Errorf("retrieving block %s: %w", c, err)
+			continue
+		}
+		defer blockReader.Close()
 
-	blockReader, err := se.retriever.Retrieve(ctx, location)
-	if err != nil {
-		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
+		blockBytes, err := io.ReadAll(blockReader)
+		if err != nil {
+			reqErr = fmt.Errorf("reading block %s data: %w", c.String(), err)
+			continue
+		}
+
+		block, err := makeBlock(blockBytes, c)
+		if err != nil {
+			reqErr = fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
+			continue
+		}
+		return block, nil
 	}
-	defer blockReader.Close()
 
-	blockBytes, err := io.ReadAll(blockReader)
-	if err != nil {
-		return nil, fmt.Errorf("reading block %s data: %w", c.String(), err)
-	}
-
-	block, err := makeBlock(blockBytes, c)
-	if err != nil {
-		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
-	}
-
-	return block, nil
+	return nil, reqErr
 }
 
 // makeBlock creates a block from the given data and CID, verifying that the
@@ -202,18 +205,19 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 
 		// If we don't have a current location, make one
 		if currentLocation.isEmpty() {
-			loc := locs[rand.Intn(len(locs))]
-			currentLocation = coalescedLocation{
-				location: loc,
-				slices: []slice{
-					{
-						cid: cid,
-						position: blobindex.Position{
-							Offset: loc.Position.Offset,
-							Length: loc.Position.Length,
+			for _, loc := range locs {
+				currentLocation = coalescedLocation{
+					location: loc,
+					slices: []slice{
+						{
+							cid: cid,
+							position: blobindex.Position{
+								Offset: loc.Position.Offset,
+								Length: loc.Position.Length,
+							},
 						},
 					},
-				},
+				}
 			}
 		} else {
 			// See if any of the locations for this block are within the max gap of
@@ -241,18 +245,19 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 			// current location, emit, then make a new one.
 			if !found {
 				coalescedLocations = append(coalescedLocations, currentLocation)
-				loc := locs[rand.Intn(len(locs))]
-				currentLocation = coalescedLocation{
-					location: loc,
-					slices: []slice{
-						{
-							cid: cid,
-							position: blobindex.Position{
-								Offset: loc.Position.Offset,
-								Length: loc.Position.Length,
+				for _, loc := range locs {
+					currentLocation = coalescedLocation{
+						location: loc,
+						slices: []slice{
+							{
+								cid: cid,
+								position: blobindex.Position{
+									Offset: loc.Position.Offset,
+									Length: loc.Position.Length,
+								},
 							},
 						},
-					},
+					}
 				}
 			}
 		}
