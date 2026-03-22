@@ -1,6 +1,9 @@
 package dagservice_test
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -709,4 +712,133 @@ func TestStorachaExchange(t *testing.T) {
 			require.Equal(t, uint64(19), retriever.requests[0].Position.Length)
 		})
 	})
+
+	t.Run("fail-over", func(t *testing.T) {
+		t.Run("GetBlock fails over to second location", func(t *testing.T) {
+			space := stestutil.RandomDID(t)
+			shardData := []byte("Hello, failover world!")
+			shardHash, _ := mh.Sum(shardData, mh.SHA2_256, -1)
+
+			loc1 := locator.Location{
+				Commitment: ucan.NewCapability(
+					assertcap.Location.Can(),
+					space.String(),
+					assertcap.LocationCaveats{
+						Space:    space.DID(),
+						Content:  captypes.FromHash(shardHash),
+						Location: ctestutil.Urls("https://storage1.example.com/shard"),
+					},
+				),
+				Position: blobindex.Position{Offset: 7, Length: 8}, 
+			}
+			loc2 := locator.Location{
+				Commitment: ucan.NewCapability(
+					assertcap.Location.Can(),
+					space.String(),
+					assertcap.LocationCaveats{
+						Space:    space.DID(),
+						Content:  captypes.FromHash(shardHash),
+						Location: ctestutil.Urls("https://storage2.example.com/shard"),
+					},
+				),
+				Position: blobindex.Position{Offset: 7, Length: 8},
+			}
+
+			blockData := shardData[7:15] 
+			blockHash, _ := mh.Sum(blockData, mh.SHA2_256, -1)
+			blockCID := cid.NewCidV1(cid.Raw, blockHash)
+
+			lctr := newStubLocator()
+			lctr.locations.Set(blockCID.Hash(), []locator.Location{loc1, loc2})
+
+			baseRetriever, _ := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+				loc1.Commitment: shardData,
+				loc2.Commitment: shardData,
+			})
+			retriever := &failingRetriever{mockRetriever: baseRetriever, failCount: 1}
+
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
+			blk, err := exchange.GetBlock(t.Context(), blockCID)
+
+			require.NoError(t, err)
+			require.Equal(t, blockData, blk.RawData())
+			require.Equal(t, 2, retriever.calls, "should have called retrieve twice")
+		})
+
+		t.Run("GetBlocks fails over to second location for a batch", func(t *testing.T) {
+			space := stestutil.RandomDID(t)
+			shardData := []byte("AAAAABBBBB")
+			shardHash, _ := mh.Sum(shardData, mh.SHA2_256, -1)
+
+			block1Data := shardData[0:5]
+			block1CID := cidFor(block1Data)
+			block2Data := shardData[5:10]
+			block2CID := cidFor(block2Data)
+
+			shard1Commitment := ucan.NewCapability(
+				assertcap.Location.Can(),
+				space.String(),
+				assertcap.LocationCaveats{
+					Space:    space.DID(),
+					Content:  captypes.FromHash(shardHash),
+					Location: ctestutil.Urls("https://storage1.example.com/shard"),
+				},
+			)
+			shard2Commitment := ucan.NewCapability(
+				assertcap.Location.Can(),
+				space.String(),
+				assertcap.LocationCaveats{
+					Space:    space.DID(),
+					Content:  captypes.FromHash(shardHash),
+					Location: ctestutil.Urls("https://storage2.example.com/shard"),
+				},
+			)
+
+			loc1_1 := locator.Location{Commitment: shard1Commitment, Position: blobindex.Position{Offset: 0, Length: 5}}
+			loc1_2 := locator.Location{Commitment: shard1Commitment, Position: blobindex.Position{Offset: 5, Length: 5}}
+
+			loc2_1 := locator.Location{Commitment: shard2Commitment, Position: blobindex.Position{Offset: 0, Length: 5}}
+			loc2_2 := locator.Location{Commitment: shard2Commitment, Position: blobindex.Position{Offset: 5, Length: 5}}
+
+			lctr := newStubLocator()
+			lctr.locations.Set(block1CID.Hash(), []locator.Location{loc1_1, loc2_1})
+			lctr.locations.Set(block2CID.Hash(), []locator.Location{loc1_2, loc2_2})
+
+			baseRetriever, _ := newMockRetriever(map[ucan.Capability[assertcap.LocationCaveats]][]byte{
+				shard1Commitment: shardData,
+				shard2Commitment: shardData,
+			})
+			retriever := &failingRetriever{mockRetriever: baseRetriever, failCount: 1}
+
+			exchange := dagservice.NewExchange(lctr, retriever, []did.DID{space})
+			blocksCh, err := exchange.GetBlocks(t.Context(), []cid.Cid{block1CID, block2CID})
+			require.NoError(t, err)
+
+			var received [][]byte
+			for blk := range blocksCh {
+				received = append(received, blk.RawData())
+			}
+
+			require.Len(t, received, 2)
+			require.Equal(t, 2, retriever.calls, "should have called retrieve twice (one fail, one success)")
+		})
+	})
+}
+
+type failingRetriever struct {
+	*mockRetriever
+	failCount int
+	calls     int
+}
+
+func (f *failingRetriever) Retrieve(ctx context.Context, location locator.Location) (io.ReadCloser, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+
+	if call <= f.failCount {
+		return nil, fmt.Errorf("simulated retrieval failure (attempt %d)", call)
+	}
+	return f.mockRetriever.Retrieve(ctx, location)
 }
