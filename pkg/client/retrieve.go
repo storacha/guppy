@@ -21,7 +21,6 @@ import (
 
 func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.ReadCloser, error) {
 	locationCommitment := location.Commitment
-
 	space := locationCommitment.Nb().Space
 
 	nodeID, err := did.Parse(locationCommitment.With())
@@ -29,50 +28,47 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 		return nil, fmt.Errorf("parsing DID of storage provider node `%s`: %w", locationCommitment.With(), err)
 	}
 
-	urls := locationCommitment.Nb().Location
+	storageProvider, err := did.Parse(locationCommitment.With())
+	if err != nil {
+		return nil, fmt.Errorf("parsing DID of storage provider `%s`: %w", locationCommitment.With(), err)
+	}
 
+	delegations, err := c.Proofs(agentstore.CapabilityQuery{
+		Can:  contentcap.Retrieve.Can(),
+		With: space.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	prfs := make([]delegation.Proof, 0, len(delegations))
+	for _, del := range delegations {
+		prfs = append(prfs, delegation.FromDelegation(del))
+	}
+
+	start := location.Position.Offset
+	end := start + location.Position.Length - 1
+	caveats := contentcap.RetrieveCaveats{
+		Blob: contentcap.BlobDigest{Digest: locationCommitment.Nb().Content.Hash()},
+		Range: contentcap.Range{
+			Start: start,
+			End:   end,
+		},
+	}
+
+	inv, err := contentcap.Retrieve.Invoke(
+		c.Issuer(),
+		storageProvider,
+		space.String(),
+		caveats,
+		delegation.WithProof(prfs...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("invoking `space/content/retrieve`: %w", err)
+	}
+
+	urls := locationCommitment.Nb().Location
 	var reqErr error
 	for _, url := range urls {
-		storageProvider, err := did.Parse(locationCommitment.With())
-		if err != nil {
-			reqErr = fmt.Errorf("parsing DID of storage provider `%s`: %w", locationCommitment.With(), err)
-			continue
-		}
-
-		delegations, err := c.Proofs(agentstore.CapabilityQuery{
-			Can:  contentcap.Retrieve.Can(),
-			With: space.String(),
-		})
-		if err != nil {
-			reqErr = err
-			continue
-		}
-		prfs := make([]delegation.Proof, 0, len(delegations))
-		for _, del := range delegations {
-			prfs = append(prfs, delegation.FromDelegation(del))
-		}
-
-		start := location.Position.Offset
-		end := start + location.Position.Length - 1
-
-		inv, err := contentcap.Retrieve.Invoke(
-			c.Issuer(),
-			storageProvider,
-			space.String(),
-			contentcap.RetrieveCaveats{
-				Blob: contentcap.BlobDigest{Digest: locationCommitment.Nb().Content.Hash()},
-				Range: contentcap.Range{
-					Start: start,
-					End:   end,
-				},
-			},
-			delegation.WithProof(prfs...),
-		)
-		if err != nil {
-			reqErr = fmt.Errorf("invoking `space/content/retrieve`: %w", err)
-			continue
-		}
-
 		conn, err := rclient.NewConnection(nodeID, &url, c.retrievalOpts...)
 		if err != nil {
 			reqErr = fmt.Errorf("creating connection: %w", err)
@@ -114,6 +110,7 @@ func (c *Client) Retrieve(ctx context.Context, location locator.Location) (io.Re
 			reqErr = fmt.Errorf("execution failure: %w", err)
 			continue
 		}
+
 		return hres.Body(), nil
 	}
 
