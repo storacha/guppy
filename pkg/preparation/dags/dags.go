@@ -117,15 +117,20 @@ func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB f
 		return types.NewBadFSEntryError(dagScan.FsEntryID(), err)
 	}
 
-	log.Debugf("Completing DAG scan for %s with CID:", dagScan.FsEntryID(), cid)
+	// If we didn't get a CID back, it means the scan wasn't ready to complete.
+	if !cid.Defined() {
+		return nil
+	}
+
+	log.Debugf("Completing DAG scan for %s with CID: %s", dagScan.FsEntryID(), cid)
 	if err := dagScan.Complete(cid); err != nil {
 		return fmt.Errorf("completing dag scan: %w", err)
 	}
 
-	// Update the scan in the repository after completion or failure.
+	// Update the scan in the repository after completion.
 	log.Debugf("Updating dag scan %s after execution", dagScan.FsEntryID())
 	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-		return fmt.Errorf("updating dag scan after fail: %w", err)
+		return fmt.Errorf("updating dag scan after execution: %w", err)
 	}
 	return nil
 }

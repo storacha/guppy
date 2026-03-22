@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -23,7 +24,6 @@ import (
 	"github.com/storacha/guppy/pkg/client/locator"
 	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
-	"github.com/storacha/guppy/pkg/preparation"
 )
 
 var retrieveCmd = &cobra.Command{
@@ -46,13 +46,8 @@ var retrieveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
-		if err != nil {
-			return err
-		}
-		defer repo.Close()
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		space, err := cmdutil.ResolveSpace(c, args[0])
 		if err != nil {
 			return err
@@ -69,7 +64,7 @@ var retrieveCmd = &cobra.Command{
 
 		outputPath := args[2]
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
 		ctx, span := tracer.Start(ctx, "retrieve", trace.WithAttributes(
 			attribute.String("retrieval.space", space.DID().String()),
@@ -84,6 +79,12 @@ var retrieveCmd = &cobra.Command{
 				span.SetStatus(codes.Error, "")
 			}
 		}()
+
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
+		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
 
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
@@ -103,7 +104,9 @@ var retrieveCmd = &cobra.Command{
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
-			// Allow the indexing service to retrieve indexes
+			// Allow the indexing service to retrieve indexes. Enable proof pruning to avoid
+			// exceeding the max header size in authorized retrievals.
+			pruner := validator.NewProofPruner(uploadServiceVerifier, contentcap.Retrieve)
 			return delegation.Delegate(
 				c.Issuer(),
 				indexerPrincipal,
@@ -111,6 +114,7 @@ var retrieveCmd = &cobra.Command{
 					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
 				},
 				delegation.WithProof(pfs...),
+				delegation.WithProofPruning(pruner),
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})

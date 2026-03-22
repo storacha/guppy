@@ -14,6 +14,8 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	"github.com/storacha/go-ucanto/did"
 
+	"github.com/storacha/guppy/internal/ctxutil"
+	"github.com/storacha/guppy/pkg/internal/util"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
@@ -137,7 +139,8 @@ func (a API) AddNodesToUploadShards(ctx context.Context, uploadID id.UploadID, s
 	}
 
 	// Process each node by adding it to a shard
-	for _, nodeCID := range nodeCIDs {
+	log.Infow("sharding nodes", "upload", uploadID, "total", len(nodeCIDs))
+	for i, nodeCID := range nodeCIDs {
 		// AddNodeToUploadShards handles finding/creating shards and assigns the node
 		// Note: we pass nil for data since we don't have it available in this flow.
 		// The digest state will be calculated later when reading the shard.
@@ -145,7 +148,11 @@ func (a API) AddNodesToUploadShards(ctx context.Context, uploadID id.UploadID, s
 		if err != nil {
 			return fmt.Errorf("failed to add node %s to shard for upload %s: %w", nodeCID, uploadID, err)
 		}
+		if (i+1)%1000 == 0 {
+			log.Infow("sharding nodes", "upload", uploadID, "progress", i+1, "total", len(nodeCIDs))
+		}
 	}
+	log.Infow("sharded nodes", "upload", uploadID, "total", len(nodeCIDs))
 
 	return nil
 }
@@ -159,6 +166,8 @@ func (a API) roomInShard(encoder ShardEncoder, shard *model.Shard, node dagsmode
 		return false, nil // No room in the shard
 	}
 
+	// In addition to the byte limit, limit the number of slices to what can be
+	// indexed. We always put entire shards in indexes.
 	if a.MaxNodesPerIndex > 0 && shard.SliceCount() >= a.MaxNodesPerIndex {
 		return false, nil // Shard has reached maximum node count
 	}
@@ -173,7 +182,6 @@ type digestStateUpdate struct {
 }
 
 func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node dagsmodel.Node, data []byte) (digestStateUpdate, error) {
-
 	if uint64(len(data)) != node.Size() {
 		return digestStateUpdate{}, fmt.Errorf("expected %d bytes for node %s, got %d", node.Size(), node.CID(), len(data))
 	}
@@ -182,6 +190,7 @@ func (a API) addNodeToDigestState(ctx context.Context, shard *model.Shard, node 
 	if err != nil {
 		return digestStateUpdate{}, fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer hasher.reset()
 
 	err = a.ShardEncoder.WriteNode(ctx, node, data, hasher)
 	if err != nil {
@@ -209,6 +218,7 @@ func (a API) updatedShardHashState(ctx context.Context, shard *model.Shard) (*sh
 	if shard.DigestStateUpTo() < shard.Size() {
 		err := a.fastWriteShard(ctx, shard.ID(), shard.DigestStateUpTo(), h)
 		if err != nil {
+			h.reset()
 			return nil, fmt.Errorf("hashing remaining data for shard %s: %w", shard.ID(), err)
 		}
 	}
@@ -221,6 +231,7 @@ func (a API) closeShard(ctx context.Context, shard *model.Shard) error {
 	if err != nil {
 		return fmt.Errorf("getting updated shard %s hasher: %w", shard.ID(), err)
 	}
+	defer h.reset()
 	shardDigest, pieceCID, err := h.finalize(shard.Size())
 	if err != nil {
 		return fmt.Errorf("finalizing digests for shard %s: %w", shard.ID(), err)
@@ -333,13 +344,6 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		return nil
 	}
 
-	nodes, err := a.Repo.NodesByShard(ctx, shardID, offset)
-	if err != nil {
-		log.Debug("Error getting nodes for shard:", err)
-
-		return err
-	}
-
 	nodeReader, err := a.OpenNodeReader()
 	if err != nil {
 		return fmt.Errorf("failed to open node reader for shard %s: %w", shardID, err)
@@ -372,12 +376,24 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 
 	go func() {
 		defer close(jobs)
-		for idx, node := range nodes {
+
+		idx := 0
+		for nis, err := range a.Repo.NodesInShard(ctx, shardID, offset) {
+			if err != nil {
+				// If we fail to iterate nodes, send the error and stop producing jobs.
+				select {
+				case <-ctx.Done():
+					return
+				case results <- result{err: fmt.Errorf("failed to iterate nodes in shard %s: %w", shardID, err)}:
+				}
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case jobs <- job{idx: idx, node: node}:
+			case jobs <- job{idx: idx, node: nis.Node}:
 			}
+			idx++
 		}
 	}()
 
@@ -406,7 +422,7 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 		case <-ctx.Done():
 			// Stop writing, but continue draining results so workers can exit.
 			drainOnly = true
-			closeErr = ctx.Err()
+			closeErr = ctxutil.Cause(ctx)
 			continue
 		case res, ok = <-results:
 			if !ok {
@@ -447,11 +463,15 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 // node.
 func (a API) makeErrBadNodes(ctx context.Context, shardID id.ShardID, nodeReader nodereader.NodeReader) error {
 	// Collect the nodes first, because we can't read data for each node while
-	// holding the lock on the database that ForEachNode has. This means holding a
-	// bunch of nodes in memory, but it's limited to the size of a shard.
-	nodes, err := a.Repo.NodesByShard(ctx, shardID, 0)
-	if err != nil {
-		return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+	// holding the lock on the database that the NodesInShard iterator has. This
+	// means holding a bunch of nodes in memory, but it's limited to the size of a
+	// shard.
+	var nodes []dagsmodel.Node
+	for nis, err := range a.Repo.NodesInShard(ctx, shardID, 0) {
+		if err != nil {
+			return fmt.Errorf("failed to iterate over nodes in shard %s: %w", shardID, err)
+		}
+		nodes = append(nodes, nis.Node)
 	}
 
 	var errs []types.BadNodeError
@@ -475,50 +495,27 @@ func lengthVarint(size uint64) []byte {
 }
 
 func (a API) ReaderForIndex(ctx context.Context, indexID id.IndexID) (io.ReadCloser, error) {
-	index, err := a.Repo.GetIndexByID(ctx, indexID)
-	if err != nil {
-		return nil, fmt.Errorf("getting index %s: %w", indexID, err)
-	}
-
-	// Get the upload to retrieve the root CID
-	upload, err := a.Repo.GetUploadByID(ctx, index.UploadID())
-	if err != nil {
-		return nil, fmt.Errorf("getting upload for index %s: %w", indexID, err)
-	}
-	if upload.RootCID() == cid.Undef {
-		return nil, fmt.Errorf("no root CID set yet for upload %s (index %s)", upload.ID(), indexID)
-	}
-
 	// Build the index by reading shards from the database
-	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: upload.RootCID()}, -1)
 
-	// Query shards that belong to this index
-	shards, err := a.Repo.ShardsForIndex(ctx, indexID)
-	if err != nil {
-		return nil, fmt.Errorf("getting shards for index %s: %w", indexID, err)
-	}
+	// Use a placeholder for the root because it doesn't matter what it is, and we
+	// don't want to wait for it to be known. It shouldn't really be something the
+	// index knows at all.
+	indexView := blobindex.NewShardedDagIndexView(cidlink.Link{Cid: util.PlaceholderCID}, -1)
 
-	// Add all shards in this index
-	for _, s := range shards {
-		shardSlices := blobindex.NewMultihashMap[blobindex.Position](-1)
-
-		err := a.Repo.ForEachNode(ctx, s.ID(), func(node dagsmodel.Node, shardOffset uint64) error {
-			position := blobindex.Position{
-				Offset: shardOffset,
-				Length: node.Size(),
-			}
-			shardSlices.Set(node.CID().Hash(), position)
-			return nil
-		})
+	// Query all nodes across all shards in this index in a single batch query
+	nodeCount := 0
+	log.Infow("building index", "index", indexID)
+	for nii, err := range a.Repo.NodesInIndex(ctx, indexID) {
 		if err != nil {
-			return nil, fmt.Errorf("iterating nodes in shard %s: %w", s.ID(), err)
+			return nil, fmt.Errorf("iterating nodes in index %s: %w", indexID, err)
 		}
-
-		if s.Digest() == nil || len(s.Digest()) == 0 {
-			return nil, fmt.Errorf("shard %s has no digest set", s.ID())
+		nodeCount++
+		if nodeCount%10000 == 0 {
+			log.Infow("building index", "index", indexID, "nodes", nodeCount)
 		}
-		indexView.Shards().Set(s.Digest(), shardSlices)
+		indexView.SetSlice(nii.ShardDigest, nii.NodeCID.Hash(), blobindex.Position{Offset: nii.ShardOffset, Length: nii.NodeSize})
 	}
+	log.Infow("built index", "index", indexID, "nodes", nodeCount)
 
 	archReader, err := blobindex.Archive(indexView)
 	if err != nil {

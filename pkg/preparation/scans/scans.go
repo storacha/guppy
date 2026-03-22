@@ -3,14 +3,17 @@ package scans
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/guppy/pkg/preparation/scans/checksum"
 	"github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/scans/visitor"
 	"github.com/storacha/guppy/pkg/preparation/scans/walker"
+	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
 	uploadmodel "github.com/storacha/guppy/pkg/preparation/uploads/model"
@@ -29,9 +32,10 @@ type SourceAccessorFunc func(ctx context.Context, sourceID id.SourceID) (fs.FS, 
 
 // API is a dependency container for executing scans on a repository.
 type API struct {
-	Repo           Repo
-	SourceAccessor SourceAccessorFunc
-	WalkerFn       WalkerFunc
+	Repo                   Repo
+	SourceAccessor         SourceAccessorFunc
+	WalkerFn               WalkerFunc
+	AssumeUnchangedSources bool
 }
 
 var _ uploads.ExecuteScanFunc = API{}.ExecuteScan
@@ -68,7 +72,7 @@ func (a API) executeScan(ctx context.Context, upload *uploadmodel.Upload, fsEntr
 	if err != nil {
 		return nil, fmt.Errorf("accessing source: %w", err)
 	}
-	fsEntry, err := a.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, a.Repo, upload.SourceID(), upload.SpaceDID(), fsEntryCb))
+	fsEntry, err := a.WalkerFn(fsys, ".", visitor.NewScanVisitor(ctx, a.Repo, upload.SourceID(), upload.SpaceDID(), a.AssumeUnchangedSources, fsEntryCb))
 	if err != nil {
 		return nil, fmt.Errorf("recursively creating directories: %w", err)
 	}
@@ -100,10 +104,10 @@ func (a API) openFile(ctx context.Context, file *model.File) (fs.File, error) {
 // getFileByID retrieves a file by its ID from the repository, returning an error if not found.
 func (a API) getFileByID(ctx context.Context, fileID id.FSEntryID) (*model.File, error) {
 	file, err := a.Repo.GetFileByID(ctx, fileID)
-	if err != nil {
+	if err != nil && !errors.Is(err, types.ErrNotFound) {
 		return nil, fmt.Errorf("getting file by ID %s: %w", fileID, err)
 	}
-	if file == nil {
+	if errors.Is(err, types.ErrNotFound) {
 		return nil, fmt.Errorf("file with ID %s not found", fileID)
 	}
 	return file, nil
@@ -123,5 +127,35 @@ func (a API) OpenFileByID(ctx context.Context, fileID id.FSEntryID) (fs.File, id
 }
 
 func (a API) RemoveBadFSEntry(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error {
-	return a.Repo.DeleteFSEntry(ctx, spaceDID, fsEntryID)
+	// Look up the entry to get its path and sourceID before deleting
+	entry, err := a.Repo.GetFSEntryByID(ctx, fsEntryID)
+	if err != nil && !errors.Is(err, types.ErrNotFound) {
+		return fmt.Errorf("looking up bad FS entry %s: %w", fsEntryID, err)
+	}
+	if entry == nil {
+		// Already deleted, nothing to do
+		return nil
+	}
+
+	// Delete the bad entry and all ancestor directory entries so the re-scan
+	// only needs to walk the dirty path from root to this file's parent.
+	paths := append([]string{entry.Path()}, computeAncestorPaths(entry.Path())...)
+	if err := a.Repo.DeleteFSEntriesByPaths(ctx, paths, entry.SourceID(), spaceDID); err != nil {
+		return fmt.Errorf("deleting bad FS entry and ancestors for %s: %w", entry.Path(), err)
+	}
+	return nil
+}
+
+// computeAncestorPaths returns the directory paths from the parent of the given
+// path up to and including the root ".". For example, "a/b/c.txt" returns
+// ["a/b", "a", "."].
+func computeAncestorPaths(filePath string) []string {
+	var paths []string
+	dir := path.Dir(filePath)
+	for dir != "." {
+		paths = append(paths, dir)
+		dir = path.Dir(dir)
+	}
+	paths = append(paths, ".")
+	return paths
 }

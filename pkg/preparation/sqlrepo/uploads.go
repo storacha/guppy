@@ -77,7 +77,7 @@ func (r *Repo) FindOrCreateUploads(ctx context.Context, spaceDID did.DID, source
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(space_did, source_id)
 				-- Force conflicts to return the row rather than completely ignore it.
-				DO UPDATE SET id = id
+				DO UPDATE SET id = uploads.id
 			RETURNING
 				id,
 				space_did,

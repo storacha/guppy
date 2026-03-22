@@ -17,6 +17,7 @@ import (
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/client/dagservice"
 	"github.com/storacha/guppy/pkg/client/locator"
+	"github.com/storacha/guppy/pkg/config"
 	"github.com/storacha/guppy/pkg/dagfs"
 )
 
@@ -52,8 +53,13 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("invalid root CID: %w", err)
 		}
 
-		c := cmdutil.MustGetClient(*StorePathP)
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		cfg, err := config.Load[config.Config]()
+		if err != nil {
+			return err
+		}
+
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
 
 		proofs, err := c.Proofs()
 		if err != nil {

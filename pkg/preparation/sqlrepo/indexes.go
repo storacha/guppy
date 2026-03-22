@@ -3,10 +3,12 @@ package sqlrepo
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/go-ucanto/core/invocation"
+	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -17,6 +19,7 @@ func (r *Repo) ShardsNotInIndexes(ctx context.Context, uploadID id.UploadID) ([]
 		SELECT id
 		FROM shards
 		WHERE upload_id = ?
+		AND state != 'open'
 		AND NOT EXISTS (
 			SELECT 1
 			FROM shards_in_indexes si
@@ -101,6 +104,59 @@ func (r *Repo) CreateIndex(ctx context.Context, uploadID id.UploadID) (*model.In
 	}
 
 	return index, nil
+}
+
+func (r *Repo) IndexesForUpload(ctx context.Context, uploadID id.UploadID) ([]*model.Index, error) {
+	rows, err := r.db.QueryContext(ctx, r.rebind(`
+		SELECT
+			id,
+			upload_id,
+			size,
+			slice_count,
+			digest,
+			piece_cid,
+			state,
+			location_inv,
+			pdp_accept_inv
+		FROM indexes
+		WHERE upload_id = ?`),
+		uploadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var indexes []*model.Index
+	for rows.Next() {
+		index, err := model.ReadIndexFromDatabase(func(
+			id *id.IndexID,
+			uploadID *id.UploadID,
+			size *uint64,
+			sliceCount *int,
+			digest *multihash.Multihash,
+			pieceCID *cid.Cid,
+			state *model.BlobState,
+			location *invocation.Invocation,
+			pdpAccept *invocation.Invocation,
+		) error {
+			return rows.Scan(id, uploadID, size, sliceCount, util.DbBytes(digest), util.DbCID(pieceCID), state, util.DbInvocation(location), util.DbInvocation(pdpAccept))
+		})
+		if err != nil {
+			return nil, err
+		}
+		if index == nil {
+			continue
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return indexes, nil
 }
 
 func (r *Repo) IndexesForUploadByState(ctx context.Context, uploadID id.UploadID, state model.BlobState) ([]*model.Index, error) {
@@ -347,4 +403,62 @@ func (r *Repo) ShardsForIndex(ctx context.Context, indexID id.IndexID) ([]*model
 	}
 
 	return shards, nil
+}
+
+func (r *Repo) NodesInIndex(ctx context.Context, indexID id.IndexID) iter.Seq2[blobs.NodeInIndex, error] {
+	return func(yield func(blobs.NodeInIndex, error) bool) {
+		stmt, err := r.prepareStmt(ctx, `
+		SELECT s.id, s.digest, nodes.cid, nodes.size, nu.shard_offset
+		FROM shards_in_indexes si
+		JOIN shards s ON s.id = si.shard_id
+		JOIN node_uploads nu ON nu.shard_id = si.shard_id
+		JOIN nodes ON nodes.cid = nu.node_cid AND nodes.space_did = nu.space_did
+		WHERE si.index_id = ?`)
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to prepare statement: %w", err)) {
+				return
+			}
+		}
+		rows, err := stmt.QueryContext(ctx, indexID)
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to query nodes in index %s: %w", indexID, err)) {
+				return
+			}
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var shardID id.ShardID
+			var shardDigest multihash.Multihash
+			var nodeCID cid.Cid
+			var nodeSize uint64
+			var shardOffset uint64
+			if err := rows.Scan(&shardID, util.DbBytes(&shardDigest), util.DbCID(&nodeCID), &nodeSize, &shardOffset); err != nil {
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to scan node row in index %s: %w", indexID, err)) {
+					return
+				}
+			}
+			if len(shardDigest) == 0 {
+				if !yield(blobs.NodeInIndex{}, fmt.Errorf("failed to iterate nodes in index %s, because shard with ID %s has no digest set", indexID, shardID)) {
+					return
+				}
+			}
+			if !yield(blobs.NodeInIndex{
+				NodeCID:     nodeCID,
+				NodeSize:    nodeSize,
+				ShardDigest: shardDigest,
+				ShardOffset: shardOffset,
+			}, nil) {
+				return
+			}
+		}
+
+		err = rows.Err()
+		if err != nil {
+			if !yield(blobs.NodeInIndex{}, fmt.Errorf("error iterating node rows in index %s: %w", indexID, err)) {
+				return
+			}
+		}
+	}
 }

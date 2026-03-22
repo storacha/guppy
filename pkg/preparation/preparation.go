@@ -54,10 +54,11 @@ type API struct {
 type Option func(cfg *config) error
 
 type config struct {
-	getLocalFSForPathFn   func(path string) (fs.FS, error)
-	maxNodesPerIndex      int
-	blobUploadParallelism int
-	bus                   bus.Bus
+	getLocalFSForPathFn    func(path string) (fs.FS, error)
+	maxNodesPerIndex       int
+	blobUploadParallelism  int
+	assumeUnchangedSources bool
+	bus                    bus.Bus
 }
 
 const defaultBlobUploadParallelism = 6
@@ -66,16 +67,22 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
 		blobUploadParallelism: defaultBlobUploadParallelism,
 		getLocalFSForPathFn: func(path string) (fs.FS, error) {
-			// A bit odd, but `fs.Sub()` happens to be okay with referring directly to
-			// a single file, where opening `"."` gives you the file. `os.DirFS()`
-			// gets grumpy if it's pointing at a file, using `fs.Sub()` over it works
-			// just fine. So by being a little roundabout here, we can support both
-			// single files and directories transparently.
-			path, err := filepath.Rel("/", path)
+			absPath, err := filepath.Abs(path)
 			if err != nil {
-				return nil, fmt.Errorf("getting relative path: %w", err)
+				return nil, fmt.Errorf("resolving absolute path: %w", err)
 			}
-			fsys, err := fs.Sub(os.DirFS("/"), path)
+			info, err := os.Stat(absPath)
+			if err != nil {
+				return nil, fmt.Errorf("statting path: %w", err)
+			}
+			// `os.DirFS()` only accepts directories, so fall back to a sub-FS when
+			// the target is a single file.
+			if info.IsDir() {
+				return os.DirFS(absPath), nil
+			}
+			dir := filepath.Dir(absPath)
+			base := filepath.Base(absPath)
+			fsys, err := fs.Sub(os.DirFS(dir), base)
 			if err != nil {
 				return nil, fmt.Errorf("getting sub fs: %w", err)
 			}
@@ -104,9 +111,10 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	}
 
 	scansAPI := scans.API{
-		Repo:           repo,
-		SourceAccessor: sourcesAPI.AccessByID,
-		WalkerFn:       walker.WalkDir,
+		Repo:                   repo,
+		SourceAccessor:         sourcesAPI.AccessByID,
+		WalkerFn:               walker.WalkDir,
+		AssumeUnchangedSources: cfg.assumeUnchangedSources,
 	}
 
 	dagsAPI := dags.API{
@@ -153,6 +161,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 
 	uploadsAPI = uploads.API{
 		Repo:                       repo,
+		AssumeUnchangedSources:     cfg.assumeUnchangedSources,
 		ExecuteScan:                scansAPI.ExecuteScan,
 		ExecuteDagScansForUpload:   dagsAPI.ExecuteDagScansForUpload,
 		AddNodesToUploadShards:     blobsAPI.AddNodesToUploadShards,
@@ -198,6 +207,13 @@ func WithGetLocalFSForPathFn(getLocalFSForPathFn func(path string) (fs.FS, error
 func WithMaxNodesPerIndex(maxNodesPerIndex int) Option {
 	return func(cfg *config) error {
 		cfg.maxNodesPerIndex = maxNodesPerIndex
+		return nil
+	}
+}
+
+func WithAssumeUnchangedSources(assume bool) Option {
+	return func(cfg *config) error {
+		cfg.assumeUnchangedSources = assume
 		return nil
 	}
 }

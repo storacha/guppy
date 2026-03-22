@@ -39,7 +39,11 @@ type Blob interface {
 	PDPAccept() invocation.Invocation
 	SpaceBlobAdded(client.AddedBlob) error
 	Added() error
-	isBlob()
+
+	// blobType returns a string representing the type of the blob (e.g. "Shard"
+	// or "Index"). This is used for logging and error messages to provide more
+	// context about the blob.
+	blobType() string
 }
 
 func validBlobState(state BlobState) bool {
@@ -106,11 +110,14 @@ func (b *blob) PDPAccept() invocation.Invocation {
 	return b.pdpAccept
 }
 
-func (b *blob) String() string {
+// blobString returns a string representation of a Blob, including its type, ID,
+// and CID (if available). This should be used in the String() method of
+// concrete Blob types to ensure consistent formatting.
+func blobString[B Blob](b B) string {
 	if b.CID() != cid.Undef {
-		return fmt.Sprintf("Shard[id=%s, cid=%s]", b.id, b.CID())
+		return fmt.Sprintf("%s[id=%s, cid=%s]", b.blobType(), b.ID(), b.CID())
 	}
-	return fmt.Sprintf("Shard[id=%s]", b.id)
+	return fmt.Sprintf("%s[id=%s]", b.blobType(), b.ID())
 }
 
 func (b *blob) Added() error {
@@ -139,7 +146,9 @@ type Shard struct {
 	pieceCIDState   []byte
 }
 
-func (s *Shard) isBlob() {}
+func (s *Shard) blobType() string { return "Shard" }
+
+func (s *Shard) String() string { return blobString(s) }
 
 func (s *Shard) DigestStateUpTo() uint64 {
 	return s.digestStateUpTo
@@ -292,7 +301,9 @@ type Index struct {
 	blob
 }
 
-func (i *Index) isBlob() {}
+func (i *Index) blobType() string { return "Index" }
+
+func (i *Index) String() string { return blobString(i) }
 
 var _ Blob = &Index{}
 

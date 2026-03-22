@@ -10,8 +10,10 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
+	"github.com/storacha/guppy/cmd/upload/check"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/bus"
@@ -25,17 +27,27 @@ import (
 var log = logging.Logger("cmd/upload")
 
 var rootFlags struct {
-	all         bool
-	retry       bool
-	parallelism uint64
+	all                    bool
+	retry                  bool
+	parallelism            uint64
+	assumeUnchangedSources bool
 }
 
 func init() {
+	Cmd.PersistentFlags().String(
+		"database-url",
+		"",
+		wordwrap.WrapString("PostgreSQL connection URL (e.g., postgres://user:pass@host:5432/dbname). If set, uses PostgreSQL instead of SQLite. If search_path is set to a schema name (e.g., postgres://user:pass@host:5432/dbname?search_path=guppy), the specified schema will be used, and will be created if it does not exist.", 60),
+	)
+	cobra.CheckErr(viper.BindPFlag("repo.database_url", Cmd.PersistentFlags().Lookup("database-url")))
+
 	Cmd.Flags().BoolVar(&rootFlags.all, "all", false, "Upload all sources (even if arguments are provided)")
 	Cmd.Flags().BoolVar(&rootFlags.retry, "retry", false, "Auto-retry failed uploads")
 	Cmd.Flags().Uint64Var(&rootFlags.parallelism, "parallelism", 6, "Number of parallel shard uploads to perform concurrently")
+	Cmd.Flags().BoolVar(&rootFlags.assumeUnchangedSources, "assume-unchanged-sources", false, "When resuming, skip filesystem rescan if a completed scan already exists")
 
 	Cmd.AddCommand(source.Cmd)
+	Cmd.AddCommand(check.Cmd)
 }
 
 var Cmd = &cobra.Command{
@@ -74,7 +86,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath(), sqlrepo.WithEventBus(eb))
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo, sqlrepo.WithEventBus(eb))
 		if err != nil {
 			return err
 		}
@@ -84,7 +96,7 @@ var Cmd = &cobra.Command{
 		// end of this function anyhow.
 		// defer repo.Close()
 
-		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
 			return err
@@ -92,6 +104,7 @@ var Cmd = &cobra.Command{
 
 		api := preparation.NewAPI(repo, client,
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
+			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)

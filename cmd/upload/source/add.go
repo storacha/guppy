@@ -44,7 +44,7 @@ var AddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		repo, err := preparation.OpenRepo(ctx, cfg.Repo.DatabasePath())
+		repo, err := preparation.OpenRepo(ctx, cfg.Repo)
 		if err != nil {
 			return err
 		}
@@ -67,7 +67,7 @@ var AddCmd = &cobra.Command{
 			return fmt.Errorf("resolving absolute path: %w", err)
 		}
 
-		client := cmdutil.MustGetClient(cfg.Repo.Dir)
+		client := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 		spaceDID, err := cmdutil.ResolveSpace(client, spaceArg)
 		if err != nil {
 			return err

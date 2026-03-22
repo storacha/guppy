@@ -73,6 +73,10 @@ type API struct {
 
 	// Publishes events observation
 	Publisher bus.Publisher
+
+	// AssumeUnchangedSources skips the filesystem scan when a completed scan
+	// already exists, assuming the filesystem hasn't changed since the last run.
+	AssumeUnchangedSources bool
 }
 
 // FindOrCreateUploads creates uploads for a given space and its associated sources.
@@ -216,6 +220,8 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	signal(dagScansAvailable)
 	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
+	signal(uploadedShardsAvailable)
+	signal(uploadedIndexesAvailable)
 	close(scansAvailable)
 
 	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
@@ -371,6 +377,18 @@ func runScanWorker(
 
 		// doWork
 		func() error {
+			if api.AssumeUnchangedSources {
+				upload, err := api.Repo.GetUploadByID(ctx, uploadID)
+				if err != nil {
+					return fmt.Errorf("checking upload for existing scan: %w", err)
+				}
+				if upload.HasRootFSEntryID() {
+					log.Infow("Skipping FS rescan (--assume-unchanged-sources): scan already exists", "upload", uploadID)
+					return nil
+				}
+				log.Infow("No existing scan found, performing FS scan despite --assume-unchanged-sources", "upload", uploadID)
+			}
+
 			err := api.ExecuteScan(ctx, uploadID, func(entry scanmodel.FSEntry) error {
 				_, isDirectory := entry.(*scanmodel.Directory)
 				_, err := api.Repo.CreateDAGScan(ctx, entry.ID(), isDirectory, uploadID, spaceDID)
@@ -567,13 +585,18 @@ func runIndexingWorker(
 		span.End()
 	}()
 
+	handleClosedIndex := func(index *blobsmodel.Index) error {
+		signal(closedIndexesAvailable)
+		return nil
+	}
+
 	return Worker(
 		ctx,
 		shardsNeedIndexing,
 
 		// doWork
 		func() error {
-			err := api.AddShardsToUploadIndexes(ctx, uploadID, nil)
+			err := api.AddShardsToUploadIndexes(ctx, uploadID, handleClosedIndex)
 			if err != nil {
 				return fmt.Errorf("adding shards to indexes for upload %s: %w", uploadID, err)
 			}
@@ -582,18 +605,13 @@ func runIndexingWorker(
 
 		// finalize
 		func() error {
-
 			// Close any remaining open indexes
-			err := api.CloseUploadIndexes(ctx, uploadID, nil)
+			err := api.CloseUploadIndexes(ctx, uploadID, handleClosedIndex)
 			if err != nil {
 				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
-
-			// We can't add indexes until the root CID is set, so we signal way down
-			// here. This means that in practice, the index worker only runs once,
-			// after all the shards are closed (but not necessarily added).
-			signal(closedIndexesAvailable)
 			close(closedIndexesAvailable)
+
 			return nil
 		},
 	)

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"github.com/storacha/guppy/cmd/gateway/banner"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/agentstore"
@@ -69,9 +71,12 @@ func init() {
 		"External HTTPS URL at which this gateway is reachable by peers (e.g. "+
 			"https://localhost:3443). Delegated routing responses served by the "+
 			"gateway will point to this URL as the location of blocks, which must be "+
-			"served over HTTPS.",
+			"served over HTTPS. This option is required to enable delegated routing "+
+			"responses, which are required for Kubo to retrieve content from the "+
+			"gateway. If not set, the gateway will still serve content over HTTP but "+
+			"will not include routing responses.",
 		80))
-	cobra.CheckErr(viper.BindPFlag("gateway.advertise-url", serveCmd.Flags().Lookup("advertise-url")))
+	cobra.CheckErr(viper.BindPFlag("gateway.advertise_url", serveCmd.Flags().Lookup("advertise-url")))
 
 	serveCmd.Flags().BoolP("subdomain", "s", subdomainEnabled, "Enabled subdomain gateway mode (e.g. <cid>.ipfs.<gateway-host>)")
 	cobra.CheckErr(viper.BindPFlag("gateway.subdomain.enabled", serveCmd.Flags().Lookup("subdomain")))
@@ -97,6 +102,8 @@ var serveCmd = &cobra.Command{
 			"Spaces can be specified by DID or by name.",
 		80),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		cfg, err := config.Load[config.Config]()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
@@ -108,7 +115,7 @@ var serveCmd = &cobra.Command{
 
 		indexHTML = []byte(strings.ReplaceAll(string(indexHTML), "{{.Version}}", build.Version))
 
-		c := cmdutil.MustGetClient(cfg.Repo.Dir)
+		c := cmdutil.MustGetClient(cfg.Repo.Dir, cfg.Network)
 
 		pub, err := crypto.UnmarshalEd25519PublicKey(c.Issuer().Verifier().Raw())
 		cobra.CheckErr(err)
@@ -146,7 +153,14 @@ var serveCmd = &cobra.Command{
 			spaces = slices.Collect(maps.Keys(authdSpaces))
 		}
 
-		indexer, indexerPrincipal := cmdutil.MustGetIndexClient()
+		indexer, indexerPrincipal := cmdutil.MustGetIndexClient(cfg.Network)
+
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
+		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -165,6 +179,9 @@ var serveCmd = &cobra.Command{
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
+			// Allow the indexing service to retrieve indexes. Enable proof pruning to avoid
+			// exceeding the max header size in authorized retrievals.
+			pruner := validator.NewProofPruner(uploadServiceVerifier, contentcap.Retrieve)
 			caps := make([]ucan.Capability[ucan.NoCaveats], 0, len(spaces))
 			for _, space := range spaces {
 				caps = append(caps, ucan.NewCapability(contentcap.RetrieveAbility, space.String(), ucan.NoCaveats{}))
@@ -172,6 +189,7 @@ var serveCmd = &cobra.Command{
 
 			opts := []delegation.Option{
 				delegation.WithProof(pfs...),
+				delegation.WithProofPruning(pruner),
 				delegation.WithExpiration(int(time.Now().Add(30 * time.Second).Unix())),
 			}
 
@@ -288,6 +306,17 @@ var serveCmd = &cobra.Command{
 			e.GET("/routing/v1/providers/*", routingHandler)
 			e.GET("/routing/v1/peers/*", routingHandler)
 		}
+
+		// shut down the server gracefully on context cancellation
+		go func() {
+			<-cmd.Context().Done()
+			cmd.Println("\nShutting down server...")
+			ctx, cancel := context.WithTimeout(cmd.Context(), time.Second*5)
+			defer cancel()
+			if err := e.Shutdown(ctx); err != nil {
+				cmd.PrintErrf("shutting down server: %s", err.Error())
+			}
+		}()
 
 		// print banner after short delay to ensure it only appears if no errors
 		// occurred during startup

@@ -2,7 +2,14 @@
 
 # Performs an upload and retrieval test using the guppy client CLI.
 #
-# Usage: test/doupload.sh
+# Usage: test/doupload [--database-url <url>]
+#
+# Options:
+#   --database-url <url>  Use PostgreSQL instead of SQLite. The URL can either
+#                         include a database name (e.g., postgres://localhost/mydb)
+#                         or omit it (e.g., postgres://localhost), in which case a
+#                         temporary database is created and dropped on exit.
+#                         To use a specific schema, add ?search_path=<name> to the URL.
 #
 # The test will:
 # 1. Create a temporary email inbox using maildrop.cc
@@ -17,11 +24,66 @@
 set -e
 set -o pipefail
 
-export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
-export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
-export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
-export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
-export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
+# Parse arguments
+database_url=""
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--database-url)
+			database_url="$2"
+			shift 2
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Usage: test/doupload [--database-url <url>]"
+			exit 1
+			;;
+	esac
+done
+
+# If a database URL was provided, set up the database.
+created_db_name=""
+if [[ -n "$database_url" ]]; then
+	# Check for psql
+	if ! command -v psql &> /dev/null; then
+		echo "psql could not be found, please install it to use --database-url."
+		exit 1
+	fi
+
+	# Parse the URL to check if a database name is included.
+	# Split off query string first, then check the path component.
+	# postgres://user:pass@host:port/dbname?sslmode=disable -> has db name
+	# postgres://user:pass@host:port?sslmode=disable        -> no db name
+	# postgres://user:pass@host:port/?sslmode=disable       -> no db name
+	# postgres://user:pass@host:port                        -> no db name
+	url_base="${database_url%%\?*}"        # everything before ?
+	url_query=""
+	if [[ "$database_url" == *"?"* ]]; then
+		url_query="?${database_url#*\?}"   # ?sslmode=disable&...
+	fi
+
+	# After the scheme (postgres://), find the path after the host
+	after_scheme="${url_base#*://}"         # user:pass@host:port/dbname
+	db_path="${after_scheme#*/}"            # dbname (or same as after_scheme if no /)
+
+	# No db name if: no / found (db_path == after_scheme), or path is empty
+	if [[ "$db_path" == "$after_scheme" ]] || [[ -z "$db_path" ]]; then
+		# No database name provided; create a temporary one
+		created_db_name="guppy_test_$(head -c 8 < /dev/urandom | xxd -p)"
+		# Strip trailing slash from base
+		url_base="${url_base%/}"
+
+		# We need to connect to the "postgres" database to create a new database. We
+		# also need to strip out parameters that Go's adapter understands but psql
+		# doesn't, namely `search_path`. Conveniently, we also don't need to set a
+		# search_path for this operation.
+		psql_query=$(echo "$url_query" | sed 's/[?&]search_path=[^&]*//' | sed 's/^&/?/')
+		postgres_db_url="${url_base}/postgres${psql_query}"
+
+		psql "$postgres_db_url" -c "CREATE DATABASE ${created_db_name};" >/dev/null
+		database_url="${url_base}/${created_db_name}${url_query}"
+		echo "Created temporary database: ${created_db_name}"
+	fi
+fi
 
 # Check for dependencies
 if ! command -v jq &> /dev/null; then
@@ -42,10 +104,15 @@ exec 3>&1
 
 sandbox="doupload-dir"
 
-# Function wrapper to properly invoke guppy with word splitting
-guppy() {
-	go run .. --data-dir ./$sandbox/storacha "$@"
-}
+go build -gcflags="all=-N -l" .. || { echo "Failed to build guppy"; exit 1; }
+
+export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
+export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
+export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
+export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
+export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
+export GUPPY_REPO_DATA_DIR="./$sandbox/storacha"
+export GUPPY_REPO_DATABASE_URL="$database_url"
 
 dataDir="$sandbox/data"
 outDir1="$sandbox/out1"
@@ -73,6 +140,12 @@ cleanup() {
 			fi
 		fi
 	done
+
+	# Drop temporary database if we created one
+	if [[ -n "$created_db_name" ]]; then
+		echo "Dropping temporary database: ${created_db_name}"
+		psql "$postgres_db_url" -c "DROP DATABASE IF EXISTS ${created_db_name};" >/dev/null 2>&1 || true
+	fi
 }
 
 # Set up trap to cleanup on EXIT, INT, TERM
@@ -110,29 +183,39 @@ main () {
 
 	echo
 	echo "🎁 Generating new space"
-	space=$(guppy space generate | tee /dev/fd/3)
+	space=$(./guppy space generate | tee /dev/fd/3)
 
 	echo
 	echo "📜 Listing space info"
-	guppy space info "$space"
+	./guppy space info "$space"
 
 	echo
 	echo "📤 Uploading data from $dataDir to space $space"
-	guppy upload source add "$space" "$dataDir"
-	rootCID=$(guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
+	./guppy upload source add "$space" "$dataDir"
+	rootCID=$(./guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
+
+	echo
+	echo "🧐 Checking local upload state"
+	./guppy upload check "$space"
+	echo "✅ Upload state passed checks!"
+
+	echo
+	echo "🕵 Verifying uploaded data is accessible and consistent"
+	./guppy verify "$rootCID"
+	echo "✅ Uploaded data verified!"
 
 	echo
 	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
-	guppy retrieve "$space" "$rootCID" "$outDir1"
+	./guppy retrieve "$space" "$rootCID" "$outDir1"
 
 	echo
 	echo "📥 Retrieving data from only subdir with root CID $rootCID to $outDir2"
-	guppy retrieve "$space" "$rootCID/small-files" "$outDir2"
+	./guppy retrieve "$space" "$rootCID/small-files" "$outDir2"
 
 
 	echo
 	echo "🔄 Resetting client"
-	guppy reset
+	./guppy reset
 	echo "🔐 Logging in as $account again"
 
 	# Log in again
@@ -143,13 +226,13 @@ main () {
 
 	echo
 	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir3"
-	guppy retrieve "$space" "$rootCID" "$outDir3"
+	./guppy retrieve "$space" "$rootCID" "$outDir3"
 
 	echo "↔️ Verifying retrieved data matches original"
 	diff -r "$dataDir" "$outDir1"
 	diff -r "$dataDir/small-files" "$outDir2"
 	diff -r "$dataDir" "$outDir3"
-	echo "✅ Data verified!"
+	echo "✅ Retrieval verified!"
 
 	jq -n \
 		--arg account "$account" \
@@ -163,7 +246,7 @@ main () {
 log_in() {
 	local account="$1"
 	# Start login in background
-	guppy login "$account" >/dev/null &
+	./guppy login "$account" >/dev/null &
 	login_pid=$!
 	cleanup_pids+=("$login_pid")
 

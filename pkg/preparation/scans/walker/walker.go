@@ -14,6 +14,10 @@ var log = logging.Logger("preparation/scans/walker")
 // FSVisitor is an interface that defines methods for visiting files and directories
 // during a file system walk.
 type FSVisitor interface {
+	// SkipEntry is called for each entry before visiting it. If it returns a
+	// non-nil entry and true, the walker uses the returned entry and skips
+	// visiting (no stat for files, no recursion for directories).
+	SkipEntry(path string, dirEntry fs.DirEntry) (model.FSEntry, bool)
 	VisitFile(path string, dirEntry fs.DirEntry) (*model.File, error)
 	VisitDirectory(path string, dirEntry fs.DirEntry, children []model.FSEntry) (*model.Directory, error)
 }
@@ -33,6 +37,9 @@ func WalkDir(fsys fs.FS, root string, visitor FSVisitor) (model.FSEntry, error) 
 // walkDir recursively descends the file system, calling the visitor for each file and directory.
 func walkDir(fsys fs.FS, name string, d fs.DirEntry, visitor FSVisitor) (model.FSEntry, error) {
 	log.Debugf("Walking %s", name)
+	if entry, skip := visitor.SkipEntry(name, d); skip {
+		return entry, nil
+	}
 	if !d.IsDir() {
 		return visitor.VisitFile(name, d)
 	}

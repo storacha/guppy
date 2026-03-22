@@ -1,12 +1,16 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/ipfs/go-cid"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 )
+
+// ErrNotFound is returned when a requested entity is not found in the repository.
+var ErrNotFound = errors.New("not found")
 
 type EmptyError struct {
 	Field string
