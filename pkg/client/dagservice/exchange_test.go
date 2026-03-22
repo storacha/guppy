@@ -729,7 +729,7 @@ func TestStorachaExchange(t *testing.T) {
 						Location: ctestutil.Urls("https://storage1.example.com/shard"),
 					},
 				),
-				Position: blobindex.Position{Offset: 7, Length: 8}, 
+				Position: blobindex.Position{Offset: 7, Length: 8},
 			}
 			loc2 := locator.Location{
 				Commitment: ucan.NewCapability(
@@ -744,7 +744,7 @@ func TestStorachaExchange(t *testing.T) {
 				Position: blobindex.Position{Offset: 7, Length: 8},
 			}
 
-			blockData := shardData[7:15] 
+			blockData := shardData[7:15]
 			blockHash, _ := mh.Sum(blockData, mh.SHA2_256, -1)
 			blockCID := cid.NewCidV1(cid.Raw, blockHash)
 
