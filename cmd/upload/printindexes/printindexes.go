@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	"github.com/spf13/cobra"
+	assertcap "github.com/storacha/go-libstoracha/capabilities/assert"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/go-ucanto/validator"
 
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/config"
@@ -120,7 +123,32 @@ func printIndex(cmd *cobra.Command, idx *model.Index) {
 	cap := caps[0]
 	cmd.Printf("      Subject:   %s\n", cap.With())
 	cmd.Printf("      Ability:   %s\n", cap.Can())
-	cmd.Printf("      Caveats:   %v\n", cap.Nb())
+
+	match, err := assertcap.Location.Match(validator.NewSource(cap, loc))
+	if err != nil {
+		cmd.Printf("      Caveats:   (not a valid assert/location: %v)\n", err)
+		return
+	}
+
+	nb := match.Value().Nb()
+	cmd.Printf("      Caveats:\n")
+	cmd.Printf("        Content:  %x\n", []byte(nb.Content.Hash()))
+
+	urls := make([]string, len(nb.Location))
+	for i, u := range nb.Location {
+		urls[i] = u.String()
+	}
+	cmd.Printf("        Location: [%s]\n", strings.Join(urls, ", "))
+
+	if nb.Range != nil {
+		if nb.Range.Length != nil {
+			cmd.Printf("        Range:    offset=%d, length=%d\n", nb.Range.Offset, *nb.Range.Length)
+		} else {
+			cmd.Printf("        Range:    offset=%d\n", nb.Range.Offset)
+		}
+	}
+
+	cmd.Printf("        Space:    %s\n", nb.Space.String())
 }
 
 type uploadInfo struct {
