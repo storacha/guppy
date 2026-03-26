@@ -3,6 +3,7 @@ package client_test
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -130,6 +131,55 @@ func TestRetrieve(t *testing.T) {
 		_, err = c.Retrieve(testContext(t), location)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "parsing DID")
+	})
+
+	t.Run("fails over to second URL", func(t *testing.T) {
+		testData := []byte("Hello, URL failover!")
+		dataHash, _ := multihash.Sum(testData, multihash.SHA2_256, -1)
+
+		space, _ := ed25519signer.Generate()
+		storageProvider, _ := ed25519signer.Generate()
+
+		successURL, _ := url.Parse(fmt.Sprintf("https://storage-ok.example.com/blob/%s", digestutil.Format(dataHash)))
+		failURL, _ := url.Parse(fmt.Sprintf("https://storage-fail.example.com/blob/%s", digestutil.Format(dataHash)))
+
+		retrievalClient := testutil.NewRetrievalClient(t, storageProvider, testData)
+		failoverTransport := &testutil.FailoverTransport{
+			FailURL: *failURL,
+			Next:    retrievalClient.Transport,
+		}
+		httpClient := &http.Client{Transport: failoverTransport}
+
+		locationCommitment := ucan.NewCapability(
+			assertcap.Location.Can(),
+			storageProvider.DID().String(),
+			assertcap.LocationCaveats{
+				Space:   space.DID(),
+				Content: captypes.FromHash(dataHash),
+				Range: &assertcap.Range{
+					Offset: 0,
+					Length: testutil.Ptr(uint64(len(testData))),
+				},
+				Location: []url.URL{*failURL, *successURL},
+			},
+		)
+
+		c, _ := testutil.Client(testutil.WithClientOptions(client.WithRetrievalOptions(rclient.WithClient(httpClient))))
+		cap := ucan.NewCapability("*", space.DID().String(), ucan.NoCaveats{})
+		proof, _ := delegation.Delegate(space, c.Issuer(), []ucan.Capability[ucan.NoCaveats]{cap}, delegation.WithNoExpiration())
+		c.AddProofs(proof)
+
+		location := locator.Location{
+			Commitment: locationCommitment,
+			Position:   blobindex.Position{Offset: 0, Length: uint64(len(testData))},
+		}
+
+		dataReader, err := c.Retrieve(testContext(t), location)
+		require.NoError(t, err)
+		data, _ := io.ReadAll(dataReader)
+		dataReader.Close()
+		require.Equal(t, testData, data)
+		require.Equal(t, 2, failoverTransport.Calls, "should have called transport twice")
 	})
 
 	t.Run("handles connection errors", func(t *testing.T) {
