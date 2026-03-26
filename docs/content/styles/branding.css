@@ -242,7 +242,7 @@ body.env-staging [data-env="staging"] {
 /* Admonitions */
 .md-typeset .admonition,
 .md-typeset details {
-  border-radius: 10px;
+  border-radius: 0.1rem;
   border-width: 1px;
 }
 
