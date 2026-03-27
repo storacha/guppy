@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -169,15 +170,14 @@ func (e BlobUploadError) ID() id.ID {
 }
 
 type BlobUploadErrors struct {
-	errs []BlobUploadError
+	errs []error
 }
 
-func NewBlobUploadErrors(errs []BlobUploadError) error {
+func NewBlobUploadErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
 	return RetriableError{err: BlobUploadErrors{errs: errs}}
-}
-
-func (e BlobUploadErrors) Errs() []BlobUploadError {
-	return e.errs
 }
 
 func (e BlobUploadErrors) Error() string {
@@ -190,9 +190,7 @@ func (e BlobUploadErrors) Error() string {
 }
 
 func (e BlobUploadErrors) Unwrap() []error {
-	errs := make([]error, len(e.errs))
-	for i, err := range e.errs {
-		errs[i] = err
-	}
-	return errs
+	return e.errs
 }
+
+type BlobAddTask func(ctx context.Context) (error, error)

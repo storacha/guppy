@@ -164,14 +164,13 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		blobAddOptions = append(blobAddOptions, clientpkg.WithPutClient(cfg.putHTTPClient))
 	}
 	storachaAPI := storacha.API{
-		Repo:                  repo,
-		Client:                client,
-		ReaderForShard:        blobsAPI.ReaderForShard,
-		ReaderForIndex:        blobsAPI.ReaderForIndex,
-		BlobUploadParallelism: cfg.blobUploadParallelism,
-		Bus:                   cfg.bus,
-		Replicas:              cfg.replicas,
-		BlobAddOptions:        blobAddOptions,
+		Repo:           repo,
+		Client:         client,
+		ReaderForShard: blobsAPI.ReaderForShard,
+		ReaderForIndex: blobsAPI.ReaderForIndex,
+		Bus:            cfg.bus,
+		Replicas:       cfg.replicas,
+		BlobAddOptions: blobAddOptions,
 	}
 
 	uploadsAPI = uploads.API{
@@ -183,10 +182,11 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		AddShardsToUploadIndexes:   blobsAPI.AddShardsToUploadIndexes,
 		CloseUploadShards:          blobsAPI.CloseUploadShards,
 		CloseUploadIndexes:         blobsAPI.CloseUploadIndexes,
-		AddShardsForUpload:         storachaAPI.AddShardsForUpload,
+		FindShardAddTasksForUpload: storachaAPI.FindShardAddTasksForUpload,
+		FindIndexAddTasksForUpload: storachaAPI.FindIndexAddTasksForUpload,
+		BlobUploadParallelism:      cfg.blobUploadParallelism,
 		PostProcessUploadedShards:  storachaAPI.PostProcessUploadedShards,
 		PostProcessUploadedIndexes: storachaAPI.PostProcessUploadedIndexes,
-		AddIndexesForUpload:        storachaAPI.AddIndexesForUpload,
 		AddStorachaUploadForUpload: storachaAPI.AddStorachaUploadForUpload,
 		RemoveBadFSEntry:           scansAPI.RemoveBadFSEntry,
 		RemoveBadNodes:             dagsAPI.RemoveBadNodes,
