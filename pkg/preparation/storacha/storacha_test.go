@@ -35,7 +35,7 @@ import (
 // padding to every "CAR" to make sure it's definitely long enough.
 var padding = bytes.Repeat([]byte{0}, 127)
 
-func TestAddShardsForUpload(t *testing.T) {
+func TestFindShardAddTasksForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s, `space/blob/replicate`s, and `filecoin/offer`s a CAR for each shard", func(t *testing.T) {
 		db := testdb.CreateTestDB(t)
 		repo := stestutil.Must(sqlrepo.New(db))(t)
@@ -53,11 +53,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &client,
-			ReaderForShard:        carForShard,
-			BlobUploadParallelism: 1,
-			Replicas:              3,
+			Repo:           repo,
+			Client:         &client,
+			ReaderForShard: carForShard,
+			Replicas:       3,
 		}
 
 		blobsApi := blobs.API{
@@ -83,8 +82,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		secondShard := shards[0]
 
 		// Upload shards that are ready to go.
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload shards
 		firstShard, err = repo.GetShardByID(t.Context(), firstShard.ID())
@@ -131,8 +135,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Now close the upload shards and run it again.
 		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload second shard
 		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
@@ -182,11 +191,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &client,
-			ReaderForShard:        carForShard,
-			BlobUploadParallelism: 1,
-			Replicas:              3,
+			Repo:           repo,
+			Client:         &client,
+			ReaderForShard: carForShard,
+			Replicas:       3,
 		}
 
 		blobsApi := blobs.API{
@@ -203,8 +211,13 @@ func TestAddShardsForUpload(t *testing.T) {
 
 		client.SpaceBlobAddError = fmt.Errorf("simulated SpaceBlobAdd error")
 
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
-		require.ErrorContains(t, err, "simulated SpaceBlobAdd error")
+		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, err)
+			require.ErrorContains(t, nonFatal, "simulated SpaceBlobAdd error")
+		}
 		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
@@ -216,7 +229,7 @@ func TestAddShardsForUpload(t *testing.T) {
 		require.Len(t, client.FilecoinOfferInvocations, 0)
 
 		// It should have closed the first shard's reader.
-		require.Len(t, shardReadersClosed, 1, "expected shard readerto be closed, even though it failed")
+		require.Len(t, shardReadersClosed, 1, "expected shard reader to be closed, even though it failed")
 		// reset the shard readers closed map
 		for shardID := range shardReadersClosed {
 			delete(shardReadersClosed, shardID)
@@ -225,8 +238,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Now retry: `space/blob/add` succeeds but `space/blob/replicate` fails.
 		client.SpaceBlobAddError = nil
 		client.SpaceBlobReplicateError = fmt.Errorf("simulated SpaceBlobReplicate error")
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.ErrorContains(t, err, "simulated SpaceBlobReplicate error")
 
@@ -243,8 +261,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		// Now retry: `space/blob/replicate` succeeds but `filecoin/offer` fails.
 		client.SpaceBlobReplicateError = nil
 		client.FilecoinOfferError = fmt.Errorf("simulated FilecoinOffer error")
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.ErrorContains(t, err, "simulated FilecoinOffer error")
 
@@ -274,11 +297,10 @@ func TestAddShardsForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &client,
-			ReaderForShard:        carForShard,
-			BlobUploadParallelism: 1,
-			Replicas:              3,
+			Repo:           repo,
+			Client:         &client,
+			ReaderForShard: carForShard,
+			Replicas:       3,
 		}
 
 		blobsApi := blobs.API{
@@ -293,8 +315,13 @@ func TestAddShardsForUpload(t *testing.T) {
 		err = blobsApi.CloseUploadShards(t.Context(), upload.ID(), nil)
 		require.NoError(t, err)
 
-		err = api.AddShardsForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 
@@ -309,7 +336,7 @@ func TestAddShardsForUpload(t *testing.T) {
 	})
 }
 
-func TestAddIndexesForUpload(t *testing.T) {
+func TestFindIndexAddTasksForUpload(t *testing.T) {
 	t.Run("`space/blob/add`s and `space/blob/replicate`s index CARs", func(t *testing.T) {
 		logging.SetLogLevel("preparation/storacha", "warn")
 		db := testdb.CreateTestDB(t)
@@ -327,11 +354,10 @@ func TestAddIndexesForUpload(t *testing.T) {
 		}
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &client,
-			ReaderForIndex:        carForIndex,
-			BlobUploadParallelism: 1,
-			Replicas:              3,
+			Repo:           repo,
+			Client:         &client,
+			ReaderForIndex: carForIndex,
+			Replicas:       3,
 		}
 
 		blobsApi := blobs.API{
@@ -368,8 +394,13 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.Len(t, shards, 3)
 		require.Len(t, indexes, 1)
 
-		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err := api.FindIndexAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload first shard
 		firstIndex, err := repo.GetIndexByID(t.Context(), indexes[0].ID())
@@ -416,8 +447,13 @@ func TestAddIndexesForUpload(t *testing.T) {
 		err = blobsApi.CloseUploadIndexes(t.Context(), upload.ID(), recordClosedIndex)
 		require.NoError(t, err)
 		require.Len(t, indexes, 2)
-		err = api.AddIndexesForUpload(t.Context(), upload.ID(), spaceDID, nil)
+		tasks, err = api.FindIndexAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range tasks {
+			nonFatal, err := task(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload second shard
 		secondIndex, err := repo.GetIndexByID(t.Context(), indexes[1].ID())
@@ -460,10 +496,9 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 		mclient := mockclient.MockClient{}
 
 		api := storacha.API{
-			Repo:                  repo,
-			Client:                &mclient,
-			BlobUploadParallelism: 1,
-			Replicas:              3,
+			Repo:     repo,
+			Client:   &mclient,
+			Replicas: 3,
 		}
 
 		upload, _ := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))

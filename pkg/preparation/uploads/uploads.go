@@ -19,6 +19,7 @@ import (
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
+	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads/model"
 )
@@ -34,9 +35,9 @@ type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, s
 type AddShardsToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *blobsmodel.Shard) error) error
 type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
-type AddShardsForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *blobsmodel.Shard) error) error
+type FindShardAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error)
+type FindIndexAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error)
 type AddNodesToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *blobsmodel.Shard) error) error
-type AddIndexesForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, indexCB func(index *blobsmodel.Index) error) error
 type PostProcessUploadedShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type PostProcessUploadedIndexesFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
@@ -48,10 +49,11 @@ type API struct {
 	Repo                       Repo
 	ExecuteScan                ExecuteScanFunc
 	ExecuteDagScansForUpload   ExecuteDagScansForUploadFunc
-	AddShardsForUpload         AddShardsForUploadFunc
+	BlobUploadParallelism      int
+	FindShardAddTasksForUpload FindShardAddTasksForUploadFunc
+	FindIndexAddTasksForUpload FindIndexAddTasksForUploadFunc
 	PostProcessUploadedShards  PostProcessUploadedShardsFunc
 	PostProcessUploadedIndexes PostProcessUploadedIndexesFunc
-	AddIndexesForUpload        AddIndexesForUploadFunc
 	AddStorachaUploadForUpload AddStorachaUploadForUploadFunc
 	RemoveBadFSEntry           RemoveBadFSEntryFunc
 	RemoveBadNodes             RemoveBadNodesFunc
@@ -288,10 +290,10 @@ func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, badFS
 
 func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, blobUploadErrors types.BlobUploadErrors) error {
 	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
-	for _, e := range blobUploadErrors.Errs() {
+	for _, e := range blobUploadErrors.Unwrap() {
 		// bad nodes error can happen from reading car during upload
 		var badNodesErr types.BadNodesError
-		if errors.As(e.Unwrap(), &badNodesErr) {
+		if errors.As(e, &badNodesErr) {
 			err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
 			if err != nil {
 				return err
@@ -649,21 +651,23 @@ func runShardUploadWorker(
 		span.End()
 	}()
 
-	return Worker(
+	nonFatals, err := Worker2(
 		ctx,
 		closedShardsAvailable,
+		api.BlobUploadParallelism,
+
+		// findWork
+		func(ctx context.Context) ([]gtypes.BlobAddTask, error) {
+			return api.FindShardAddTasksForUpload(ctx, uploadID, spaceDID)
+		},
 
 		// doWork
-		func() error {
-			err := api.AddShardsForUpload(ctx, uploadID, spaceDID, func(shard *blobsmodel.Shard) error {
+		func(ctx context.Context, task gtypes.BlobAddTask) (error, error) {
+			nonFatal, err := task(ctx)
+			if nonFatal == nil && err == nil {
 				signal(uploadedShardsAvailable)
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing shards for upload %s: %w", uploadID, err)
 			}
-
-			return nil
+			return nonFatal, err
 		},
 
 		// finalize
@@ -672,6 +676,8 @@ func runShardUploadWorker(
 			return nil
 		},
 	)
+
+	return errors.Join(err, gtypes.NewBlobUploadErrors(nonFatals))
 }
 
 func runPostProcessShardWorker(
@@ -761,20 +767,23 @@ func runIndexUploadWorker(
 		span.End()
 	}()
 
-	return Worker(
+	nonFatals, err := Worker2(
 		ctx,
 		closedIndexesAvailable,
+		api.BlobUploadParallelism,
+
+		// findWork
+		func(ctx context.Context) ([]gtypes.BlobAddTask, error) {
+			return api.FindIndexAddTasksForUpload(ctx, uploadID, spaceDID)
+		},
 
 		// doWork
-		func() error {
-			err := api.AddIndexesForUpload(ctx, uploadID, spaceDID, func(index *blobsmodel.Index) error {
+		func(ctx context.Context, task gtypes.BlobAddTask) (error, error) {
+			nonFatal, err := task(ctx)
+			if nonFatal == nil && err == nil {
 				signal(uploadedIndexesAvailable)
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("`space/blob/add`ing indexes for upload %s: %w", uploadID, err)
 			}
-			return nil
+			return nonFatal, err
 		},
 
 		// finalize
@@ -783,6 +792,8 @@ func runIndexUploadWorker(
 			return nil
 		},
 	)
+
+	return errors.Join(err, gtypes.NewBlobUploadErrors(nonFatals))
 }
 
 func runPostProcessIndexWorker(
