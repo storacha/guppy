@@ -85,7 +85,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -138,7 +138,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -214,7 +214,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, err)
 			require.ErrorContains(t, nonFatal, "simulated SpaceBlobAdd error")
 		}
@@ -241,7 +241,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -264,7 +264,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err = api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -318,7 +318,7 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		tasks, err := api.FindShardAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -397,7 +397,7 @@ func TestFindIndexAddTasksForUpload(t *testing.T) {
 		tasks, err := api.FindIndexAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
@@ -450,7 +450,7 @@ func TestFindIndexAddTasksForUpload(t *testing.T) {
 		tasks, err = api.FindIndexAddTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
 		for _, task := range tasks {
-			nonFatal, err := task(t.Context())
+			nonFatal, err := task.Run(t.Context())
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
