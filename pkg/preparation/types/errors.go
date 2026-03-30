@@ -193,4 +193,7 @@ func (e BlobUploadErrors) Unwrap() []error {
 	return e.errs
 }
 
-type BlobAddTask func(ctx context.Context) (error, error)
+type BlobAddTask struct {
+	ID  id.ID
+	Run func(context.Context) (error, error)
+}

@@ -1,6 +1,7 @@
 package uploads_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,11 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type unwrappableError interface {
-	error
-	Unwrap() error
-}
-
 // e is a shorthand helper function that uses [require.EventuallyWithT] with
 // a standard timeout and interval, to keep noise out of the tests.
 func e(t *testing.T, condition func(collect *assert.CollectT)) {
@@ -22,23 +18,36 @@ func e(t *testing.T, condition func(collect *assert.CollectT)) {
 	require.EventuallyWithT(t, condition, time.Second, 10*time.Millisecond)
 }
 
+func task(fn func() error) func(context.Context) (error, error) {
+	return func(ctx context.Context) (error, error) {
+		return nil, fn()
+	}
+}
+
 func TestWorker(t *testing.T) {
 	t.Run("runs the work function for every signal received, then the finalize function when the channel closes", func(t *testing.T) {
 		signalChan := make(chan struct{}, 1)
-		resultChan := make(chan error, 1)
+		type result struct {
+			nonFatals []error
+			err       error
+		}
+		resultChan := make(chan result, 1)
 		var runs int
 		var finalizes int
 
 		go func() {
 			defer close(resultChan)
-
-			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
-				return nil
-			}, func() error {
-				finalizes++
-				return nil
-			})
+			nonFatals, err := uploads.Worker(t.Context(), signalChan, 1,
+				func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+					runs++
+					return nil, nil
+				},
+				func() error {
+					finalizes++
+					return nil
+				},
+			)
+			resultChan <- result{nonFatals, err}
 		}()
 
 		require.Equal(t, 0, runs, "worker should not run before signal")
@@ -47,36 +56,46 @@ func TestWorker(t *testing.T) {
 		signalChan <- struct{}{}
 		e(t, func(t *assert.CollectT) { require.Equal(t, 2, runs, "worker should run again after second signal") })
 
-		require.Equal(t, 0, finalizes, "finalize function should be called until the channel closes")
+		require.Equal(t, 0, finalizes, "finalize function should not be called until the channel closes")
 		close(signalChan)
 		e(t, func(t *assert.CollectT) {
 			require.Equal(t, 1, finalizes, "finalize function should be called once the channel closes")
 		})
 
-		result := <-resultChan
-		require.Nil(t, result, "result should be nil after successful runs")
+		res := <-resultChan
+		require.Nil(t, res.err, "error should be nil after successful runs")
+		require.Empty(t, res.nonFatals, "non-fatal errors should be empty after successful runs")
 	})
 
 	t.Run("immediately responds with any work error, skipping the finalizer", func(t *testing.T) {
 		workerErr := errors.New("error in doWork")
 		signalChan := make(chan struct{}, 3)
-		resultChan := make(chan error, 1)
+		type result struct {
+			nonFatals []error
+			err       error
+		}
+		resultChan := make(chan result, 1)
 		var runs int
 		var finalizes int
 
 		go func() {
 			defer close(resultChan)
-			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
-				// Fail on the second run
-				if runs == 2 {
-					return workerErr
-				}
-				return nil
-			}, func() error {
-				finalizes++
-				return nil
-			})
+			nonFatals, err := uploads.Worker(t.Context(), signalChan, 1,
+				func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+					runs++
+					if runs == 2 {
+						return []func(context.Context) (error, error){
+							task(func() error { return workerErr }),
+						}, nil
+					}
+					return nil, nil
+				},
+				func() error {
+					finalizes++
+					return nil
+				},
+			)
+			resultChan <- result{nonFatals, err}
 		}()
 
 		// Send three signals; the second should cause an error, the third should not run
@@ -84,28 +103,35 @@ func TestWorker(t *testing.T) {
 		signalChan <- struct{}{}
 		signalChan <- struct{}{}
 
-		result, ok := (<-resultChan).(unwrappableError)
-		require.True(t, ok, "result should be a wrapped error")
-		require.ErrorContains(t, result, "worker encountered an error: error in doWork")
-		require.Equal(t, workerErr, result.Unwrap(), "worker should send back the error it encountered, wrapped")
-		require.Equal(t, 2, runs, "worker should have stopped after encountering an error")
-		require.Equal(t, 0, finalizes, "finalize function should not have be called")
+		res := <-resultChan
+		require.ErrorContains(t, res.err, "worker task encountered a fatal error: error in doWork")
+		require.ErrorIs(t, res.err, workerErr)
+		require.LessOrEqual(t, runs, 3, "worker should have stopped after encountering an error")
+		require.Equal(t, 0, finalizes, "finalize function should not have been called")
 	})
 
 	t.Run("responds with any finalize error", func(t *testing.T) {
 		finalizerErr := errors.New("error in finalize")
 		signalChan := make(chan struct{}, 3)
-		resultChan := make(chan error, 1)
+		type result struct {
+			nonFatals []error
+			err       error
+		}
+		resultChan := make(chan result, 1)
 		var runs int
 
 		go func() {
 			defer close(resultChan)
-			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
-				return nil
-			}, func() error {
-				return finalizerErr
-			})
+			nonFatals, err := uploads.Worker(t.Context(), signalChan, 1,
+				func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+					runs++
+					return nil, nil
+				},
+				func() error {
+					return finalizerErr
+				},
+			)
+			resultChan <- result{nonFatals, err}
 		}()
 
 		// Send three signals; all should run
@@ -114,32 +140,39 @@ func TestWorker(t *testing.T) {
 		signalChan <- struct{}{}
 		close(signalChan)
 
-		result, ok := (<-resultChan).(unwrappableError)
-		require.True(t, ok, "result should be a wrapped error")
-		require.ErrorContains(t, result, "worker finalize encountered an error: error in finalize")
-		require.Equal(t, finalizerErr, result.Unwrap(), "worker should send back the error it encountered, wrapped")
+		res := <-resultChan
+		require.ErrorContains(t, res.err, "worker finalize encountered an error: error in finalize")
+		require.ErrorIs(t, res.err, finalizerErr)
 		require.Equal(t, 3, runs, "worker should have run all three times")
 	})
 
 	t.Run("ignores a nil finalizer", func(t *testing.T) {
 		signalChan := make(chan struct{}, 1)
-		resultChan := make(chan error, 1)
+		type result struct {
+			nonFatals []error
+			err       error
+		}
+		resultChan := make(chan result, 1)
 		var ran bool
 
 		go func() {
 			defer close(resultChan)
-
-			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				ran = true
-				return nil
-			}, nil)
+			nonFatals, err := uploads.Worker(t.Context(), signalChan, 1,
+				func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+					ran = true
+					return nil, nil
+				},
+				nil,
+			)
+			resultChan <- result{nonFatals, err}
 		}()
 
 		require.False(t, ran, "worker should not run before signal")
 		signalChan <- struct{}{}
 		e(t, func(t *assert.CollectT) { require.True(t, ran, "worker should run after signal") })
 		close(signalChan)
-		result := <-resultChan
-		require.Nil(t, result, "result should be nil after successful runs and no finalizer")
+		res := <-resultChan
+		require.Nil(t, res.err, "error should be nil after successful runs and no finalizer")
+		require.Empty(t, res.nonFatals)
 	})
 }

@@ -86,18 +86,21 @@ func (a API) FindShardAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 
 	tasks := make([]gtypes.BlobAddTask, 0, len(closedShards))
 	for _, shard := range closedShards {
-		tasks = append(tasks, func(ctx context.Context) (error, error) {
-			if err := a.addBlob(ctx, shard, spaceDID); err != nil {
-				err = fmt.Errorf("failed to add shard %s: %w", shard, err)
-				// [gtypes.BlobUploadError]s are non-fatal.
-				var errBlobUpload gtypes.BlobUploadError
-				if errors.As(err, &errBlobUpload) {
-					return err, nil
+		tasks = append(tasks, gtypes.BlobAddTask{
+			ID: shard.ID(),
+			Run: func(ctx context.Context) (error, error) {
+				if err := a.addBlob(ctx, shard, spaceDID); err != nil {
+					err = fmt.Errorf("failed to add shard %s: %w", shard, err)
+					// [gtypes.BlobUploadError]s are non-fatal.
+					var errBlobUpload gtypes.BlobUploadError
+					if errors.As(err, &errBlobUpload) {
+						return err, nil
+					}
+					log.Errorf("%v", err)
+					return nil, err
 				}
-				log.Errorf("%v", err)
-				return nil, err
-			}
-			return nil, nil
+				return nil, nil
+			},
 		})
 	}
 	return tasks, nil
@@ -115,18 +118,21 @@ func (a API) FindIndexAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 
 	tasks := make([]gtypes.BlobAddTask, 0, len(closedIndexes))
 	for _, index := range closedIndexes {
-		tasks = append(tasks, func(ctx context.Context) (error, error) {
-			if err := a.addBlob(ctx, index, spaceDID); err != nil {
-				err = fmt.Errorf("failed to add index %s: %w", index, err)
-				// [gtypes.BlobUploadError]s are non-fatal.
-				var errBlobUpload gtypes.BlobUploadError
-				if errors.As(err, &errBlobUpload) {
-					return err, nil
+		tasks = append(tasks, gtypes.BlobAddTask{
+			ID: index.ID(),
+			Run: func(ctx context.Context) (error, error) {
+				if err := a.addBlob(ctx, index, spaceDID); err != nil {
+					err = fmt.Errorf("failed to add index %s: %w", index, err)
+					// [gtypes.BlobUploadError]s are non-fatal.
+					var errBlobUpload gtypes.BlobUploadError
+					if errors.As(err, &errBlobUpload) {
+						return err, nil
+					}
+					log.Errorf("%v", err)
+					return nil, err
 				}
-				log.Errorf("%v", err)
-				return nil, err
-			}
-			return nil, nil
+				return nil, nil
+			},
 		})
 	}
 	return tasks, nil
@@ -290,7 +296,7 @@ func (a API) addBlob(ctx context.Context, blob model.Blob, spaceDID did.DID) err
 		}
 	}
 
-	if err := a.updateBlob(ctx, blob); err != nil {
+	if err := a.updateBlob(context.WithoutCancel(ctx), blob); err != nil {
 		return fmt.Errorf("failed to update blob %s after `space/blob/add`: %w", blob, err)
 	}
 	return nil
@@ -310,7 +316,7 @@ func (a API) postProcessBlob(ctx context.Context, blob model.Blob, spaceDID did.
 	if err := blob.Added(); err != nil {
 		return fmt.Errorf("failed to mark blob %s as added: %w", blob, err)
 	}
-	if err := a.updateBlob(ctx, blob); err != nil {
+	if err := a.updateBlob(context.WithoutCancel(ctx), blob); err != nil {
 		return fmt.Errorf("failed to update blob %s after adding to space: %w", blob, err)
 	}
 
