@@ -105,8 +105,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
 
 		// Now run post processing.
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err := api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 		// Reload shards
 		firstShard, err = repo.GetShardByID(t.Context(), firstShard.ID())
 		require.NoError(t, err)
@@ -154,8 +159,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
 
 		// Now run post processing.
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err = api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload second shard
 		secondShard, err = repo.GetShardByID(t.Context(), secondShard.ID())
@@ -218,8 +228,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 			require.NoError(t, err)
 			require.ErrorContains(t, nonFatal, "simulated SpaceBlobAdd error")
 		}
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err := api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// It should have `space/blob/add`ed (and failed)...
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
@@ -245,8 +260,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
-		require.ErrorContains(t, err, "simulated SpaceBlobReplicate error")
+		ppTasks, err = api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, fatalErr := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.ErrorContains(t, fatalErr, "simulated SpaceBlobReplicate error")
+		}
 
 		// It should have `space/blob/add`ed again...
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
@@ -268,8 +288,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
-		require.ErrorContains(t, err, "simulated FilecoinOffer error")
+		ppTasks, err = api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
+		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, fatalErr := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.ErrorContains(t, fatalErr, "simulated FilecoinOffer error")
+		}
 
 		// It should NOT `space/blob/add` again...
 		require.Len(t, client.SpaceBlobAddInvocations, 2)
@@ -322,8 +347,13 @@ func TestFindShardAddTasksForUpload(t *testing.T) {
 			require.NoError(t, nonFatal)
 			require.NoError(t, err)
 		}
-		err = api.PostProcessUploadedShards(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err := api.FindShardPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// It should `space/blob/add`...
 		require.Len(t, client.SpaceBlobAddInvocations, 1)
@@ -414,8 +444,13 @@ func TestFindIndexAddTasksForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[0].Space)
 
 		// Now run post processing.
-		err = api.PostProcessUploadedIndexes(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err := api.FindIndexPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload first shard
 		firstIndex, err = repo.GetIndexByID(t.Context(), indexes[0].ID())
@@ -466,8 +501,13 @@ func TestFindIndexAddTasksForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceBlobAddInvocations[1].Space)
 
 		// Now run post processing.
-		err = api.PostProcessUploadedIndexes(t.Context(), upload.ID(), spaceDID)
+		ppTasks, err = api.FindIndexPostProcessTasksForUpload(t.Context(), upload.ID(), spaceDID)
 		require.NoError(t, err)
+		for _, task := range ppTasks {
+			nonFatal, err := task.Run(t.Context())
+			require.NoError(t, nonFatal)
+			require.NoError(t, err)
+		}
 
 		// Reload second shard
 		secondIndex, err = repo.GetIndexByID(t.Context(), indexes[1].ID())
