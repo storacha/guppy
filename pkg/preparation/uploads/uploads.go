@@ -223,6 +223,7 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	signal(dagScansAvailable)
 	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
+	signal(closedIndexesAvailable)
 	signal(uploadedShardsAvailable)
 	signal(uploadedIndexesAvailable)
 	close(scansAvailable)
