@@ -20,11 +20,6 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/core/receipt/fx"
 	"github.com/storacha/go-ucanto/did"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/storacha/guppy/pkg/bus"
 	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/client"
@@ -34,6 +29,9 @@ import (
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/storacha/guppy/pkg/preparation/uploads"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -72,9 +70,11 @@ type API struct {
 
 var _ uploads.FindShardAddTasksForUploadFunc = API{}.FindShardAddTasksForUpload
 var _ uploads.FindIndexAddTasksForUploadFunc = API{}.FindIndexAddTasksForUpload
+var _ uploads.FindShardPostProcessTasksForUploadFunc = API{}.FindShardPostProcessTasksForUpload
+var _ uploads.FindIndexPostProcessTasksForUploadFunc = API{}.FindIndexPostProcessTasksForUpload
 var _ uploads.AddStorachaUploadForUploadFunc = API{}.AddStorachaUploadForUpload
 
-func (a API) FindShardAddTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error) {
+func (a API) FindShardAddTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error) {
 	ctx, span := tracer.Start(ctx, "find-shard-add-tasks-for-upload")
 	defer span.End()
 
@@ -84,9 +84,9 @@ func (a API) FindShardAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 	}
 	span.AddEvent("found closed shards", trace.WithAttributes(attribute.Int("shards", len(closedShards))))
 
-	tasks := make([]gtypes.BlobAddTask, 0, len(closedShards))
+	tasks := make([]gtypes.IDTask, 0, len(closedShards))
 	for _, shard := range closedShards {
-		tasks = append(tasks, gtypes.BlobAddTask{
+		tasks = append(tasks, gtypes.IDTask{
 			ID: shard.ID(),
 			Run: func(ctx context.Context) (error, error) {
 				if err := a.addBlob(ctx, shard, spaceDID); err != nil {
@@ -106,7 +106,7 @@ func (a API) FindShardAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 	return tasks, nil
 }
 
-func (a API) FindIndexAddTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error) {
+func (a API) FindIndexAddTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error) {
 	ctx, span := tracer.Start(ctx, "find-index-add-tasks-for-upload")
 	defer span.End()
 
@@ -116,9 +116,9 @@ func (a API) FindIndexAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 	}
 	span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
 
-	tasks := make([]gtypes.BlobAddTask, 0, len(closedIndexes))
+	tasks := make([]gtypes.IDTask, 0, len(closedIndexes))
 	for _, index := range closedIndexes {
-		tasks = append(tasks, gtypes.BlobAddTask{
+		tasks = append(tasks, gtypes.IDTask{
 			ID: index.ID(),
 			Run: func(ctx context.Context) (error, error) {
 				if err := a.addBlob(ctx, index, spaceDID); err != nil {
@@ -138,74 +138,41 @@ func (a API) FindIndexAddTasksForUpload(ctx context.Context, uploadID id.UploadI
 	return tasks, nil
 }
 
-func (a API) PostProcessUploadedShards(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
-	ctx, span := tracer.Start(ctx, "post-process-uploaded-shards")
+func (a API) FindShardPostProcessTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error) {
+	ctx, span := tracer.Start(ctx, "find-shard-post-process-tasks-for-upload")
 	defer span.End()
+
 	uploadedShards, err := a.Repo.ShardsForUploadByState(ctx, uploadID, model.BlobStateUploaded)
 	if err != nil {
-		return fmt.Errorf("failed to get uploaded shards for post processing %s: %w", uploadID, err)
+		return nil, fmt.Errorf("failed to get uploaded shards for upload %s: %w", uploadID, err)
 	}
 	span.AddEvent("found uploaded shards", trace.WithAttributes(attribute.Int("shards", len(uploadedShards))))
-	blobs := make([]model.Blob, len(uploadedShards))
-	for i, shard := range uploadedShards {
-		blobs[i] = shard
-	}
-	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		var opts []client.FilecoinOfferOption
-		if blob.PDPAccept() != nil {
-			opts = append(opts, client.WithPDPAcceptInvocation(blob.PDPAccept()))
-		}
-		if err := a.filecoinOffer(ctx, blob, spaceDID, opts...); err != nil {
-			return gtypes.NewBlobUploadError(blob.ID(), err)
-		}
 
-		return nil
-	})
-}
-
-func (a API) postProcessBlobs(ctx context.Context, blobs []model.Blob, spaceDID did.DID, afterAdded func(blob model.Blob) error) error {
-	// Ensure at least 1 parallelism
-	if a.BlobUploadParallelism < 1 {
-		a.BlobUploadParallelism = 1
-	}
-
-	sem := make(chan struct{}, a.BlobUploadParallelism)
-	blobUploadErrorCh := make(chan error, len(blobs))
-	eg, gctx := errgroup.WithContext(ctx)
-	for _, blob := range blobs {
-		sem <- struct{}{}
-		eg.Go(func() error {
-			defer func() { <-sem }()
-			if err := a.postProcessBlob(gctx, blob, spaceDID, afterAdded); err != nil {
-				err = fmt.Errorf("failed to add blob %s: %w", blob, err)
-				var errBlobUpload gtypes.BlobUploadError
-				if errors.As(err, &errBlobUpload) {
-					blobUploadErrorCh <- err
+	tasks := make([]gtypes.IDTask, 0, len(uploadedShards))
+	for _, shard := range uploadedShards {
+		tasks = append(tasks, gtypes.IDTask{
+			ID: shard.ID(),
+			Run: func(ctx context.Context) (error, error) {
+				err := a.postProcessBlob(ctx, shard, spaceDID, func(blob model.Blob) error {
+					var opts []client.FilecoinOfferOption
+					if blob.PDPAccept() != nil {
+						opts = append(opts, client.WithPDPAcceptInvocation(blob.PDPAccept()))
+					}
+					if err := a.filecoinOffer(ctx, blob, spaceDID, opts...); err != nil {
+						return fmt.Errorf("failed to `filecoin/offer` shard %s: %w", blob, err)
+					}
 					return nil
+				})
+				if err != nil {
+					log.Errorf("failed to post-process shard %s: %v", shard, err)
+					return nil, fmt.Errorf("failed to post-process shard %s: %w", shard, err)
 				}
-				log.Errorf("%v", err)
-				return err
-			}
-			log.Infof("Successfully post-processed blob %s", blob.ID())
-			return nil
+				log.Infof("Successfully post-processed shard %s", shard.ID())
+				return nil, nil
+			},
 		})
 	}
-
-	terminalErr := eg.Wait()
-	close(blobUploadErrorCh)
-
-	if terminalErr != nil {
-		return terminalErr
-	}
-
-	var blobUploadErrors []error
-	for err := range blobUploadErrorCh {
-		blobUploadErrors = append(blobUploadErrors, err)
-	}
-	if len(blobUploadErrors) > 0 {
-		return gtypes.NewBlobUploadErrors(blobUploadErrors)
-	}
-	return nil
+	return tasks, nil
 }
 
 func (a API) readerForBlob(ctx context.Context, blob model.Blob) (io.ReadCloser, error) {
@@ -381,28 +348,37 @@ func (a API) filecoinOffer(ctx context.Context, blob model.Blob, spaceDID did.DI
 	return nil
 }
 
-// PostProcessUploadedIndexes runs post-processing for uploaded indexes, including
-// adding them to the space via `space/index/add`.
-func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {
-	ctx, span := tracer.Start(ctx, "post-process-uploaded-indexes")
+func (a API) FindIndexPostProcessTasksForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error) {
+	ctx, span := tracer.Start(ctx, "find-index-post-process-tasks-for-upload")
 	defer span.End()
 
 	uploadedIndexes, err := a.Repo.IndexesForUploadByState(ctx, uploadID, model.BlobStateUploaded)
 	if err != nil {
-		return fmt.Errorf("failed to get uploaded indexes for upload %s: %w", uploadID, err)
+		return nil, fmt.Errorf("failed to get uploaded indexes for upload %s: %w", uploadID, err)
 	}
 	span.AddEvent("found uploaded indexes", trace.WithAttributes(attribute.Int("indexes", len(uploadedIndexes))))
 
-	blobs := make([]model.Blob, len(uploadedIndexes))
-	for i, shard := range uploadedIndexes {
-		blobs[i] = shard
+	tasks := make([]gtypes.IDTask, 0, len(uploadedIndexes))
+	for _, index := range uploadedIndexes {
+		tasks = append(tasks, gtypes.IDTask{
+			ID: index.ID(),
+			Run: func(ctx context.Context) (error, error) {
+				err := a.postProcessBlob(ctx, index, spaceDID, func(blob model.Blob) error {
+					// Use a placeholder for the root because it doesn't matter what it is,
+					// and we don't want to wait for it to be known. It shouldn't really be
+					// something the index knows at all.
+					return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), util.PlaceholderCID, spaceDID)
+				})
+				if err != nil {
+					log.Errorf("failed to post-process index %s: %v", index, err)
+					return nil, fmt.Errorf("failed to post-process index %s: %w", index, err)
+				}
+				log.Infof("Successfully post-processed index %s", index.ID())
+				return nil, nil
+			},
+		})
 	}
-	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		// Use a placeholder for the root because it doesn't matter what it is,
-		// and we don't want to wait for it to be known. It shouldn't really be
-		// something the index knows at all.
-		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), util.PlaceholderCID, spaceDID)
-	})
+	return tasks, nil
 }
 
 func (a API) AddStorachaUploadForUpload(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error {

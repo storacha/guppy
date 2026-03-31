@@ -36,11 +36,11 @@ type AddNodeToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, s
 type AddShardsToUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
 type CloseUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, shardCB func(shard *blobsmodel.Shard) error) error
 type CloseUploadIndexesFunc func(ctx context.Context, uploadID id.UploadID, indexCB func(index *blobsmodel.Index) error) error
-type FindShardAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error)
-type FindIndexAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.BlobAddTask, error)
+type FindShardAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error)
+type FindIndexAddTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error)
 type AddNodesToUploadShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, shardCB func(shard *blobsmodel.Shard) error) error
-type PostProcessUploadedShardsFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
-type PostProcessUploadedIndexesFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
+type FindShardPostProcessTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error)
+type FindIndexPostProcessTasksForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) ([]gtypes.IDTask, error)
 type AddStorachaUploadForUploadFunc func(ctx context.Context, uploadID id.UploadID, spaceDID did.DID) error
 type RemoveBadFSEntryFunc func(ctx context.Context, spaceDID did.DID, fsEntryID id.FSEntryID) error
 type RemoveBadNodesFunc func(ctx context.Context, spaceDID did.DID, nodeCIDs []cid.Cid) error
@@ -53,8 +53,8 @@ type API struct {
 	BlobUploadParallelism      int
 	FindShardAddTasksForUpload FindShardAddTasksForUploadFunc
 	FindIndexAddTasksForUpload FindIndexAddTasksForUploadFunc
-	PostProcessUploadedShards  PostProcessUploadedShardsFunc
-	PostProcessUploadedIndexes PostProcessUploadedIndexesFunc
+	FindShardPostProcessTasksForUpload FindShardPostProcessTasksForUploadFunc
+	FindIndexPostProcessTasksForUpload FindIndexPostProcessTasksForUploadFunc
 	AddStorachaUploadForUpload AddStorachaUploadForUploadFunc
 	RemoveBadFSEntry           RemoveBadFSEntryFunc
 	RemoveBadNodes             RemoveBadNodesFunc
@@ -748,22 +748,30 @@ func runPostProcessShardWorker(
 		span.End()
 	}()
 
+	var inFlightShards sync.Map
+
 	_, err = Worker(
 		ctx,
 		uploadedShardsAvailable,
-		1,
+		api.BlobUploadParallelism,
 
 		// findWork
 		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
-					err := api.PostProcessUploadedShards(ctx, uploadID, spaceDID)
-					if err != nil {
-						return nil, fmt.Errorf("`post-processing shards for upload %s: %w", uploadID, err)
-					}
-					return nil, nil
-				},
-			}, nil
+			rawTasks, err := api.FindShardPostProcessTasksForUpload(ctx, uploadID, spaceDID)
+			if err != nil {
+				return nil, err
+			}
+			var tasks []func(context.Context) (error, error)
+			for _, raw := range rawTasks {
+				if _, loaded := inFlightShards.LoadOrStore(raw.ID, struct{}{}); loaded {
+					continue
+				}
+				tasks = append(tasks, func(ctx context.Context) (error, error) {
+					defer inFlightShards.Delete(raw.ID)
+					return raw.Run(ctx)
+				})
+			}
+			return tasks, nil
 		},
 
 		// finalize
@@ -772,7 +780,6 @@ func runPostProcessShardWorker(
 			if err != nil {
 				return fmt.Errorf("`upload/add`ing upload %s: %w", uploadID, err)
 			}
-
 			return nil
 		},
 	)
@@ -882,22 +889,30 @@ func runPostProcessIndexWorker(
 		span.End()
 	}()
 
+	var inFlightIndexes sync.Map
+
 	_, err = Worker(
 		ctx,
 		uploadedIndexesAvailable,
-		1,
+		api.BlobUploadParallelism,
 
 		// findWork
 		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
-					err := api.PostProcessUploadedIndexes(ctx, uploadID, spaceDID)
-					if err != nil {
-						return nil, fmt.Errorf("`post-processing indexes for upload %s: %w", uploadID, err)
-					}
-					return nil, nil
-				},
-			}, nil
+			rawTasks, err := api.FindIndexPostProcessTasksForUpload(ctx, uploadID, spaceDID)
+			if err != nil {
+				return nil, err
+			}
+			var tasks []func(context.Context) (error, error)
+			for _, raw := range rawTasks {
+				if _, loaded := inFlightIndexes.LoadOrStore(raw.ID, struct{}{}); loaded {
+					continue
+				}
+				tasks = append(tasks, func(ctx context.Context) (error, error) {
+					defer inFlightIndexes.Delete(raw.ID)
+					return raw.Run(ctx)
+				})
+			}
+			return tasks, nil
 		},
 
 		// finalize
