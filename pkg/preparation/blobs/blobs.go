@@ -377,23 +377,22 @@ func (a API) fastWriteShard(ctx context.Context, shardID id.ShardID, offset uint
 	go func() {
 		defer close(jobs)
 
-		idx := 0
+		var jobSlice []job
+
 		for nis, err := range a.Repo.NodesInShard(ctx, shardID, offset) {
 			if err != nil {
-				// If we fail to iterate nodes, send the error and stop producing jobs.
-				select {
-				case <-ctx.Done():
-					return
-				case results <- result{err: fmt.Errorf("failed to iterate nodes in shard %s: %w", shardID, err)}:
-				}
+				results <- result{err: fmt.Errorf("failed to iterate nodes in shard %s: %w", shardID, err)}
 				return
 			}
+			jobSlice = append(jobSlice, job{idx: len(jobSlice), node: nis.Node})
+		}
+
+		for _, j := range jobSlice {
 			select {
 			case <-ctx.Done():
 				return
-			case jobs <- job{idx: idx, node: nis.Node}:
+			case jobs <- j:
 			}
-			idx++
 		}
 	}()
 
