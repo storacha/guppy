@@ -65,6 +65,7 @@ type API struct {
 	BlobUploadParallelism int
 	Bus                   bus.Publisher
 	Replicas              uint
+	BlobAddOptions        []client.SpaceBlobAddOption
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -336,7 +337,7 @@ func (a API) spaceBlobAdd(ctx context.Context, content io.Reader, spaceDID did.D
 	ctx, span := tracer.Start(ctx, "space-blob-add")
 	defer span.End()
 
-	return a.Client.SpaceBlobAdd(ctx, content, spaceDID, opts...)
+	return a.Client.SpaceBlobAdd(ctx, content, spaceDID, append(a.BlobAddOptions, opts...)...)
 }
 
 func (a API) spaceBlobReplicate(ctx context.Context, blob model.Blob, spaceDID did.DID, locationCommitment delegation.Delegation) error {

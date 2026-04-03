@@ -107,6 +107,7 @@ var Cmd = &cobra.Command{
 			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
 			preparation.WithReplicas(cfg.Upload.Replicas),
+			preparation.WithPutHTTPClient(cmdutil.TracedHTTPClient),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
