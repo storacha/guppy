@@ -20,6 +20,7 @@ import (
 	"github.com/storacha/go-libstoracha/blobindex"
 	stestutil "github.com/storacha/go-libstoracha/testutil"
 	"github.com/storacha/go-ucanto/did"
+	"github.com/storacha/guppy/pkg/internal/util"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagsmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
@@ -28,7 +29,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/internal/testutil"
 	spacesmodel "github.com/storacha/guppy/pkg/preparation/spaces/model"
 	"github.com/storacha/guppy/pkg/preparation/sqlrepo"
-	"github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
+	repoutil "github.com/storacha/guppy/pkg/preparation/sqlrepo/util"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
 	"github.com/stretchr/testify/require"
@@ -645,7 +646,7 @@ func nodesInShard(ctx context.Context, t *testing.T, db *sql.DB, shardID id.Shar
 	var foundNodeCIDs []cid.Cid
 	for rows.Next() {
 		var foundNodeCID cid.Cid
-		err = rows.Scan(util.DbCID(&foundNodeCID))
+		err = rows.Scan(repoutil.DbCID(&foundNodeCID))
 		require.NoError(t, err)
 		foundNodeCIDs = append(foundNodeCIDs, foundNodeCID)
 	}
@@ -1075,7 +1076,7 @@ func TestReaderForIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the index content
-		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, cidlink.Link{Cid: util.PlaceholderCID}, indexView.Content())
 		require.Equal(t, 1, indexView.Shards().Size(), "index should have one shard")
 
 		shardSlices := indexView.Shards().Get(digest)
@@ -1154,7 +1155,7 @@ func TestReaderForIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the index content
-		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, cidlink.Link{Cid: util.PlaceholderCID}, indexView.Content())
 		require.Equal(t, 2, indexView.Shards().Size(), "index should have two shards")
 
 		// Verify first shard
@@ -1169,41 +1170,6 @@ func TestReaderForIndex(t *testing.T) {
 		require.NotNil(t, shard2Slices)
 		require.Equal(t, 1, shard2Slices.Size(), "second shard should have one slice")
 		require.Equal(t, blobindex.Position{Offset: 20 + 3, Length: 300}, shard2Slices.Get(node3.CID().Hash()))
-	})
-
-	t.Run("returns an error when index does not exist", func(t *testing.T) {
-		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
-		api := blobs.API{
-			Repo:         repo,
-			ShardEncoder: blobs.NewCAREncoder(),
-		}
-
-		nonExistentIndexID := id.New()
-		indexReader, err := api.ReaderForIndex(t.Context(), nonExistentIndexID)
-		require.Error(t, err)
-		require.ErrorContains(t, err, "getting index")
-		require.Nil(t, indexReader)
-	})
-
-	t.Run("returns an error when upload has no root CID", func(t *testing.T) {
-		repo := stestutil.Must(sqlrepo.New(testdb.CreateTestDB(t)))(t)
-		api := blobs.API{
-			Repo:         repo,
-			ShardEncoder: blobs.NewCAREncoder(),
-		}
-
-		spaceDID := stestutil.RandomDID(t)
-		upload, _ := testutil.CreateUpload(t, repo, spaceDID)
-
-		// Create an index for this upload (without setting a root CID)
-		index, err := repo.CreateIndex(t.Context(), upload.ID())
-		require.NoError(t, err)
-
-		// Try to get a reader for the index
-		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
-		require.Error(t, err)
-		require.ErrorContains(t, err, "no root CID set yet for upload")
-		require.Nil(t, indexReader)
 	})
 
 	t.Run("returns an error when shard has no digest", func(t *testing.T) {
@@ -1236,13 +1202,15 @@ func TestReaderForIndex(t *testing.T) {
 		// Create an index and add the shard to it
 		index, err := repo.CreateIndex(t.Context(), upload.ID())
 		require.NoError(t, err)
+		// NB: Because the shard is still open, this should never be done, but
+		// that's enforced at a higher level (the model, not the repo). If we *do*
+		// end up here, we should run into the error this test demonstrates.
 		err = repo.AddShardToIndex(t.Context(), index.ID(), shard.ID())
 		require.NoError(t, err)
 
 		// Try to get a reader for the index
 		indexReader, err := api.ReaderForIndex(t.Context(), index.ID())
-		require.Error(t, err)
-		require.ErrorContains(t, err, "has no digest set")
+		require.ErrorContains(t, err, fmt.Sprintf("iterating nodes in index %s: failed to iterate nodes in index %s, because shard with ID %s has no digest set", index.ID(), index.ID(), shard.ID()))
 		require.Nil(t, indexReader)
 	})
 
@@ -1277,7 +1245,7 @@ func TestReaderForIndex(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the index is empty but has the correct root
-		require.Equal(t, rootLink, indexView.Content())
+		require.Equal(t, cidlink.Link{Cid: util.PlaceholderCID}, indexView.Content())
 		require.Equal(t, 0, indexView.Shards().Size(), "index should have no shards")
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,7 +28,10 @@ const (
 // OpenRepo opens a database connection and applies migrations.
 // If cfg.IsPostgres(), it connects to PostgreSQL; otherwise it uses SQLite.
 func OpenRepo(ctx context.Context, cfg appconfig.RepoConfig, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
-	if cfg.IsPostgres() {
+	if cfg.DatabaseURL != "" {
+		if !cfg.IsPostgres() {
+			return nil, fmt.Errorf("unsupported database URL scheme: only postgres:// and postgresql:// are supported")
+		}
 		return openPostgresRepo(ctx, cfg.DatabaseURL, opts...)
 	}
 	return openSQLiteRepo(ctx, cfg.DatabasePath(), opts...)
@@ -64,6 +68,16 @@ func openSQLiteRepo(ctx context.Context, dbPath string, opts ...sqlrepo.Option) 
 }
 
 func openPostgresRepo(ctx context.Context, connURL string, opts ...sqlrepo.Option) (*sqlrepo.Repo, error) {
+	schema, err := parseSchemaName(connURL)
+	if err != nil {
+		return nil, err
+	}
+	if schema != "" {
+		if err := ensurePostgresSchema(ctx, connURL, schema); err != nil {
+			return nil, err
+		}
+	}
+
 	db, err := sql.Open("postgres", connURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
@@ -91,6 +105,42 @@ func openPostgresRepo(ctx context.Context, connURL string, opts ...sqlrepo.Optio
 	}
 
 	return repo, nil
+}
+
+// ensurePostgresSchema creates the given schema if it does not exist, using a
+// temporary connection that is closed immediately afterward.
+func ensurePostgresSchema(ctx context.Context, connURL string, schema string) error {
+	db, err := sql.Open("postgres", connURL)
+	if err != nil {
+		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
+	}
+	defer db.Close()
+
+	// Quote and interpolate--this is an identifier, not a value, so we can't use
+	// a parameterized query.
+	quoted := pq.QuoteIdentifier(schema)
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted)); err != nil {
+		return fmt.Errorf("failed to create PostgreSQL schema %q: %w", schema, err)
+	}
+	return nil
+}
+
+// parseSchemaName extracts a single schema name from the search_path query
+// parameter of a PostgreSQL connection URL. Returns "" if search_path is not
+// set. Returns an error if multiple schemas are specified.
+func parseSchemaName(connURL string) (string, error) {
+	u, err := url.Parse(connURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse database URL: %w", err)
+	}
+	sp := u.Query().Get("search_path")
+	if sp == "" {
+		return "", nil
+	}
+	if strings.Contains(sp, ",") {
+		return "", fmt.Errorf("database URL search_path must contain exactly one schema, got: %q", sp)
+	}
+	return sp, nil
 }
 
 func migrate(ctx context.Context, db *sql.DB, dialect sqlrepo.Dialect) error {

@@ -28,6 +28,7 @@ import (
 	"github.com/storacha/guppy/pkg/bus"
 	"github.com/storacha/guppy/pkg/bus/events"
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/internal/util"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/meteredwriter"
 	gtypes "github.com/storacha/guppy/pkg/preparation/types"
@@ -394,15 +395,6 @@ func (a API) AddIndexesForUpload(ctx context.Context, uploadID id.UploadID, spac
 	}
 	span.AddEvent("found closed indexes", trace.WithAttributes(attribute.Int("indexes", len(closedIndexes))))
 
-	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
-	if err != nil {
-		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
-	}
-	rootCID := upload.RootCID()
-	if rootCID == cid.Undef {
-		return fmt.Errorf("tried to add index, but upload %s has no root CID yet", uploadID)
-	}
-
 	blobs := make([]model.Blob, len(closedIndexes))
 	for i, shard := range closedIndexes {
 		blobs[i] = shard
@@ -427,21 +419,15 @@ func (a API) PostProcessUploadedIndexes(ctx context.Context, uploadID id.UploadI
 	}
 	span.AddEvent("found uploaded indexes", trace.WithAttributes(attribute.Int("indexes", len(uploadedIndexes))))
 
-	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
-	if err != nil {
-		return fmt.Errorf("failed to get upload %s: %w", uploadID, err)
-	}
-	rootCID := upload.RootCID()
-	if rootCID == cid.Undef {
-		return fmt.Errorf("tried to add index, but upload %s has no root CID yet", uploadID)
-	}
-
 	blobs := make([]model.Blob, len(uploadedIndexes))
 	for i, shard := range uploadedIndexes {
 		blobs[i] = shard
 	}
 	return a.postProcessBlobs(ctx, blobs, spaceDID, func(blob model.Blob) error {
-		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), rootCID, spaceDID)
+		// Use a placeholder for the root because it doesn't matter what it is,
+		// and we don't want to wait for it to be known. It shouldn't really be
+		// something the index knows at all.
+		return a.Client.SpaceIndexAdd(ctx, blob.CID(), blob.Size(), util.PlaceholderCID, spaceDID)
 	})
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/storacha/guppy/pkg/client"
+	"github.com/storacha/guppy/pkg/internal/util"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/blobs/model"
 	"github.com/storacha/guppy/pkg/preparation/internal/mockclient"
@@ -399,7 +400,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 		require.Equal(t, spaceDID, client.SpaceIndexAddInvocations[0].Space)
 		require.Equal(t, firstIndex.CID(), client.SpaceIndexAddInvocations[0].IndexCID)
 		require.Equal(t, firstIndex.Size(), client.SpaceIndexAddInvocations[0].IndexSize)
-		require.Equal(t, rootCID, client.SpaceIndexAddInvocations[0].RootCID)
+		require.Equal(t, util.PlaceholderCID, client.SpaceIndexAddInvocations[0].RootCID)
 
 		// But it should not `filecoin/offer` it, because it's an index
 		require.Len(t, client.FilecoinOfferInvocations, 0)

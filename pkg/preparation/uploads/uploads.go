@@ -220,6 +220,8 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 	signal(dagScansAvailable)
 	signal(nodeUploadsAvailable)
 	signal(closedShardsAvailable)
+	signal(uploadedShardsAvailable)
+	signal(uploadedIndexesAvailable)
 	close(scansAvailable)
 
 	log.Debugf("Waiting for workers to finish for upload %s", uploadID)
@@ -583,13 +585,18 @@ func runIndexingWorker(
 		span.End()
 	}()
 
+	handleClosedIndex := func(index *blobsmodel.Index) error {
+		signal(closedIndexesAvailable)
+		return nil
+	}
+
 	return Worker(
 		ctx,
 		shardsNeedIndexing,
 
 		// doWork
 		func() error {
-			err := api.AddShardsToUploadIndexes(ctx, uploadID, nil)
+			err := api.AddShardsToUploadIndexes(ctx, uploadID, handleClosedIndex)
 			if err != nil {
 				return fmt.Errorf("adding shards to indexes for upload %s: %w", uploadID, err)
 			}
@@ -598,18 +605,13 @@ func runIndexingWorker(
 
 		// finalize
 		func() error {
-
 			// Close any remaining open indexes
-			err := api.CloseUploadIndexes(ctx, uploadID, nil)
+			err := api.CloseUploadIndexes(ctx, uploadID, handleClosedIndex)
 			if err != nil {
 				return fmt.Errorf("closing upload indexes for upload %s: %w", uploadID, err)
 			}
-
-			// We can't add indexes until the root CID is set, so we signal way down
-			// here. This means that in practice, the index worker only runs once,
-			// after all the shards are closed (but not necessarily added).
-			signal(closedIndexesAvailable)
 			close(closedIndexesAvailable)
+
 			return nil
 		},
 	)

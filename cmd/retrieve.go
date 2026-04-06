@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
+	"github.com/storacha/go-ucanto/validator"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -79,6 +80,12 @@ var retrieveCmd = &cobra.Command{
 			}
 		}()
 
+		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
+		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
+		if err != nil {
+			return err
+		}
+
 		locator := locator.NewIndexLocator(indexer, func(spaces []did.DID) (delegation.Delegation, error) {
 			queries := make([]agentstore.CapabilityQuery, 0, len(spaces))
 			for _, space := range spaces {
@@ -97,7 +104,9 @@ var retrieveCmd = &cobra.Command{
 				pfs = append(pfs, delegation.FromDelegation(del))
 			}
 
-			// Allow the indexing service to retrieve indexes
+			// Allow the indexing service to retrieve indexes. Enable proof pruning to avoid
+			// exceeding the max header size in authorized retrievals.
+			pruner := validator.NewProofPruner(uploadServiceVerifier, contentcap.Retrieve)
 			return delegation.Delegate(
 				c.Issuer(),
 				indexerPrincipal,
@@ -105,6 +114,7 @@ var retrieveCmd = &cobra.Command{
 					ucan.NewCapability(contentcap.Retrieve.Can(), space.DID().String(), ucan.NoCaveats{}),
 				},
 				delegation.WithProof(pfs...),
+				delegation.WithProofPruning(pruner),
 				delegation.WithExpiration(int(time.Now().Add(30*time.Second).Unix())),
 			)
 		})
