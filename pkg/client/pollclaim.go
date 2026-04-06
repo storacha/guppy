@@ -16,7 +16,7 @@ import (
 // authorized by way of the given `authOk`. It returns a channel which will
 // produce the result and then close.
 func (c *Client) PollClaim(ctx context.Context, authOk access.AuthorizeOk) <-chan result.Result[[]delegation.Delegation, error] {
-	return c.PollClaimWithTick(ctx, authOk, time.Tick(250*time.Millisecond))
+	return c.PollClaimWithTick(ctx, authOk, time.Tick(time.Second))
 }
 
 // PollClaimWithTick is the same as [PollClaim], but accepts the tick channel
