@@ -70,6 +70,11 @@ Guppy looks for a TOML config file in these locations, reading only the first fi
     enabled = false
     # Public host(s) for the gateway. Required if subdomain mode is enabled.
     # hosts = ["gateway.example.com"]
+
+[preparation]
+  # Number of replicas to request per shard. Cannot be greater than 3. Not
+  # recommended to set less than 3 except for testing purposes.
+  replicas = 3
 ```
 
 ## Environment Variables

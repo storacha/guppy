@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	Repo    RepoConfig    `mapstructure:"repo" toml:"repo"`
-	Gateway GatewayConfig `mapstructure:"gateway" toml:"gateway"`
-	Network NetworkConfig `mapstructure:"network" toml:"network"`
+	Repo        RepoConfig        `mapstructure:"repo" toml:"repo"`
+	Gateway     GatewayConfig     `mapstructure:"gateway" toml:"gateway"`
+	Network     NetworkConfig     `mapstructure:"network" toml:"network"`
+	Preparation PreparationConfig `mapstructure:"preparation" toml:"preparation"`
 }
 
 func (c Config) Validate() error {

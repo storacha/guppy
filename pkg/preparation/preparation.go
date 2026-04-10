@@ -2,6 +2,7 @@ package preparation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -59,9 +60,13 @@ type config struct {
 	blobUploadParallelism  int
 	assumeUnchangedSources bool
 	bus                    bus.Bus
+	replicas               uint
 }
 
-const defaultBlobUploadParallelism = 6
+const (
+	defaultBlobUploadParallelism = 6
+	defaultReplicas              = 3
+)
 
 func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 	cfg := &config{
@@ -90,6 +95,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		},
 		maxNodesPerIndex: defaultMaxNodesPerIndex,
 		bus:              &bus.NoopBus{},
+		replicas:         defaultReplicas,
 	}
 	for _, opt := range options {
 		if err := opt(cfg); err != nil {
@@ -157,6 +163,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		ReaderForIndex:        blobsAPI.ReaderForIndex,
 		BlobUploadParallelism: cfg.blobUploadParallelism,
 		Bus:                   cfg.bus,
+		Replicas:              cfg.replicas,
 	}
 
 	uploadsAPI = uploads.API{
@@ -224,6 +231,18 @@ func WithBlobUploadParallelism(blobUploadParallelism int) Option {
 			return fmt.Errorf("parallelism must be greater than 0")
 		}
 		cfg.blobUploadParallelism = blobUploadParallelism
+		return nil
+	}
+}
+
+// WithReplicas sets the number of replicas to use when uploading blobs,
+// including the original. The default is 3 replicas.
+func WithReplicas(replicas uint) Option {
+	return func(cfg *config) error {
+		if replicas == 0 {
+			return errors.New("replica count must be greater than 0")
+		}
+		cfg.replicas = replicas
 		return nil
 	}
 }

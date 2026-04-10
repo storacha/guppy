@@ -64,6 +64,7 @@ type API struct {
 	ReaderForIndex        ReaderForIndexFunc
 	BlobUploadParallelism int
 	Bus                   bus.Publisher
+	Replicas              uint
 }
 
 var _ uploads.AddShardsForUploadFunc = API{}.AddShardsForUpload
@@ -342,6 +343,12 @@ func (a API) spaceBlobReplicate(ctx context.Context, blob model.Blob, spaceDID d
 	ctx, span := tracer.Start(ctx, "space-blob-replicate")
 	defer span.End()
 
+	// if the replication count is 1 (or less) then there is nothing to do
+	replicas := a.Replicas
+	if replicas <= 1 {
+		return nil
+	}
+
 	_, _, err := a.Client.SpaceBlobReplicate(
 		ctx,
 		spaceDID,
@@ -349,7 +356,7 @@ func (a API) spaceBlobReplicate(ctx context.Context, blob model.Blob, spaceDID d
 			Digest: blob.Digest(),
 			Size:   blob.Size(),
 		},
-		3,
+		replicas,
 		locationCommitment,
 	)
 	return err

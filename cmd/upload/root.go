@@ -106,6 +106,7 @@ var Cmd = &cobra.Command{
 			preparation.WithBlobUploadParallelism(int(rootFlags.parallelism)),
 			preparation.WithAssumeUnchangedSources(rootFlags.assumeUnchangedSources),
 			preparation.WithEventBus(eb),
+			preparation.WithReplicas(cfg.Preparation.Replicas),
 		)
 		allUploads, err := api.FindOrCreateUploads(ctx, spaceDID)
 		if err != nil {
