@@ -57,6 +57,7 @@ func TestAddShardsForUpload(t *testing.T) {
 			Client:                &client,
 			ReaderForShard:        carForShard,
 			BlobUploadParallelism: 1,
+			Replicas:              3,
 		}
 
 		blobsApi := blobs.API{
@@ -185,6 +186,7 @@ func TestAddShardsForUpload(t *testing.T) {
 			Client:                &client,
 			ReaderForShard:        carForShard,
 			BlobUploadParallelism: 1,
+			Replicas:              3,
 		}
 
 		blobsApi := blobs.API{
@@ -276,6 +278,7 @@ func TestAddShardsForUpload(t *testing.T) {
 			Client:                &client,
 			ReaderForShard:        carForShard,
 			BlobUploadParallelism: 1,
+			Replicas:              3,
 		}
 
 		blobsApi := blobs.API{
@@ -328,6 +331,7 @@ func TestAddIndexesForUpload(t *testing.T) {
 			Client:                &client,
 			ReaderForIndex:        carForIndex,
 			BlobUploadParallelism: 1,
+			Replicas:              3,
 		}
 
 		blobsApi := blobs.API{
@@ -459,6 +463,7 @@ func TestAddStorachaUploadForUpload(t *testing.T) {
 			Repo:                  repo,
 			Client:                &mclient,
 			BlobUploadParallelism: 1,
+			Replicas:              3,
 		}
 
 		upload, _ := testutil.CreateUpload(t, repo, spaceDID, spacesmodel.WithShardSize(1<<16))
