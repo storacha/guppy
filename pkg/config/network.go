@@ -29,6 +29,9 @@ type NetworkConfig struct {
 	// AuthorizedRetrievals indicates whether UCAN authorized retrievals are supported.
 	// Use a pointer to distinguish between unset and false.
 	AuthorizedRetrievals *bool `mapstructure:"authorized_retrievals" toml:"authorized_retrievals"`
+	// InsecureDIDResolution enables HTTP (instead of HTTPS) for did:web resolution.
+	// NB: this should only be used for development purposes.
+	InsecureDIDResolution bool `mapstructure:"insecure_did_resolution" toml:"insecure_did_resolution,omitempty"`
 }
 
 // IsEmpty returns true if no network configuration fields are set.
@@ -137,6 +140,11 @@ func (n NetworkConfig) ToPresetConfig(baseName string) (presets.NetworkConfig, e
 
 	if n.AuthorizedRetrievals != nil {
 		network.AuthorizedRetrievals = *n.AuthorizedRetrievals
+		network.Name = "custom"
+	}
+
+	if n.InsecureDIDResolution {
+		network.InsecureDIDResolution = true
 		network.Name = "custom"
 	}
 
