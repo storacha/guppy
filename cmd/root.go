@@ -93,7 +93,7 @@ func init() {
 	// Preparation configuration flags
 	rootCmd.PersistentFlags().Uint("replicas", presets.DefaultReplicas, "Number of replicas to request per shard")
 	cobra.CheckErr(rootCmd.PersistentFlags().MarkHidden("replicas"))
-	cobra.CheckErr(viper.BindPFlag("preparation.replicas", rootCmd.PersistentFlags().Lookup("replicas")))
+	cobra.CheckErr(viper.BindPFlag("upload.replicas", rootCmd.PersistentFlags().Lookup("replicas")))
 
 	// Add Commands
 	rootCmd.AddCommand(
