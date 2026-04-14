@@ -58,8 +58,10 @@ var listCmd = &cobra.Command{
 			}
 			fmt.Println(string(jsonBytes))
 		} else {
-			fmt.Printf("%-60s %s\n", "SPACE", "NAME")
-			for _, space := range spaces {
+			for i, space := range spaces {
+				if i == 0 {
+					fmt.Printf("%-60s %s\n", "SPACE", "NAME")
+				}
 				names := space.Names()
 				if len(names) > 0 {
 					quoted := make([]string, len(names))
