@@ -42,6 +42,9 @@ type NetworkConfig struct {
 	UploadID             did.DID
 	UploadURL            url.URL
 	AuthorizedRetrievals bool // Support for UCAN authorized retrievals.
+	// InsecureDIDResolution enables HTTP (instead of HTTPS) for did:web resolution.
+	// NB: this should only be used for development purposes.
+	InsecureDIDResolution bool
 }
 
 // Known network configurations.

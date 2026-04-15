@@ -10,6 +10,7 @@ import (
 	"github.com/mitchellh/go-wordwrap"
 	"github.com/spf13/cobra"
 	contentcap "github.com/storacha/go-libstoracha/capabilities/space/content"
+	"github.com/storacha/go-libstoracha/principalresolver"
 	"github.com/storacha/go-ucanto/core/delegation"
 	"github.com/storacha/go-ucanto/did"
 	"github.com/storacha/go-ucanto/ucan"
@@ -81,7 +82,11 @@ var retrieveCmd = &cobra.Command{
 		}()
 
 		network := cmdutil.MustGetNetworkConfig(cfg.Network, "")
-		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID)
+		var resolverOpts []principalresolver.Option
+		if network.InsecureDIDResolution {
+			resolverOpts = append(resolverOpts, principalresolver.InsecureResolution())
+		}
+		uploadServiceVerifier, err := cmdutil.ResolveDIDWebAndWrap(ctx, network.UploadID, resolverOpts...)
 		if err != nil {
 			return err
 		}
