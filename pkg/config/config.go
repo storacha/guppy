@@ -10,6 +10,7 @@ type Config struct {
 	Repo    RepoConfig    `mapstructure:"repo" toml:"repo"`
 	Gateway GatewayConfig `mapstructure:"gateway" toml:"gateway"`
 	Network NetworkConfig `mapstructure:"network" toml:"network"`
+	Upload  UploadConfig  `mapstructure:"upload" toml:"upload"`
 }
 
 func (c Config) Validate() error {
@@ -20,7 +21,10 @@ func (c Config) Validate() error {
 	if err := c.Gateway.Validate(); err != nil {
 		return err
 	}
-	return c.Network.Validate()
+	if err := c.Network.Validate(); err != nil {
+		return err
+	}
+	return c.Upload.Validate()
 }
 
 func Load[T Validatable]() (T, error) {

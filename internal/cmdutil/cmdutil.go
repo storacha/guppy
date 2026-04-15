@@ -242,8 +242,8 @@ func ResolveSpace(c *client.Client, identifier string) (did.DID, error) {
 	return space.DID(), nil
 }
 
-func ResolveDIDWebAndWrap(ctx context.Context, didWeb did.DID) (principal.Verifier, error) {
-	resolver, err := principalresolver.NewHTTPResolver([]did.DID{didWeb})
+func ResolveDIDWebAndWrap(ctx context.Context, didWeb did.DID, opts ...principalresolver.Option) (principal.Verifier, error) {
+	resolver, err := principalresolver.NewHTTPResolver([]did.DID{didWeb}, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating principal resolver: %w", err)
 	}

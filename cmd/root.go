@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/storacha/guppy/cmd/blob"
 	"github.com/storacha/guppy/cmd/unixfs"
+	"github.com/storacha/guppy/pkg/presets"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
@@ -88,6 +89,15 @@ func init() {
 
 	rootCmd.PersistentFlags().String("indexer-url", "", "Indexing service URL (overrides network preset)")
 	cobra.CheckErr(viper.BindPFlag("network.indexer_url", rootCmd.PersistentFlags().Lookup("indexer-url")))
+
+	rootCmd.PersistentFlags().Bool("insecure-did-resolution", false, "Enable insecure DID resolution (overrides network preset)")
+	cobra.CheckErr(rootCmd.PersistentFlags().MarkHidden("insecure-did-resolution"))
+	cobra.CheckErr(viper.BindPFlag("network.insecure_did_resolution", rootCmd.PersistentFlags().Lookup("insecure-did-resolution")))
+
+	// Preparation configuration flags
+	rootCmd.PersistentFlags().Uint("replicas", presets.DefaultReplicas, "Number of replicas to request per shard")
+	cobra.CheckErr(rootCmd.PersistentFlags().MarkHidden("replicas"))
+	cobra.CheckErr(viper.BindPFlag("upload.replicas", rootCmd.PersistentFlags().Lookup("replicas")))
 
 	// Add Commands
 	rootCmd.AddCommand(

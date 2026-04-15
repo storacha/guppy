@@ -42,6 +42,9 @@ type NetworkConfig struct {
 	UploadID             did.DID
 	UploadURL            url.URL
 	AuthorizedRetrievals bool // Support for UCAN authorized retrievals.
+	// InsecureDIDResolution enables HTTP (instead of HTTPS) for did:web resolution.
+	// NB: this should only be used for development purposes.
+	InsecureDIDResolution bool
 }
 
 // Known network configurations.
@@ -84,7 +87,10 @@ var Networks = []NetworkConfig{
 	},
 }
 
-var DefaultNetwork = Networks[0]
+var (
+	DefaultNetwork  = Networks[0]
+	DefaultReplicas = uint(3)
+)
 
 // GetNetworkConfig returns the network config for the passed name or the
 // STORACHA_NETWORK environment variable if set. If both are empty, the default
