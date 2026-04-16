@@ -1,0 +1,12 @@
+version: 1
+piri:
+  nodes:
+    - storage:
+        db: sqlite
+        blob: filesystem
+    - storage:
+       db: sqlite
+       blob: filesystem
+    - storage:
+       db: sqlite
+       blob: filesystem

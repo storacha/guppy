@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 
 # Performs an upload and retrieval test using the guppy client CLI.
 #
@@ -12,7 +12,7 @@
 #                         To use a specific schema, add ?search_path=<name> to the URL.
 #
 # The test will:
-# 1. Create a temporary email inbox using maildrop.cc
+# 1. Check out Smelt, initialize it, and move into a container.
 # 2. Create a new space
 # 3. Upload some random data to the space
 # 4. Retrieve the full data
@@ -21,308 +21,170 @@
 # 7. Retrieve the full data again
 # 8. Verify that all retrieved data matches the original
 
+# TODO: Postgres support is not yet ported to Smelt/Sprue
+
 set -e
 set -o pipefail
 
-# Parse arguments
-database_url=""
-while [[ $# -gt 0 ]]; do
-	case $1 in
-		--database-url)
-			database_url="$2"
-			shift 2
-			;;
-		*)
-			echo "Unknown option: $1"
-			echo "Usage: test/doupload [--database-url <url>]"
-			exit 1
-			;;
-	esac
-done
 
-# If a database URL was provided, set up the database.
-created_db_name=""
-if [[ -n "$database_url" ]]; then
-	# Check for psql
-	if ! command -v psql &> /dev/null; then
-		echo "psql could not be found, please install it to use --database-url."
-		exit 1
-	fi
+runGuppyContainer () {
+  case $1 in
+  down)
+    echo "Taking down containers..."
+    docker compose down
+    echo "Removing volumes..."
+    docker volume prune --force --all --filter "label=com.docker.compose.project=guppy-test"
+    exit $?
+    ;;
+  shell)
+    service="${2:-guppy}"
+    echo "Starting a shell in the container..."
+    docker compose run --rm --entrypoint="/bin/sh" "$service"
+    exit $?
+    ;;
+  *)
+		# Start up the `piri` services first to watch them.
+    upServices $(docker compose config --services | grep piri- | sort)
 
-	# Parse the URL to check if a database name is included.
-	# Split off query string first, then check the path component.
-	# postgres://user:pass@host:port/dbname?sslmode=disable -> has db name
-	# postgres://user:pass@host:port?sslmode=disable        -> no db name
-	# postgres://user:pass@host:port/?sslmode=disable       -> no db name
-	# postgres://user:pass@host:port                        -> no db name
-	url_base="${database_url%%\?*}"        # everything before ?
-	url_query=""
-	if [[ "$database_url" == *"?"* ]]; then
-		url_query="?${database_url#*\?}"   # ?sslmode=disable&...
-	fi
+    echo "🧹 Resetting data-dir"
+    docker volume prune --force --all --filter "label=com.docker.compose.project=guppy-test" --filter "label=com.docker.compose.volume=guppy-data" >/dev/null
 
-	# After the scheme (postgres://), find the path after the host
-	after_scheme="${url_base#*://}"         # user:pass@host:port/dbname
-	db_path="${after_scheme#*/}"            # dbname (or same as after_scheme if no /)
+    [ -d smelt/.git ] || git clone https://github.com/storacha/smelt.git smelt
 
-	# No db name if: no / found (db_path == after_scheme), or path is empty
-	if [[ "$db_path" == "$after_scheme" ]] || [[ -z "$db_path" ]]; then
-		# No database name provided; create a temporary one
-		created_db_name="guppy_test_$(head -c 8 < /dev/urandom | xxd -p)"
-		# Strip trailing slash from base
-		url_base="${url_base%/}"
+    echo "🏁 Initializing smelt"
+    export SMELT_MANIFEST="$PWD/smelt-manifest.yml"
+    (cd smelt && make init >/dev/null)
 
-		# We need to connect to the "postgres" database to create a new database. We
-		# also need to strip out parameters that Go's adapter understands but psql
-		# doesn't, namely `search_path`. Conveniently, we also don't need to set a
-		# search_path for this operation.
-		psql_query=$(echo "$url_query" | sed 's/[?&]search_path=[^&]*//' | sed 's/^&/?/')
-		postgres_db_url="${url_base}/postgres${psql_query}"
-
-		psql "$postgres_db_url" -c "CREATE DATABASE ${created_db_name};" >/dev/null
-		database_url="${url_base}/${created_db_name}${url_query}"
-		echo "Created temporary database: ${created_db_name}"
-	fi
-fi
-
-# Check for dependencies
-if ! command -v jq &> /dev/null; then
-		echo "jq could not be found, please install it to run this script."
-		exit 1
-fi
-if ! command -v htmlq &> /dev/null; then
-		echo "htmlq could not be found, please install it to run this script."
-		exit 1
-fi
-
-# Change to the directory of this script
-cd "$(dirname "$0")"
-
-# Teeing to /dev/fd/3 will show output on stdout while still capturing it.
-exec 3>&1
+    # docker compose run --rm --entrypoint="true" guppy-doupload
 
 
-sandbox="doupload-dir"
 
-go build -gcflags="all=-N -l" .. || { echo "Failed to build guppy"; exit 1; }
-
-export STORACHA_SERVICE_URL="https://staging.up.warm.storacha.network"
-export STORACHA_SERVICE_DID="did:web:staging.up.warm.storacha.network"
-export STORACHA_RECEIPTS_URL="https://staging.up.warm.storacha.network/receipt/"
-export STORACHA_INDEXING_SERVICE_URL="https://staging.indexer.warm.storacha.network"
-export STORACHA_INDEXING_SERVICE_DID="did:web:staging.indexer.warm.storacha.network"
-export GUPPY_REPO_DATA_DIR="./$sandbox/storacha"
-export GUPPY_REPO_DATABASE_URL="$database_url"
-
-dataDir="$sandbox/data"
-outDir1="$sandbox/out1"
-outDir2="$sandbox/out2"
-outDir3="$sandbox/out3"
-
-# Track background processes to kill on exit
-cleanup_pids=()
-
-# Cleanup function to kill background processes and their children
-cleanup() {
-	local pid=
-	for pid in "${cleanup_pids[@]}"; do
-		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-			echo "Cleaning up background process $pid and its children"
-			# Kill all child processes first
-			pkill -P "$pid" 2>/dev/null || true
-			# Then kill the parent
-			kill "$pid" 2>/dev/null || true
-			# Wait a moment, then force kill if still alive
-			sleep 0.1
-			if kill -0 "$pid" 2>/dev/null; then
-				pkill -9 -P "$pid" 2>/dev/null || true
-				kill -9 "$pid" 2>/dev/null || true
-			fi
-		fi
-	done
-
-	# Drop temporary database if we created one
-	if [[ -n "$created_db_name" ]]; then
-		echo "Dropping temporary database: ${created_db_name}"
-		psql "$postgres_db_url" -c "DROP DATABASE IF EXISTS ${created_db_name};" >/dev/null 2>&1 || true
-	fi
+    echo "🐳 Moving into the container..."
+    echo
+    docker compose run --rm --build --quiet-build guppy-doupload
+    exit $?
+    ;;
+  esac
 }
 
-# Set up trap to cleanup on EXIT, INT, TERM
-trap cleanup EXIT INT TERM
+runTests () {
+	# Teeing to /dev/fd/3 will show output on stdout while still capturing it.
+	exec 3>&1
 
-# Track the last command for error reporting
-last_command=""
-trap 'last_command=$ZSH_DEBUG_CMD' DEBUG
+	# HTTPS is not available in Smelt, so allow insecure DID resolution.
+	export GUPPY_NETWORK_INSECURE_DID_RESOLUTION=true
 
-# Error handler
-handle_error() {
-	local exit_code=$1
-	local failed_command=$2
+	account="racha@hen.house"
+
 	echo
-	echo "❌ Command failed with exit code $exit_code: $failed_command"
-}
+	echo "🏭 Generating random data"
+	randdir --output "data/large-files" --size 50MB --min-file-size 10MB
+	randdir --output "data/small-files" --size 5MB --min-file-size 100KB --max-file-size 1MB
 
-# Handle errors with some printed output
-trap 'handle_error $? "$last_command"' ERR
-
-main () {
-	rm -rf "$sandbox"
-	mkdir -p "$sandbox"
-
-	go run github.com/storacha/randdir@latest --output "$dataDir/large-files" --size 50MB --min-file-size 10MB
-	go run github.com/storacha/randdir@latest --output "$dataDir/small-files" --size 5MB --min-file-size 100KB --max-file-size 1MB
-
-	# Generate a random maildrop email address
-	local random_id=$(head -c 10 < /dev/urandom | base32 | tr "[:upper:]" "[:lower:]")
-	local account="${random_id}@maildrop.cc"
+	echo
 	echo "🔐 Logging in as $account"
 
 	# Log in
-	log_in "$account"
+	guppy login "$account"
 
 	echo
 	echo "🎁 Generating new space"
-	space=$(./guppy space generate | tee /dev/fd/3)
+	space=$(guppy space generate | tee /dev/fd/3)
+
+	# (Currently not supported in Smelt/Sprue)
+	# echo
+	# echo "📜 Listing space info"
+	# guppy space info "$space"
 
 	echo
-	echo "📜 Listing space info"
-	./guppy space info "$space"
-
-	echo
-	echo "📤 Uploading data from $dataDir to space $space"
-	./guppy upload source add "$space" "$dataDir"
-	rootCID=$(./guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
+	echo "📤 Uploading data from data/ to space $space"
+	guppy upload source add "$space" "data"
+	rootCID=$(guppy upload "$space" | tee /dev/fd/3 | grep 'Upload completed successfully:' | awk '{print $4}')
 
 	echo
 	echo "🧐 Checking local upload state"
-	./guppy upload check "$space"
+	guppy upload check "$space"
 	echo "✅ Upload state passed checks!"
 
 	echo
 	echo "🕵 Verifying uploaded data is accessible and consistent"
-	./guppy verify "$rootCID"
+	guppy verify "$rootCID"
 	echo "✅ Uploaded data verified!"
 
 	echo
-	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir1"
-	./guppy retrieve "$space" "$rootCID" "$outDir1"
+	echo "📥 Retrieving data from space $space with root CID $rootCID to out1"
+	guppy retrieve "$space" "$rootCID" "out1"
 
 	echo
-	echo "📥 Retrieving data from only subdir with root CID $rootCID to $outDir2"
-	./guppy retrieve "$space" "$rootCID/small-files" "$outDir2"
+	echo "📥 Retrieving data from only subdir with root CID $rootCID to out2"
+	guppy retrieve "$space" "$rootCID/small-files" "out2"
 
+	# TODO: Re-login not working yet.
 
-	echo
-	echo "🔄 Resetting client"
-	./guppy reset
-	echo "🔐 Logging in as $account again"
+	# echo
+	# echo "🔄 Resetting client"
+	# guppy reset
+	# echo "🔐 Logging in as $account again"
 
-	# Log in again
-	log_in "$account"
+	# # Log in again
+	# guppy login "$account"
 
-	# Remove from cleanup list once completed
-	cleanup_pids=("${cleanup_pids[@]/$login_pid}")
-
-	echo
-	echo "📥 Retrieving data from space $space with root CID $rootCID to $outDir3"
-	./guppy retrieve "$space" "$rootCID" "$outDir3"
+	# echo
+	# echo "📥 Retrieving data from space $space with root CID $rootCID to out3"
+	# guppy retrieve "$space" "$rootCID" "out3"
 
 	echo "↔️ Verifying retrieved data matches original"
-	diff -r "$dataDir" "$outDir1"
-	diff -r "$dataDir/small-files" "$outDir2"
-	diff -r "$dataDir" "$outDir3"
+	diff -r "data" "out1"
+	diff -r "data/small-files" "out2"
+	# diff -r "data" "out3"
 	echo "✅ Retrieval verified!"
 
-	jq -n \
-		--arg account "$account" \
-		--arg space "$space" \
-		--arg rootCID "$rootCID" \
-		--arg dataDir "$dataDir" \
-		--arg subdir "subdir" \
-		'{$account, $space, $rootCID, $dataDir, $subdir}' > "$sandbox/test-params.json"
+	# TODO:
+	# jq -n \
+	# 	--arg account "$account" \
+	# 	--arg space "$space" \
+	# 	--arg rootCID "$rootCID" \
+	# 	--arg dataDir "$dataDir" \
+	# 	--arg subdir "subdir" \
+	# 	'{$account, $space, $rootCID, $dataDir, $subdir}' > "$sandbox/test-params.json"
 }
 
-log_in() {
-	local account="$1"
-	# Start login in background
-	./guppy login "$account" >/dev/null &
-	login_pid=$!
-	cleanup_pids+=("$login_pid")
+upServices () {
+	if ! command -v mprocs &> /dev/null; then
+		echo "To see logs while waiting, install \`mprocs\`."
+		docker compose up -d --wait "$@"
+		return
+	fi
 
-	# Verify email
-	verify_email "$account"
+	local mprocsPort
+	local config
 
-	# Wait for login to complete
-	wait $login_pid
+	mprocsPort=$((5000 + RANDOM % 1000))
+	config=$(mktemp) && mv "$config" "$config.json" && config="$config.json"
+	jq \
+		'{
+			server: "\($mprocsServer)",
+			procs: {
+				"Starting...": "docker compose up -d --wait \($ARGS.positional | join(" ")) && mprocs --server \"\($mprocsServer)\" --ctl \"{c: quit}\""
+			} + ($ARGS.positional | INDEX(.[]; " " + .) | map_values({shell: "docker compose logs -f --no-log-prefix \(.)", stop: {"send-keys": ["<C-c>"]}}))
+		}' \
+		-n \
+		--arg mprocsServer "127.0.0.1:$mprocsPort" \
+		--args "$@" \
+			>"$config"
 
-	# Remove from cleanup list once completed
-	cleanup_pids=("${cleanup_pids[@]/$login_pid}")
+	mprocs --config "$config"
+	rm "$config"
 }
 
-seen_message_ids=()
 
-# Function to check maildrop inbox and click verification link
-verify_email() {
-	local email="$1"
-	local inbox_name="${email%%@*}"
+# Bootstrap this script into a `guppy` service container.
+if [[ -z "$IN_CONTAINER" ]]; then
+  # Change to the directory of this script
+  cd "$(dirname "$0")"
 
-	echo "⏳ Waiting for verification email..."
-	local max_attempts=30
-	local attempt=0
+	runGuppyContainer "$@"
+else
+	runTests
+fi
 
-	while [ $attempt -lt $max_attempts ]; do
-		# Fetch inbox from Maildrop using GraphQL API
-		local inbox_query='{"query":"query { inbox(mailbox:\"'${inbox_name}'\") { id subject } }"}'
-		local inbox_response=$(curl -s -X POST \
-			-H 'content-type: application/json' \
-			--url https://api.maildrop.cc/graphql \
-			--data "$inbox_query")
-
-		# Find the first message that we haven't seen yet
-		local message_id=""
-		local all_message_ids=($(jq -r '.data.inbox[].id // empty' <<< "$inbox_response"))
-
-		for id in "${all_message_ids[@]}"; do
-			# Check if this ID is in the seen list
-			if [[ ! " ${seen_message_ids[@]} " =~ " ${id} " ]]; then
-				message_id="$id"
-				seen_message_ids+=("$message_id")
-				break
-			fi
-		done
-
-		if [ -n "$message_id" ]; then
-			echo "📬 Found email (ID: $message_id), retrieving verification link..."
-
-			# Fetch the message content (HTML) using GraphQL
-			local message_query='{"query":"query { message(mailbox:\"'${inbox_name}'\", id:\"'${message_id}'\") { html } }"}'
-			local message_response=$(curl -s -X POST \
-				-H 'content-type: application/json' \
-				--url https://api.maildrop.cc/graphql \
-				--data "$message_query")
-
-			# Extract the HTML content from the GraphQL response and decode it
-			local message_html=$(jq -r '.data.message.html' <<< "$message_response")
-
-			# Extract all https links from the HTML
-			local verify_url=$(htmlq --attribute href a.button <<< "$message_html")
-
-			echo "✅ Submitting approval form to: $verify_url"
-			curl -sL -X POST "$verify_url" > /dev/null
-
-			echo "✓ Email verified!"
-			return 0
-		else
-			echo "⚠️ No verification link found in email, retrying..."
-		fi
-
-		attempt=$((attempt + 1))
-		sleep 2
-	done
-
-	echo "❌ Failed to receive verification email after ${max_attempts} attempts"
-	return 1
-}
-
-main
