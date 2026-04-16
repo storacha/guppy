@@ -1,0 +1,74 @@
+# Development/Debug Dockerfile for guppy
+# Build: docker build -f Dockerfile.dev -t guppy:dev .
+# Run:   docker run -p 2345:2345 guppy:dev [args...]
+# Connect debugger to localhost:2345
+
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
+
+ARG TARGETARCH
+ARG TARGETOS=linux
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+ARG BUILT_BY=docker-dev
+
+WORKDIR /src
+
+# Install delve debugger and randdir tool for target architecture
+RUN GOARCH=${TARGETARCH} go install github.com/go-delve/delve/cmd/dlv@latest && \
+    GOARCH=${TARGETARCH} go install github.com/storacha/randdir@latest
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Debug build — no optimizations, no inlining, full symbols
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -gcflags="all=-N -l" \
+    -ldflags="-X github.com/storacha/guppy/pkg/build.version=${VERSION} \
+      -X github.com/storacha/guppy/pkg/build.Commit=${COMMIT} \
+      -X github.com/storacha/guppy/pkg/build.Date=${DATE} \
+      -X github.com/storacha/guppy/pkg/build.BuiltBy=${BUILT_BY}" \
+    -o /app .
+
+FROM debian:bookworm-slim AS dev
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    # Shell experience
+    bash-completion \
+    less \
+    vim-tiny \
+    # Process debugging
+    procps \
+    htop \
+    strace \
+    # Network debugging
+    iputils-ping \
+    dnsutils \
+    net-tools \
+    tcpdump \
+    # Data tools
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app /usr/bin/guppy
+COPY --from=build /go/bin/dlv /usr/bin/dlv
+COPY --from=build /go/bin/randdir /usr/bin/randdir
+
+# Create data directories
+RUN mkdir -p /root/.storacha/guppy /root/.config/guppy
+
+WORKDIR /root
+
+ENV TERM=xterm-256color
+RUN echo 'alias ll="ls -la"' >> /etc/bash.bashrc && \
+    echo 'PS1="\[\e[32m\][guppy-dev]\[\e[m\] \w# "' >> /etc/bash.bashrc
+
+SHELL ["/bin/bash", "-c"]
+
+EXPOSE 2345
+
+ENTRYPOINT ["dlv", "exec", "/usr/bin/guppy", "--headless", "--listen=:2345", "--api-version=2", "--accept-multiclient", "--"]

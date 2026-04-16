@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   bin-releaser:
@@ -24,17 +23,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Release Binaries and Containers
+      - name: Release Binaries
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
