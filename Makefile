@@ -55,7 +55,18 @@ docker-setup:
 	$(DOCKER) buildx create --name multiarch --use 2>/dev/null || $(DOCKER) buildx use multiarch
 
 docker-prod: docker-setup
-	$(DOCKER) buildx build --platform linux/amd64,linux/arm64 --target prod -t guppy:latest .
+	$(DOCKER) buildx build --platform linux/amd64,linux/arm64 --target prod \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg COMMIT=$(COMMIT) \
+	  --build-arg DATE=$(DATE) \
+	  --build-arg BUILT_BY=make \
+	  -t guppy:latest .
 
 docker-dev: docker-setup
-	$(DOCKER) buildx build --platform linux/amd64,linux/arm64 --target dev -t guppy:dev .
+	$(DOCKER) buildx build --platform linux/amd64,linux/arm64 \
+	  -f Dockerfile.dev \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg COMMIT=$(COMMIT) \
+	  --build-arg DATE=$(DATE) \
+	  --build-arg BUILT_BY=make-debug \
+	  -t guppy:dev .
