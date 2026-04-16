@@ -33,7 +33,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build (amd64 only, no push)
+      - name: Build prod (amd64 only, no push)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -45,6 +45,20 @@ jobs:
             COMMIT=${{ github.event.pull_request.head.sha }}
             DATE=${{ github.event.pull_request.updated_at }}
             BUILT_BY=ghcr-pr
+
+      - name: Build dev (amd64 only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dev
+          push: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=dev
+          build-args: |
+            VERSION=pr-${{ github.event.pull_request.number }}
+            COMMIT=${{ github.event.pull_request.head.sha }}
+            DATE=${{ github.event.pull_request.updated_at }}
+            BUILT_BY=ghcr-pr-dev
 
   # Extract release ref from Releaser workflow artifacts
   prepare-checkout:
@@ -106,6 +120,60 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.head_commit.timestamp }}
             BUILT_BY=ghcr-main
+
+  # Publish dev container on push to main — adds delve + randdir + diagnostic tools
+  publish-main-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish dev (main)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Dockerfile.dev's runtime stage uses debian and runs apt-get, so the
+      # arm64 build needs QEMU. (The prod Dockerfile avoids this because its
+      # runtime stage has no RUN commands.)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=main-dev
+            type=sha,prefix=sha-,suffix=-dev,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dev
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+          build-args: |
+            VERSION=main
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp }}
+            BUILT_BY=ghcr-main-dev
 
   # Publish on release tag (v*) — direct push or via Releaser
   publish-release:
