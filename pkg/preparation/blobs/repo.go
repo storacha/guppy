@@ -30,8 +30,11 @@ type Repo interface {
 	// CreateNodeUpload creates a node_uploads record with shard_id = NULL.
 	CreateNodeUpload(ctx context.Context, nodeCID cid.Cid, spaceDID did.DID, uploadID id.UploadID) error
 	FindNodeByCIDAndSpaceDID(ctx context.Context, c cid.Cid, spaceDID did.DID) (dagsmodel.Node, error)
-	// NodesInShard iterates over all the nodes for a given shard, in the
-	// order they should appear in the shard.
+	// NodesInShard iterates over all the nodes for a given shard, in the order
+	// they should appear in the shard. NB: A DB connection will be held open for
+	// the duration of the iteration, so when using a single connection, callers
+	// should not make and wait for additional queries before finishing iteration,
+	// or the iteration will deadlock.
 	NodesInShard(ctx context.Context, shardID id.ShardID, startOffset uint64) iter.Seq2[NodeInShard, error]
 	GetSpaceByDID(ctx context.Context, spaceDID did.DID) (*spacesmodel.Space, error)
 	DeleteShard(ctx context.Context, shardID id.ShardID) error
