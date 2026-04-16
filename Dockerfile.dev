@@ -14,9 +14,15 @@ ARG BUILT_BY=docker-dev
 
 WORKDIR /src
 
-# Install delve debugger and randdir tool for target architecture
+# Install delve debugger and randdir tool for the target architecture.
+# When cross-compiling, `go install` drops binaries under
+# $GOPATH/bin/${GOOS}_${GOARCH}/; when native, under $GOPATH/bin/.
+# Normalize both cases by copying into a stable /tools path.
 RUN GOARCH=${TARGETARCH} go install github.com/go-delve/delve/cmd/dlv@latest && \
-    GOARCH=${TARGETARCH} go install github.com/storacha/randdir@latest
+    GOARCH=${TARGETARCH} go install github.com/storacha/randdir@latest && \
+    mkdir -p /tools && \
+    find /go/bin -maxdepth 2 -type f -name dlv     -exec cp {} /tools/dlv     \; && \
+    find /go/bin -maxdepth 2 -type f -name randdir -exec cp {} /tools/randdir \;
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -55,8 +61,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app /usr/bin/guppy
-COPY --from=build /go/bin/dlv /usr/bin/dlv
-COPY --from=build /go/bin/randdir /usr/bin/randdir
+COPY --from=build /tools/dlv /usr/bin/dlv
+COPY --from=build /tools/randdir /usr/bin/randdir
 
 # Create data directories
 RUN mkdir -p /root/.storacha/guppy /root/.config/guppy
