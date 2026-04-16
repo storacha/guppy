@@ -1,0 +1,49 @@
+# Upload service configuration for Docker Compose environment
+
+deployment:
+  environment: "development"
+  allow_provision_without_payment_plan: true # allows provision without customer
+  max_replicas: 3
+
+server:
+  host: "0.0.0.0"
+  port: 80  # Use port 80 for did:web resolution
+  public_url: http://upload:80
+
+identity:
+  key_file: "/keys/upload.pem"
+  service_did: "did:web:upload"
+
+indexer:
+  endpoint: "http://indexer:80"
+  did: "did:web:indexer"
+
+mailer:
+  type: "nop"
+
+dynamodb:
+  endpoint: "http://dynamodb-local:8000"
+  region: "us-west-1"
+  agent_index_table: "agent-index"
+  blob_registry_table: "blob-registry"
+  consumer_table: "consumer"
+  customer_table: "customer"
+  delegation_table: "delegation"
+  space_metrics_table: "space-metrics"
+  admin_metrics_table: "admin-metrics"
+  replica_table: "replica"
+  revocation_table: "revocation"
+  storage_provider_table: "storage-provider"
+  subscription_table: "subscription"
+  space_diff_table: "space-diff"
+  upload_table: "upload"
+
+s3:
+  endpoint: "http://minio:9000"
+  region: "us-west-1"
+  agent_message_bucket: "agent-message"
+  delegation_bucket: "delegation"
+  upload_shards_bucket: "upload-shards"
+
+log:
+  level: "info"

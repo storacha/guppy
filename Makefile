@@ -6,7 +6,7 @@ DB_PATH ?= ~/.storacha/guppy/preparation.db
 GOOSE := go tool goose
 
 VERSION=$(shell awk -F'"' '/"version":/ {print $$4}' version.json)
-COMMIT=$(shell git rev-parse --short HEAD)
+COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE=$(shell date -u -Iseconds)
 GOFLAGS=-ldflags="-X github.com/storacha/guppy/pkg/build.version=$(VERSION) -X github.com/storacha/guppy/pkg/build.Commit=$(COMMIT) -X github.com/storacha/guppy/pkg/build.Date=$(DATE) -X github.com/storacha/guppy/pkg/build.BuiltBy=make"
 DOCKER?=$(shell which docker)
@@ -59,3 +59,7 @@ docker-prod: docker-setup
 
 docker-dev: docker-setup
 	$(DOCKER) buildx build --platform linux/amd64,linux/arm64 --target dev -t guppy:dev .
+
+test-upload:
+	@echo "Running upload test..."
+	./test/doupload

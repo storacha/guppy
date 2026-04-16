@@ -1,0 +1,44 @@
+name: guppy-test
+
+include:
+  - path:
+      - ./smelt/compose.yml
+      - ./compose.smelt-override.yml
+
+services:
+  guppy-doupload:
+    extends:
+      service: guppy
+      file: ./smelt/systems/guppy/compose.yml
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: dev
+    image: guppy:dev
+    environment:
+      - IN_CONTAINER=true
+    entrypoint: ["/usr/local/bin/doupload"]
+    volumes:
+      - ./doupload:/usr/local/bin/doupload
+    depends_on:
+      email-clicker:
+        condition: service_started
+      piri-0:
+        condition: service_healthy
+      piri-1:
+        condition: service_healthy
+      piri-2:
+        condition: service_healthy
+
+  email-clicker:
+    image: docker:cli
+    environment:
+      - COMPOSE_PROJECT=guppy-test
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./email-clicker/click.sh:/usr/local/bin/click.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/click.sh"]
+    depends_on:
+      - upload
+    networks:
+      - storacha-network
