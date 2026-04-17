@@ -73,7 +73,7 @@ var AddCmd = &cobra.Command{
 			return err
 		}
 
-		api := preparation.NewAPI(repo, client)
+		api := preparation.NewAPI(repo, client, preparation.WithPutHTTPClient(cmdutil.TracedHTTPClient))
 
 		// Parse shard size if provided
 		var spaceOptions []model.SpaceOption

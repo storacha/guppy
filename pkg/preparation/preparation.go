@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/did"
 
 	"github.com/storacha/guppy/pkg/bus"
+	clientpkg "github.com/storacha/guppy/pkg/client"
 	"github.com/storacha/guppy/pkg/preparation/blobs"
 	"github.com/storacha/guppy/pkg/preparation/dags"
 	"github.com/storacha/guppy/pkg/preparation/dags/nodereader"
@@ -61,6 +63,7 @@ type config struct {
 	assumeUnchangedSources bool
 	bus                    bus.Bus
 	replicas               uint
+	putHTTPClient          *http.Client
 }
 
 const (
@@ -156,6 +159,10 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		ShardEncoder:     blobs.NewCAREncoder(),
 	}
 
+	var blobAddOptions []clientpkg.SpaceBlobAddOption
+	if cfg.putHTTPClient != nil {
+		blobAddOptions = append(blobAddOptions, clientpkg.WithPutClient(cfg.putHTTPClient))
+	}
 	storachaAPI := storacha.API{
 		Repo:                  repo,
 		Client:                client,
@@ -164,6 +171,7 @@ func NewAPI(repo Repo, client StorachaClient, options ...Option) API {
 		BlobUploadParallelism: cfg.blobUploadParallelism,
 		Bus:                   cfg.bus,
 		Replicas:              cfg.replicas,
+		BlobAddOptions:        blobAddOptions,
 	}
 
 	uploadsAPI = uploads.API{
@@ -243,6 +251,14 @@ func WithReplicas(replicas uint) Option {
 			return errors.New("replica count must be greater than 0")
 		}
 		cfg.replicas = replicas
+		return nil
+	}
+}
+
+// WithPutHTTPClient sets the HTTP client used for blob PUT uploads.
+func WithPutHTTPClient(c *http.Client) Option {
+	return func(cfg *config) error {
+		cfg.putHTTPClient = c
 		return nil
 	}
 }

@@ -43,8 +43,10 @@ func envSigner() (principal.Signer, error) {
 	return signer.Parse(str)
 }
 
-var tracedHttpClient = &http.Client{
-	Transport: otelhttp.NewTransport(http.DefaultTransport),
+// TracedHTTPClient is an HTTP client with OpenTelemetry tracing and a guppy
+// User-Agent header on all outbound requests.
+var TracedHTTPClient = &http.Client{
+	Transport: newUserAgentTransport(otelhttp.NewTransport(http.DefaultTransport)),
 }
 
 // MustGetClient creates a new client suitable for the CLI, using stored data,
@@ -77,7 +79,7 @@ func MustGetClientForNetwork(storePath string, networkCfg config.NetworkConfig, 
 
 	conn, err := uclient.NewConnection(
 		network.UploadID,
-		uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(tracedHttpClient)),
+		uhttp.NewChannel(&network.UploadURL, uhttp.WithClient(TracedHTTPClient)),
 		uclient.WithOutboundCodec(car.NewOutboundCodec()),
 	)
 	if err != nil {
@@ -90,7 +92,7 @@ func MustGetClientForNetwork(storePath string, networkCfg config.NetworkConfig, 
 			append(
 				options,
 				client.WithConnection(conn),
-				client.WithReceiptsClient(receiptclient.New(&network.ReceiptsURL, receiptclient.WithHTTPClient(tracedHttpClient))),
+				client.WithReceiptsClient(receiptclient.New(&network.ReceiptsURL, receiptclient.WithHTTPClient(TracedHTTPClient))),
 			)...,
 		)...,
 	)
@@ -132,7 +134,7 @@ func MustGetIndexClient(networkCfg config.NetworkConfig) (*indexclient.Client, u
 func MustGetIndexClientForNetwork(networkCfg config.NetworkConfig, flagName string) (*indexclient.Client, ucan.Principal) {
 	network := MustGetNetworkConfig(networkCfg, flagName)
 
-	client, err := indexclient.New(network.IndexerID, network.IndexerURL, indexclient.WithHTTPClient(tracedHttpClient))
+	client, err := indexclient.New(network.IndexerID, network.IndexerURL, indexclient.WithHTTPClient(TracedHTTPClient))
 	if err != nil {
 		log.Fatal(err)
 	}
