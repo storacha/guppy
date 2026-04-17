@@ -14,6 +14,7 @@ import (
 
 	"github.com/storacha/guppy/cmd/internal/upload/ui"
 	"github.com/storacha/guppy/cmd/upload/check"
+	"github.com/storacha/guppy/cmd/upload/printindexes"
 	"github.com/storacha/guppy/cmd/upload/source"
 	"github.com/storacha/guppy/internal/cmdutil"
 	"github.com/storacha/guppy/pkg/bus"
@@ -48,6 +49,7 @@ func init() {
 
 	Cmd.AddCommand(source.Cmd)
 	Cmd.AddCommand(check.Cmd)
+	Cmd.AddCommand(printindexes.Cmd)
 }
 
 var Cmd = &cobra.Command{
