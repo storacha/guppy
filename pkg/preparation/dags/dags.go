@@ -50,44 +50,58 @@ var _ uploads.RemoveBadNodesFunc = API{}.RemoveBadNodes
 
 // ExecuteDagScansForUpload runs all pending and awaiting children DAG scans for the given upload, until there are no more scans to process.
 func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID, nodeCB func(node model.Node, data []byte) error) error {
-	var badFsEntryErrs []types.BadFSEntryError
 	for {
-		ctx, span := tracer.Start(ctx, "dag-scans-batch", trace.WithAttributes(
+		passCtx, span := tracer.Start(ctx, "dag-scans-batch", trace.WithAttributes(
 			attribute.String("upload.id", uploadID.String()),
 		))
-		defer span.End() // In case of early return
 
-		dagScans, err := a.Repo.IncompleteDAGScansForUpload(ctx, uploadID)
+		dagScans, err := a.Repo.IncompleteDAGScansForUpload(passCtx, uploadID)
 		if err != nil {
+			span.End()
 			return fmt.Errorf("getting dag scans for upload %s: %w", uploadID, err)
 		}
 		log.Debugf("Found %d pending or awaiting children dag scans for upload %s", len(dagScans), uploadID)
 		if len(dagScans) == 0 {
+			span.End()
 			return nil // No pending or awaiting children scans found, exit the loop
 		}
-		executions := 0
+
+		// badFsEntryErrs is reset each pass so that, when the loop exits because
+		// a pass made no completions, we return only the bad entries discovered
+		// in the final pass — not accumulated duplicates from earlier passes.
+		var badFsEntryErrs []types.BadFSEntryError
+		completions := 0
 		for _, dagScan := range dagScans {
 			if dagScan.CID().Defined() {
+				span.End()
 				return fmt.Errorf("tried to execute completed dag scan %s (cid %s)", dagScan.FsEntryID(), dagScan.CID())
 			}
 
 			log.Debugf("Executing dag scan %s", dagScan.FsEntryID())
-			if err := a.executeDAGScan(ctx, dagScan, nodeCB); err != nil {
+			completed, err := a.executeDAGScan(passCtx, dagScan, nodeCB)
+			if err != nil {
 				var errBadFSEntry types.BadFSEntryError
 				if errors.As(err, &errBadFSEntry) {
 					badFsEntryErrs = append(badFsEntryErrs, errBadFSEntry)
 					continue // Continue with the next dag scan
 				}
+				span.End()
 				return fmt.Errorf("executing dag scan %s: %w", dagScan.FsEntryID(), err)
 			}
 
-			executions++
-			span.SetAttributes(attribute.Int("executed", executions))
+			if completed {
+				completions++
+				span.SetAttributes(attribute.Int("executed", completions))
+			}
 		}
 
 		span.End()
 
-		if executions == 0 {
+		// Only completions count as progress. A directory that was deferred
+		// because its children are still incomplete returns (false, nil) and
+		// must not keep the loop alive — otherwise a bad file child causes its
+		// parent to "execute" forever without ever completing.
+		if completions == 0 {
 			if len(badFsEntryErrs) > 0 {
 				return types.NewBadFSEntriesError(badFsEntryErrs)
 			}
@@ -96,8 +110,11 @@ func (a API) ExecuteDagScansForUpload(ctx context.Context, uploadID id.UploadID,
 	}
 }
 
-// executeDAGScan executes a dag scan on the given fs entry, creating a unix fs dag for the given file or directory.
-func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) error {
+// executeDAGScan executes a dag scan on the given fs entry, creating a unix fs
+// dag for the given file or directory. The returned boolean reports whether
+// the scan completed (got a CID and was persisted); a directory scan deferred
+// because of incomplete children returns (false, nil).
+func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB func(node model.Node, data []byte) error) (bool, error) {
 	var err error
 	var cid cid.Cid
 	switch ds := dagScan.(type) {
@@ -106,33 +123,33 @@ func (a API) executeDAGScan(ctx context.Context, dagScan model.DAGScan, nodeCB f
 	case *model.DirectoryDAGScan:
 		cid, err = a.executeDirectoryDAGScan(ctx, ds, nodeCB)
 	default:
-		return fmt.Errorf("unrecognized DAG scan type: %T", dagScan)
+		return false, fmt.Errorf("unrecognized DAG scan type: %T", dagScan)
 	}
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return fmt.Errorf("executing dag scan: %w", err)
+			return false, fmt.Errorf("executing dag scan: %w", err)
 		}
 
-		return types.NewBadFSEntryError(dagScan.FsEntryID(), err)
+		return false, types.NewBadFSEntryError(dagScan.FsEntryID(), err)
 	}
 
 	// If we didn't get a CID back, it means the scan wasn't ready to complete.
 	if !cid.Defined() {
-		return nil
+		return false, nil
 	}
 
 	log.Debugf("Completing DAG scan for %s with CID: %s", dagScan.FsEntryID(), cid)
 	if err := dagScan.Complete(cid); err != nil {
-		return fmt.Errorf("completing dag scan: %w", err)
+		return false, fmt.Errorf("completing dag scan: %w", err)
 	}
 
 	// Update the scan in the repository after completion.
 	log.Debugf("Updating dag scan %s after execution", dagScan.FsEntryID())
 	if err := a.Repo.UpdateDAGScan(ctx, dagScan); err != nil {
-		return fmt.Errorf("updating dag scan after execution: %w", err)
+		return false, fmt.Errorf("updating dag scan after execution: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (a API) executeFileDAGScan(ctx context.Context, dagScan *model.FileDAGScan, nodeCB func(node model.Node, data []byte) error) (cid.Cid, error) {
