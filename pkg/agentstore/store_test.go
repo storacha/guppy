@@ -13,6 +13,7 @@ import (
 	"github.com/storacha/go-ucanto/principal/ed25519/signer"
 	"github.com/storacha/go-ucanto/ucan"
 	"github.com/stretchr/testify/require"
+	"github.com/ipfs/go-cid"
 )
 
 // delegationLinks extracts the CID links from a slice of delegations for comparison.
@@ -44,6 +45,7 @@ func TestStore(t *testing.T) {
 			t.Run("Principal", func(t *testing.T) { testPrincipal(t, newStore) })
 			t.Run("Delegations", func(t *testing.T) { testDelegations(t, newStore) })
 			t.Run("Query", func(t *testing.T) { testQuery(t, newStore) })
+			t.Run("Remove", func(t *testing.T) { testRemove(t, newStore) })
 			t.Run("Reset", func(t *testing.T) { testReset(t, newStore) })
 		})
 	}
@@ -461,6 +463,37 @@ func testQuery(t *testing.T, newStore func(t *testing.T) Store) {
 			require.NoError(t, err)
 			require.ElementsMatch(t, delegationLinks([]delegation.Delegation{wildcardResourceDel}), delegationLinks(proofs))
 		})
+	})
+}
+
+func testRemove(t *testing.T, newStore func(t *testing.T) Store) {
+	t.Run("removes a specific delegation", func(t *testing.T) {
+		s := newStore(t)
+		p, err := s.Principal()
+		require.NoError(t, err)
+
+		del1 := testutil.Must(uploadcap.Add.Delegate(
+			p, p, p.DID().String(),
+			uploadcap.AddCaveats{Root: testutil.RandomCID(t), Shards: nil},
+		))(t)
+
+		del2 := testutil.Must(uploadcap.Get.Delegate(
+			p, p, p.DID().String(),
+			uploadcap.GetCaveats{Root: testutil.RandomCID(t)},
+		))(t)
+
+		err = s.AddDelegations(del1, del2)
+		require.NoError(t, err)
+
+		targetCid, err := cid.Parse(del1.Link().String())
+		require.NoError(t, err)
+		err = s.RemoveDelegation(targetCid)
+		require.NoError(t, err)
+
+		delegs, err := s.Delegations()
+		require.NoError(t, err)
+		require.Len(t, delegs, 1, "should have exactly one delegation remaining")
+		require.Equal(t, del2.Link().String(), delegs[0].Link().String(), "the correct delegation should remain")
 	})
 }
 
