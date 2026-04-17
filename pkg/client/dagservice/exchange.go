@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"slices"
 	"sync"
 
@@ -74,26 +73,30 @@ func (se *storachaExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		return nil, fmt.Errorf("locating block %s: %w", c, err)
 	}
 
-	// Randomly pick one of the available locations
-	location := locations[rand.Intn(len(locations))]
+	var reqErr error
+	for _, location := range locations {
+		blockReader, err := se.retriever.Retrieve(ctx, location)
+		if err != nil {
+			reqErr = fmt.Errorf("retrieving block %s: %w", c, err)
+			continue
+		}
 
-	blockReader, err := se.retriever.Retrieve(ctx, location)
-	if err != nil {
-		return nil, fmt.Errorf("retrieving block %s: %w", c, err)
+		blockBytes, err := io.ReadAll(blockReader)
+		blockReader.Close()
+		if err != nil {
+			reqErr = fmt.Errorf("reading block %s data: %w", c.String(), err)
+			continue
+		}
+
+		block, err := makeBlock(blockBytes, c)
+		if err != nil {
+			reqErr = fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
+			continue
+		}
+		return block, nil
 	}
-	defer blockReader.Close()
 
-	blockBytes, err := io.ReadAll(blockReader)
-	if err != nil {
-		return nil, fmt.Errorf("reading block %s data: %w", c.String(), err)
-	}
-
-	block, err := makeBlock(blockBytes, c)
-	if err != nil {
-		return nil, fmt.Errorf("creating block %s (data length: %d): %w", c.String(), len(blockBytes), err)
-	}
-
-	return block, nil
+	return nil, reqErr
 }
 
 // makeBlock creates a block from the given data and CID, verifying that the
@@ -123,12 +126,12 @@ func makeBlock(data []byte, c cid.Cid) (blocks.Block, error) {
 }
 
 type coalescedLocation struct {
-	location locator.Location
-	slices   []slice
+	locations []locator.Location
+	slices    []slice
 }
 
 func (cl coalescedLocation) isEmpty() bool {
-	return cl.location == (locator.Location{})
+	return len(cl.locations) == 0
 }
 
 type slice struct {
@@ -202,15 +205,14 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 
 		// If we don't have a current location, make one
 		if currentLocation.isEmpty() {
-			loc := locs[rand.Intn(len(locs))]
 			currentLocation = coalescedLocation{
-				location: loc,
+				locations: locs,
 				slices: []slice{
 					{
 						cid: cid,
 						position: blobindex.Position{
-							Offset: loc.Position.Offset,
-							Length: loc.Position.Length,
+							Offset: locs[0].Position.Offset,
+							Length: locs[0].Position.Length,
 						},
 					},
 				},
@@ -219,21 +221,25 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 			// See if any of the locations for this block are within the max gap of
 			// the current location.
 			found := false
-			if !currentLocation.isEmpty() {
-				for _, loc := range locs {
-					if withinGap(currentLocation.location, loc, se.maxGap) {
-						// Extend the coalesced location to include the gap and this block
-						currentLocation.location.Position.Length = loc.Position.Offset + loc.Position.Length - currentLocation.location.Position.Offset
-						currentLocation.slices = append(currentLocation.slices, slice{
-							cid: cid,
-							position: blobindex.Position{
-								Offset: loc.Position.Offset,
-								Length: loc.Position.Length,
-							},
-						})
-						found = true
-						break
+			for _, loc := range locs {
+				// We check against the first location of the current batch (which defines the shard)
+				if withinGap(currentLocation.locations[0], loc, se.maxGap) {
+					// Extend the batch range based on the first location's coordinate system
+					currentLocation.slices = append(currentLocation.slices, slice{
+						cid: cid,
+						position: blobindex.Position{
+							Offset: loc.Position.Offset,
+							Length: loc.Position.Length,
+						},
+					})
+					// Update batch length to cover all slices
+					firstLoc := currentLocation.locations[0]
+					newEnd := loc.Position.Offset + loc.Position.Length
+					for i := range currentLocation.locations {
+						currentLocation.locations[i].Position.Length = newEnd - firstLoc.Position.Offset
 					}
+					found = true
+					break
 				}
 			}
 
@@ -241,15 +247,14 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 			// current location, emit, then make a new one.
 			if !found {
 				coalescedLocations = append(coalescedLocations, currentLocation)
-				loc := locs[rand.Intn(len(locs))]
 				currentLocation = coalescedLocation{
-					location: loc,
+					locations: locs,
 					slices: []slice{
 						{
 							cid: cid,
 							position: blobindex.Position{
-								Offset: loc.Position.Offset,
-								Length: loc.Position.Length,
+								Offset: locs[0].Position.Offset,
+								Length: locs[0].Position.Length,
 							},
 						},
 					},
@@ -264,46 +269,70 @@ func (se *storachaExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 
 	var wg sync.WaitGroup
 	for _, cloc := range coalescedLocations {
-		log.Infof("Fetching %d coalesced blocks at offset %d with length %d", len(cloc.slices), cloc.location.Position.Offset, cloc.location.Position.Length)
+		log.Infof("Fetching %d coalesced blocks at offset %d with length %d from %d locations", len(cloc.slices), cloc.locations[0].Position.Offset, cloc.locations[0].Position.Length, len(cloc.locations))
 		wg.Add(1)
 		go func(cloc coalescedLocation) {
 			defer wg.Done()
-			blockReader, err := se.retriever.Retrieve(ctx, cloc.location)
-			if err != nil {
-				log.Errorf("retrieving blocks starting at offset %d: %v", cloc.location.Position.Offset, err)
-				return
+
+			var reqErr error
+			for _, loc := range cloc.locations {
+				blockReader, err := se.retriever.Retrieve(ctx, loc)
+				if err != nil {
+					reqErr = fmt.Errorf("retrieving blocks starting at offset %d from location %s: %v", loc.Position.Offset, loc.Commitment.With(), err)
+					continue
+				}
+
+				// Slices appear in order, and cannot overlap, so we can slice up the data
+				// as we read it.
+				pos := loc.Position.Offset
+				success := true
+				for _, slc := range cloc.slices {
+					// Skip to slice offset
+					if slc.position.Offset > pos {
+						skipped, err := io.CopyN(io.Discard, blockReader, int64(slc.position.Offset-pos))
+						pos += uint64(skipped)
+						if err != nil {
+							reqErr = fmt.Errorf("skipping to block %s at %d-%d: expected to skip %d bytes, skipped %d: %v", slc.cid.String(), slc.position.Offset, slc.position.Offset+slc.position.Length, slc.position.Offset-pos, skipped, err)
+							success = false
+							break
+						}
+					}
+
+					// Read slice data
+					sliceBytes := make([]byte, slc.position.Length)
+					read, err := io.ReadFull(blockReader, sliceBytes)
+					pos += uint64(read)
+					if err != nil {
+						reqErr = fmt.Errorf("reading block %s at %d-%d: expected %d bytes, got %d: %v", slc.cid.String(), slc.position.Offset, slc.position.Offset+slc.position.Length, slc.position.Length, read, err)
+						success = false
+						break
+					}
+
+					// Create block
+					blk, err := makeBlock(sliceBytes, slc.cid)
+					if err != nil {
+						reqErr = fmt.Errorf("creating block %s at %d-%d: %v", slc.cid.String(), slc.position.Offset, slc.position.Offset+slc.position.Length, err)
+						success = false
+						break
+					}
+
+					select {
+					case out <- blk:
+					case <-ctx.Done():
+						blockReader.Close()
+						return
+					}
+				}
+				blockReader.Close()
+
+				if success {
+					return
+				}
+				// If we failed mid-batch, we continue to the next location
 			}
-			defer blockReader.Close()
 
-			// Slices appear in order, and cannot overlap, so we can slice up the data
-			// as we read it.
-			pos := cloc.location.Position.Offset
-			for _, slice := range cloc.slices {
-				// Skip to slice offset
-				skipped, err := io.CopyN(io.Discard, blockReader, int64(slice.position.Offset-pos))
-				pos += uint64(skipped)
-				if err != nil {
-					log.Errorf("skipping to block %s at %d-%d: expected to skip %d bytes, skipped %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Offset-pos, skipped, err)
-					return
-				}
-
-				// Read slice data
-				sliceBytes := make([]byte, slice.position.Length)
-				read, err := io.ReadFull(blockReader, sliceBytes)
-				pos += uint64(read)
-				if err != nil {
-					log.Errorf("reading block %s at %d-%d: expected %d bytes, got %d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, slice.position.Length, read, err)
-					return
-				}
-
-				// Create block
-				blk, err := makeBlock(sliceBytes, slice.cid)
-				if err != nil {
-					log.Errorf("creating block %s at %d-%d: %v", slice.cid.String(), slice.position.Offset, slice.position.Offset+slice.position.Length, err)
-					return
-				}
-
-				out <- blk
+			if reqErr != nil {
+				log.Errorf("failed to fetch batch: %v", reqErr)
 			}
 		}(cloc)
 	}
