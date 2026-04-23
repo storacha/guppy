@@ -242,12 +242,12 @@ func (a API) ExecuteUpload(ctx context.Context, uploadID id.UploadID, spaceDID d
 			return cid.Undef, fmt.Errorf("handling bad FS entries worker error [%w]: %w", workersErr, err)
 		}
 	case errors.As(workersErr, &blobUploadErrors):
-		err := a.handleBadBlobUploads(ctx, uploadID, spaceDID, blobUploadErrors)
+		err := a.handleBadBlobUploads(ctx, uploadID, blobUploadErrors)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad shard uploads worker error [%w]: %w", workersErr, err)
 		}
 	case errors.As(workersErr, &badNodesErr):
-		err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
+		err := a.handleBadNodes(ctx, uploadID, badNodesErr)
 		if err != nil {
 			return cid.Undef, fmt.Errorf("handling bad nodes worker error [%w]: %w", workersErr, err)
 		}
@@ -289,13 +289,13 @@ func (a API) handleBadFSEntries(ctx context.Context, uploadID id.UploadID, badFS
 	return nil
 }
 
-func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, blobUploadErrors types.BlobUploadErrors) error {
+func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, blobUploadErrors types.BlobUploadErrors) error {
 	// when there's a bad shard upload, it's not based on a problem locally usually, unless bad nodes were read during upload
 	for _, e := range blobUploadErrors.Unwrap() {
 		// bad nodes error can happen from reading car during upload
 		var badNodesErr types.BadNodesError
 		if errors.As(e, &badNodesErr) {
-			err := a.handleBadNodes(ctx, uploadID, spaceDID, badNodesErr)
+			err := a.handleBadNodes(ctx, uploadID, badNodesErr)
 			if err != nil {
 				return err
 			}
@@ -305,7 +305,7 @@ func (a API) handleBadBlobUploads(ctx context.Context, uploadID id.UploadID, spa
 	return nil
 }
 
-func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, spaceDID did.DID, badNodesErr types.BadNodesError) error {
+func (a API) handleBadNodes(ctx context.Context, uploadID id.UploadID, badNodesErr types.BadNodesError) error {
 	upload, err := a.Repo.GetUploadByID(ctx, uploadID)
 	if err != nil {
 		return fmt.Errorf("getting upload %s after finding bad nodes: %w", uploadID, err)
