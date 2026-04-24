@@ -18,6 +18,7 @@ import (
 	"github.com/storacha/guppy/pkg/preparation/bettererrgroup"
 	blobsmodel "github.com/storacha/guppy/pkg/preparation/blobs/model"
 	dagmodel "github.com/storacha/guppy/pkg/preparation/dags/model"
+	"github.com/storacha/guppy/pkg/preparation/internal/worker"
 	scanmodel "github.com/storacha/guppy/pkg/preparation/scans/model"
 	"github.com/storacha/guppy/pkg/preparation/types"
 	"github.com/storacha/guppy/pkg/preparation/types/id"
@@ -374,23 +375,23 @@ func runScanWorker(
 		span.End()
 	}()
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		scansAvailable,
 		1,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
+		func(ctx context.Context) ([]worker.Task, error) {
+			return []worker.Task{
+				func(ctx context.Context) worker.TaskError {
 					if api.AssumeUnchangedSources {
 						upload, err := api.Repo.GetUploadByID(ctx, uploadID)
 						if err != nil {
-							return nil, fmt.Errorf("checking upload for existing scan: %w", err)
+							return worker.NewFatalError(fmt.Errorf("checking upload for existing scan: %w", err))
 						}
 						if upload.HasRootFSEntryID() {
 							log.Infow("Skipping FS rescan (--assume-unchanged-sources): scan already exists", "upload", uploadID)
-							return nil, nil
+							return nil
 						}
 						log.Infow("No existing scan found, performing FS scan despite --assume-unchanged-sources", "upload", uploadID)
 					}
@@ -406,10 +407,10 @@ func runScanWorker(
 					})
 
 					if err != nil {
-						return nil, fmt.Errorf("running scans: %w", err)
+						return worker.NewFatalError(fmt.Errorf("running scans: %w", err))
 					}
 
-					return nil, nil
+					return nil
 				},
 			}, nil
 		},
@@ -419,7 +420,9 @@ func runScanWorker(
 			close(dagScansAvailable)
 			return nil
 		},
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }
 
@@ -456,25 +459,25 @@ func runDAGScanWorker(
 		span.End()
 	}()
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		dagScansAvailable,
 		1,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
+		func(ctx context.Context) ([]worker.Task, error) {
+			return []worker.Task{
+				func(ctx context.Context) worker.TaskError {
 					err := api.ExecuteDagScansForUpload(ctx, uploadID, func(node dagmodel.Node, data []byte) error {
 						signal(nodeUploadsAvailable)
 						return nil
 					})
 
 					if err != nil {
-						return nil, fmt.Errorf("running dag scans for upload %s: %w", uploadID, err)
+						return worker.NewFatalError(fmt.Errorf("running dag scans for upload %s: %w", uploadID, err))
 					}
 
-					return nil, nil
+					return nil
 				},
 			}, nil
 		},
@@ -501,7 +504,9 @@ func runDAGScanWorker(
 			close(nodeUploadsAvailable)
 			return nil
 		},
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }
 
@@ -542,20 +547,20 @@ func runShardingWorker(
 		return nil
 	}
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		nodeUploadsAvailable,
 		1,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
+		func(ctx context.Context) ([]worker.Task, error) {
+			return []worker.Task{
+				func(ctx context.Context) worker.TaskError {
 					err := api.AddNodesToUploadShards(ctx, uploadID, spaceDID, handleClosedShard)
 					if err != nil {
-						return nil, fmt.Errorf("adding nodes to shards for upload %s: %w", uploadID, err)
+						return worker.NewFatalError(fmt.Errorf("adding nodes to shards for upload %s: %w", uploadID, err))
 					}
-					return nil, nil
+					return nil
 				},
 			}, nil
 		},
@@ -571,7 +576,9 @@ func runShardingWorker(
 
 			return nil
 		},
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }
 
@@ -611,20 +618,20 @@ func runIndexingWorker(
 		return nil
 	}
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		shardsNeedIndexing,
 		1,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
-			return []func(context.Context) (error, error){
-				func(ctx context.Context) (error, error) {
+		func(ctx context.Context) ([]worker.Task, error) {
+			return []worker.Task{
+				func(ctx context.Context) worker.TaskError {
 					err := api.AddShardsToUploadIndexes(ctx, uploadID, handleClosedIndex)
 					if err != nil {
-						return nil, fmt.Errorf("adding shards to indexes for upload %s: %w", uploadID, err)
+						return worker.NewFatalError(fmt.Errorf("adding shards to indexes for upload %s: %w", uploadID, err))
 					}
-					return nil, nil
+					return nil
 				},
 			}, nil
 		},
@@ -640,7 +647,9 @@ func runIndexingWorker(
 
 			return nil
 		},
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }
 
@@ -678,30 +687,30 @@ func runShardUploadWorker(
 
 	var inFlightShards sync.Map
 
-	nonFatals, err := Worker(
+	te := worker.Run(
 		ctx,
 		closedShardsAvailable,
 		api.BlobUploadParallelism,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+		func(ctx context.Context) ([]worker.Task, error) {
 			rawTasks, err := api.FindShardAddTasksForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return nil, err
 			}
-			var tasks []func(context.Context) (error, error)
+			var tasks []worker.Task
 			for _, raw := range rawTasks {
 				// Ignore tasks that are already in flight.
 				if _, loaded := inFlightShards.LoadOrStore(raw.ID, struct{}{}); loaded {
 					continue
 				}
-				tasks = append(tasks, func(ctx context.Context) (error, error) {
+				tasks = append(tasks, func(ctx context.Context) worker.TaskError {
 					defer inFlightShards.Delete(raw.ID)
-					nonFatal, fatal := raw.Run(ctx)
-					if nonFatal == nil && fatal == nil {
+					taskErr := raw.Run(ctx)
+					if taskErr == nil {
 						signal(uploadedShardsAvailable)
 					}
-					return nonFatal, fatal
+					return taskErr
 				})
 			}
 			return tasks, nil
@@ -714,7 +723,14 @@ func runShardUploadWorker(
 		},
 	)
 
-	return errors.Join(err, types.NewBlobUploadErrors(nonFatals))
+	var nonFatals []error
+	var fatal error
+	if te != nil {
+		nonFatals = te.NonFatalErrors()
+		fatal = te.FatalError()
+	}
+	err = errors.Join(fatal, types.NewBlobUploadErrors(nonFatals))
+	return err
 }
 
 func runPostProcessShardWorker(
@@ -749,23 +765,23 @@ func runPostProcessShardWorker(
 
 	var inFlightShards sync.Map
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		uploadedShardsAvailable,
 		api.BlobUploadParallelism,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+		func(ctx context.Context) ([]worker.Task, error) {
 			rawTasks, err := api.FindShardPostProcessTasksForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return nil, err
 			}
-			var tasks []func(context.Context) (error, error)
+			var tasks []worker.Task
 			for _, raw := range rawTasks {
 				if _, loaded := inFlightShards.LoadOrStore(raw.ID, struct{}{}); loaded {
 					continue
 				}
-				tasks = append(tasks, func(ctx context.Context) (error, error) {
+				tasks = append(tasks, func(ctx context.Context) worker.TaskError {
 					defer inFlightShards.Delete(raw.ID)
 					return raw.Run(ctx)
 				})
@@ -781,7 +797,9 @@ func runPostProcessShardWorker(
 			}
 			return nil
 		},
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }
 
@@ -819,30 +837,30 @@ func runIndexUploadWorker(
 
 	var inFlightIndexes sync.Map
 
-	nonFatals, err := Worker(
+	te := worker.Run(
 		ctx,
 		closedIndexesAvailable,
 		api.BlobUploadParallelism,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+		func(ctx context.Context) ([]worker.Task, error) {
 			rawTasks, err := api.FindIndexAddTasksForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return nil, err
 			}
-			var tasks []func(context.Context) (error, error)
+			var tasks []worker.Task
 			for _, raw := range rawTasks {
 				// Ignore tasks that are already in flight.
 				if _, loaded := inFlightIndexes.LoadOrStore(raw.ID, struct{}{}); loaded {
 					continue
 				}
-				tasks = append(tasks, func(ctx context.Context) (error, error) {
+				tasks = append(tasks, func(ctx context.Context) worker.TaskError {
 					defer inFlightIndexes.Delete(raw.ID)
-					nonFatal, fatal := raw.Run(ctx)
-					if nonFatal == nil && fatal == nil {
+					taskErr := raw.Run(ctx)
+					if taskErr == nil {
 						signal(uploadedIndexesAvailable)
 					}
-					return nonFatal, fatal
+					return taskErr
 				})
 			}
 			return tasks, nil
@@ -855,7 +873,14 @@ func runIndexUploadWorker(
 		},
 	)
 
-	return errors.Join(err, types.NewBlobUploadErrors(nonFatals))
+	var nonFatals []error
+	var fatal error
+	if te != nil {
+		nonFatals = te.NonFatalErrors()
+		fatal = te.FatalError()
+	}
+	err = errors.Join(fatal, types.NewBlobUploadErrors(nonFatals))
+	return err
 }
 
 func runPostProcessIndexWorker(
@@ -890,23 +915,23 @@ func runPostProcessIndexWorker(
 
 	var inFlightIndexes sync.Map
 
-	_, err = Worker(
+	if te := worker.Run(
 		ctx,
 		uploadedIndexesAvailable,
 		api.BlobUploadParallelism,
 
 		// findWork
-		func(ctx context.Context) ([]func(context.Context) (error, error), error) {
+		func(ctx context.Context) ([]worker.Task, error) {
 			rawTasks, err := api.FindIndexPostProcessTasksForUpload(ctx, uploadID, spaceDID)
 			if err != nil {
 				return nil, err
 			}
-			var tasks []func(context.Context) (error, error)
+			var tasks []worker.Task
 			for _, raw := range rawTasks {
 				if _, loaded := inFlightIndexes.LoadOrStore(raw.ID, struct{}{}); loaded {
 					continue
 				}
-				tasks = append(tasks, func(ctx context.Context) (error, error) {
+				tasks = append(tasks, func(ctx context.Context) worker.TaskError {
 					defer inFlightIndexes.Delete(raw.ID)
 					return raw.Run(ctx)
 				})
@@ -916,6 +941,8 @@ func runPostProcessIndexWorker(
 
 		// finalize
 		nil,
-	)
+	); te != nil {
+		err = te
+	}
 	return err
 }

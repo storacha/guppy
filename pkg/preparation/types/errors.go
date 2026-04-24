@@ -1,7 +1,6 @@
 package types
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -191,13 +190,4 @@ func (e BlobUploadErrors) Error() string {
 
 func (e BlobUploadErrors) Unwrap() []error {
 	return e.errs
-}
-
-// IDTask represents a task that can be identified and deduplicated by an
-// [id.ID]. The task's Run function returns two errors: a non-fatal error that
-// can be collected and reported after all tasks have completed, and a fatal
-// error that should cause immediate cancellation of all other tasks.
-type IDTask struct {
-	ID  id.ID
-	Run func(context.Context) (error, error)
 }
