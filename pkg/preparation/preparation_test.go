@@ -405,7 +405,7 @@ func TestExecuteUpload(t *testing.T) {
 		// We don't know exactly how many successful PUTs there were, but we know it
 		// should be at least 2 and at most 6.
 		require.GreaterOrEqual(t, putBlobs.Size(), 2, "expected at least 2/5 shards to be added so far")
-		require.Less(t, putBlobs.Size(), 6, "expected at most 4/5 shards + 1 index to be added so far")
+		require.LessOrEqual(t, putBlobs.Size(), 6, "expected at most 5/5 shards + 1 index to be added so far")
 		require.Len(t, uploadAddCaps, 0, "expected `upload/add` not to have been called yet")
 
 		t.Log("Retrying the upload after error...")
