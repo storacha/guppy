@@ -1,0 +1,49 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - asasalint
+    - asciicheck
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - errorlint
+    - gocognit
+    - gocritic
+    - gocyclo
+    - gosec
+    - misspell
+    - nilerr
+    - nilnil
+    - prealloc
+    - revive
+    - unparam
+    - wastedassign
+
+  settings:
+    gocognit:
+      min-complexity: 30
+    gocyclo:
+      min-complexity: 30
+    gosec:
+      excludes:
+        - G115
+        - G404
+        - G304
+        - G501
+        - G401
+
+  exclusions:
+    rules:
+      - path: cmd/gateway/banner/banner\.go
+        linters: [gosec]
+        text: "G602"
+      - path: main\.go
+        linters: [gosec]
+        text: "G108|G114"
+      - path: pkg/preparation/preparation_test\.go
+        linters: [gosec]
+        text: "G301"
+      - linters: [errcheck]
+        source: "fmt\\.Fprint(f|ln)?\\((cmd\\.OutOrStdout|cmd\\.OutOrStderr|os\\.Stdout|os\\.Stderr|w)"

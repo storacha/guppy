@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,7 @@ func prepareTestClient(
 	uploadAddCaps *[]ucan.Capability[uploadcap.AddCaveats],
 ) *ctestutil.ClientWithCustomPut {
 	t.Helper()
+	var capsMu sync.Mutex
 	client := &ctestutil.ClientWithCustomPut{
 		Client: helpers.Must(ctestutil.Client(
 			ctestutil.WithSpaceBlobAdd(),
@@ -98,7 +100,9 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[spaceindexcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							capsMu.Lock()
 							*indexCaps = append(*indexCaps, cap)
+							capsMu.Unlock()
 							return result.Ok[spaceindexcap.AddOk, failure.IPLDBuilderFailure](spaceindexcap.AddOk{}), nil, nil
 						},
 					),
@@ -114,7 +118,9 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[spaceblobcap.ReplicateOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							capsMu.Lock()
 							*replicateCaps = append(*replicateCaps, cap)
+							capsMu.Unlock()
 							sitePromises := make([]types.Promise, cap.Nb().Replicas)
 							for i := range sitePromises {
 								siteDigest, err := multihash.Encode(fmt.Appendf(nil, "test-replicated-site-%d", i), multihash.IDENTITY)
@@ -147,7 +153,9 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[filecoincap.OfferOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							capsMu.Lock()
 							*offerCaps = append(*offerCaps, cap)
+							capsMu.Unlock()
 							return result.Ok[filecoincap.OfferOk, failure.IPLDBuilderFailure](
 								filecoincap.OfferOk{
 									Piece: cap.Nb().Piece,
@@ -167,7 +175,9 @@ func prepareTestClient(
 							inv invocation.Invocation,
 							context server.InvocationContext,
 						) (result.Result[uploadcap.AddOk, failure.IPLDBuilderFailure], fx.Effects, error) {
+							capsMu.Lock()
 							*uploadAddCaps = append(*uploadAddCaps, cap)
+							capsMu.Unlock()
 							return result.Ok[uploadcap.AddOk, failure.IPLDBuilderFailure](uploadcap.AddOk{
 								Root:   cap.Nb().Root,
 								Shards: cap.Nb().Shards,

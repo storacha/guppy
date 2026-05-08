@@ -2,6 +2,7 @@ package uploads_test
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,31 +27,31 @@ func TestWorker(t *testing.T) {
 	t.Run("runs the work function for every signal received, then the finalize function when the channel closes", func(t *testing.T) {
 		signalChan := make(chan struct{}, 1)
 		resultChan := make(chan error, 1)
-		var runs int
-		var finalizes int
+		var runs atomic.Int32
+		var finalizes atomic.Int32
 
 		go func() {
 			defer close(resultChan)
 
 			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
+				runs.Add(1)
 				return nil
 			}, func() error {
-				finalizes++
+				finalizes.Add(1)
 				return nil
 			})
 		}()
 
-		require.Equal(t, 0, runs, "worker should not run before signal")
+		require.Equal(t, int32(0), runs.Load(), "worker should not run before signal")
 		signalChan <- struct{}{}
-		e(t, func(t *assert.CollectT) { require.Equal(t, 1, runs, "worker should run once after signal") })
+		e(t, func(t *assert.CollectT) { require.Equal(t, int32(1), runs.Load(), "worker should run once after signal") })
 		signalChan <- struct{}{}
-		e(t, func(t *assert.CollectT) { require.Equal(t, 2, runs, "worker should run again after second signal") })
+		e(t, func(t *assert.CollectT) { require.Equal(t, int32(2), runs.Load(), "worker should run again after second signal") })
 
-		require.Equal(t, 0, finalizes, "finalize function should be called until the channel closes")
+		require.Equal(t, int32(0), finalizes.Load(), "finalize function should be called until the channel closes")
 		close(signalChan)
 		e(t, func(t *assert.CollectT) {
-			require.Equal(t, 1, finalizes, "finalize function should be called once the channel closes")
+			require.Equal(t, int32(1), finalizes.Load(), "finalize function should be called once the channel closes")
 		})
 
 		result := <-resultChan
@@ -61,20 +62,20 @@ func TestWorker(t *testing.T) {
 		workerErr := errors.New("error in doWork")
 		signalChan := make(chan struct{}, 3)
 		resultChan := make(chan error, 1)
-		var runs int
-		var finalizes int
+		var runs atomic.Int32
+		var finalizes atomic.Int32
 
 		go func() {
 			defer close(resultChan)
 			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
+				n := runs.Add(1)
 				// Fail on the second run
-				if runs == 2 {
+				if n == 2 {
 					return workerErr
 				}
 				return nil
 			}, func() error {
-				finalizes++
+				finalizes.Add(1)
 				return nil
 			})
 		}()
@@ -88,20 +89,20 @@ func TestWorker(t *testing.T) {
 		require.True(t, ok, "result should be a wrapped error")
 		require.ErrorContains(t, result, "worker encountered an error: error in doWork")
 		require.Equal(t, workerErr, result.Unwrap(), "worker should send back the error it encountered, wrapped")
-		require.Equal(t, 2, runs, "worker should have stopped after encountering an error")
-		require.Equal(t, 0, finalizes, "finalize function should not have be called")
+		require.Equal(t, int32(2), runs.Load(), "worker should have stopped after encountering an error")
+		require.Equal(t, int32(0), finalizes.Load(), "finalize function should not have be called")
 	})
 
 	t.Run("responds with any finalize error", func(t *testing.T) {
 		finalizerErr := errors.New("error in finalize")
 		signalChan := make(chan struct{}, 3)
 		resultChan := make(chan error, 1)
-		var runs int
+		var runs atomic.Int32
 
 		go func() {
 			defer close(resultChan)
 			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				runs++
+				runs.Add(1)
 				return nil
 			}, func() error {
 				return finalizerErr
@@ -118,26 +119,26 @@ func TestWorker(t *testing.T) {
 		require.True(t, ok, "result should be a wrapped error")
 		require.ErrorContains(t, result, "worker finalize encountered an error: error in finalize")
 		require.Equal(t, finalizerErr, result.Unwrap(), "worker should send back the error it encountered, wrapped")
-		require.Equal(t, 3, runs, "worker should have run all three times")
+		require.Equal(t, int32(3), runs.Load(), "worker should have run all three times")
 	})
 
 	t.Run("ignores a nil finalizer", func(t *testing.T) {
 		signalChan := make(chan struct{}, 1)
 		resultChan := make(chan error, 1)
-		var ran bool
+		var ran atomic.Bool
 
 		go func() {
 			defer close(resultChan)
 
 			resultChan <- uploads.Worker(t.Context(), signalChan, func() error {
-				ran = true
+				ran.Store(true)
 				return nil
 			}, nil)
 		}()
 
-		require.False(t, ran, "worker should not run before signal")
+		require.False(t, ran.Load(), "worker should not run before signal")
 		signalChan <- struct{}{}
-		e(t, func(t *assert.CollectT) { require.True(t, ran, "worker should run after signal") })
+		e(t, func(t *assert.CollectT) { require.True(t, ran.Load(), "worker should run after signal") })
 		close(signalChan)
 		result := <-resultChan
 		require.Nil(t, result, "result should be nil after successful runs and no finalizer")
